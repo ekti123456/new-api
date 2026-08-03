@@ -302,10 +302,21 @@ func CreateBodyStorageFromReader(reader io.Reader, contentLength int64, maxBytes
 	return storage, nil
 }
 
-// ReaderOnly wraps an io.Reader to hide io.Closer, preventing http.NewRequest
+// readerOnly wraps an io.Reader to hide io.Closer, preventing http.NewRequest
 // from type-asserting io.ReadCloser and closing the underlying BodyStorage.
+// SourceReader intentionally exposes only the reader. Callers that need to
+// inspect a rewindable outbound body can do so without gaining ownership of
+// the underlying closer.
+type readerOnly struct {
+	io.Reader
+}
+
+func (r readerOnly) SourceReader() io.Reader {
+	return r.Reader
+}
+
 func ReaderOnly(r io.Reader) io.Reader {
-	return struct{ io.Reader }{r}
+	return readerOnly{Reader: r}
 }
 
 // CleanupOldCacheFiles 清理旧的缓存文件（用于启动时清理残留）

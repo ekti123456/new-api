@@ -327,6 +327,9 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	if err := applyNewAPIPolicyHeaders(c, req, info, requestBody); err != nil {
+		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -359,6 +362,9 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	if err := applyNewAPIPolicyHeaders(c, req, info, requestBody); err != nil {
+		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -386,6 +392,15 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	policyRequest, err := http.NewRequest(http.MethodGet, fullRequestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new WebSocket policy request failed: %w", err)
+	}
+	policyRequest.Header = targetHeader
+	if err := applyNewAPIPolicyHeaders(c, policyRequest, info, nil); err != nil {
+		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
+	}
+	targetHeader = policyRequest.Header
 	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
