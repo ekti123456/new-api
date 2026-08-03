@@ -2,22 +2,25 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"net/http/httptest"
 )
 
 func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
@@ -151,6 +154,7 @@ func TestApplyNewAPIPolicyHeadersStripsSpoofedHeadersOutsideBindingScope(t *test
 
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", nil)
+	context.Set(newAPIPolicyRequestContextGinKey, newAPIPolicyRequestContext{Secret: "stale-secret"})
 	upstreamRequest, err := http.NewRequest(http.MethodPost, "https://guard.example/v10/responses", bytes.NewReader(nil))
 	require.NoError(t, err)
 	for _, name := range newAPIPolicyHeaderNames {
@@ -167,6 +171,8 @@ func TestApplyNewAPIPolicyHeadersStripsSpoofedHeadersOutsideBindingScope(t *test
 	for _, name := range newAPIPolicyHeaderNames {
 		assert.Empty(t, upstreamRequest.Header.Get(name), name)
 	}
+	stale, _ := context.Get(newAPIPolicyRequestContextGinKey)
+	assert.Nil(t, stale)
 }
 
 func TestLoadNewAPIPolicyConfigSupportsLegacyTargets(t *testing.T) {
@@ -207,6 +213,138 @@ func TestPolicyTargetMatchesOriginPathAndWebSocketScheme(t *testing.T) {
 			assert.Equal(t, test.match, policyTargetMatches(test.target, actual))
 		})
 	}
+}
+
+func TestVerifyNewAPIPolicyDecisionRejectsTamperingAndRequestMismatch(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef"
+	requestContext := newAPIPolicyRequestContext{RequestID: "req-policy-response", Secret: secret}
+	header := signedPolicyDecisionHeader(secret, requestContext.RequestID)
+
+	decision, err := verifyNewAPIPolicyDecision(header, requestContext)
+	require.NoError(t, err)
+	assert.Equal(t, "dec_0123456789abcdef", decision.DecisionID)
+	assert.True(t, decision.StrikeEligible)
+
+	tampered := header.Clone()
+	tampered.Set("X-Codex2API-Policy-Severity", "critical")
+	_, err = verifyNewAPIPolicyDecision(tampered, requestContext)
+	require.ErrorContains(t, err, "signature mismatch")
+
+	mismatched := requestContext
+	mismatched.RequestID = "req-other"
+	_, err = verifyNewAPIPolicyDecision(header, mismatched)
+	require.ErrorContains(t, err, "request id")
+}
+
+func TestVerifiedNewAPIPolicyDecisionSkipsChannelRetry(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef"
+	requestContext := newAPIPolicyRequestContext{
+		RequestID: "req-policy-response", Secret: secret,
+		Enforcement: newAPIPolicyEnforcementConfig{BanAfter: 2, WindowSeconds: 86400},
+	}
+	request, err := http.NewRequest(http.MethodPost, "http://codex2api.example/v1/responses", nil)
+	require.NoError(t, err)
+	request = request.WithContext(context.WithValue(request.Context(), newAPIPolicyRequestContextKey{}, requestContext))
+	response := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     signedPolicyDecisionHeader(secret, requestContext.RequestID),
+		Body:       io.NopCloser(bytes.NewBufferString(`{"error":{"message":"blocked","type":"invalid_request_error","code":"request_policy_violation"}}`)),
+		Request:    request,
+	}
+	ginContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	require.True(t, processNewAPIPolicyResponse(ginContext, response))
+	newAPIError := service.RelayErrorHandler(ginContext, response, false)
+	assert.True(t, types.IsSkipRetryError(newAPIError))
+	assert.False(t, types.IsRecordErrorLog(newAPIError))
+}
+
+func TestLoadNewAPIPolicyEnforcementDefaultsAreSafe(t *testing.T) {
+	for _, name := range []string{
+		"CODEX2API_POLICY_AUDIT_ENABLED", "CODEX2API_POLICY_STRIKE_ENABLED",
+		"CODEX2API_POLICY_ACCOUNT_BAN_ENABLED", "CODEX2API_POLICY_IP_BLOCK_ENABLED",
+		"CODEX2API_POLICY_BAN_AFTER", "CODEX2API_POLICY_WINDOW_SECONDS",
+	} {
+		t.Setenv(name, "")
+	}
+
+	config, err := loadNewAPIPolicyEnforcementConfig()
+	require.NoError(t, err)
+	assert.True(t, config.AuditEnabled)
+	assert.False(t, config.StrikeEnabled)
+	assert.False(t, config.AccountBanEnabled)
+	assert.False(t, config.IPBlockEnabled)
+	assert.Equal(t, 2, config.BanAfter)
+	assert.Equal(t, 86400, config.WindowSeconds)
+
+	t.Setenv("CODEX2API_POLICY_ACCOUNT_BAN_ENABLED", "true")
+	_, err = loadNewAPIPolicyEnforcementConfig()
+	require.ErrorContains(t, err, "STRIKE_ENABLED")
+}
+
+func TestProcessNewAPIPolicyWebSocketMessageVerifiesPerTurnSignature(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef"
+	requestContext := newAPIPolicyRequestContext{
+		RequestID: "req-policy-response", Secret: secret,
+		Enforcement: newAPIPolicyEnforcementConfig{BanAfter: 2, WindowSeconds: 86400},
+	}
+	header := signedPolicyDecisionHeader(secret, requestContext.RequestID)
+	eventID := "responses:7"
+	eventCanonical := strings.Join([]string{
+		"policy-event-v1", requestContext.RequestID, header.Get("X-Codex2API-Policy-Decision-ID"), eventID,
+		header.Get("X-Codex2API-Policy-Action"), header.Get("X-Codex2API-Policy-Profile"),
+		header.Get("X-Codex2API-Policy-Reason"), header.Get("X-Codex2API-Policy-Severity"),
+		header.Get("X-Codex2API-Policy-Strike-Eligible"), header.Get("X-Codex2API-Policy-Rule-Version"),
+		header.Get("X-Codex2API-Policy-Evidence-SHA256"),
+	}, "\n")
+	details := map[string]any{
+		"request_id": requestContext.RequestID, "decision_id": header.Get("X-Codex2API-Policy-Decision-ID"),
+		"event_id": eventID, "action": "block", "profile": "strict",
+		"reason_code": "direct_target_intrusion_request", "severity": "high", "strike_eligible": true,
+		"rule_version":      header.Get("X-Codex2API-Policy-Rule-Version"),
+		"evidence_sha256":   header.Get("X-Codex2API-Policy-Evidence-SHA256"),
+		"signature_version": "v1", "response_signature": header.Get("X-Codex2API-Policy-Response-Signature"),
+		"event_signature_version": "v1", "event_signature": newAPIHMAC(secret, eventCanonical),
+	}
+	payload, err := common2.Marshal(map[string]any{
+		"type": "error", "error": map[string]any{"code": "request_policy_violation", "details": details},
+	})
+	require.NoError(t, err)
+	ginContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ginContext.Set(newAPIPolicyRequestContextGinKey, requestContext)
+
+	result := ProcessNewAPIPolicyWebSocketMessage(ginContext, payload)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Terminate)
+
+	details["event_signature"] = strings.Repeat("0", 64)
+	tampered, err := common2.Marshal(map[string]any{
+		"type": "error", "error": map[string]any{"code": "request_policy_violation", "details": details},
+	})
+	require.NoError(t, err)
+	assert.False(t, ProcessNewAPIPolicyWebSocketMessage(ginContext, tampered).Verified)
+}
+
+func signedPolicyDecisionHeader(secret string, requestID string) http.Header {
+	header := make(http.Header)
+	header.Set("X-Codex2API-Policy-Violation", "true")
+	header.Set("X-Codex2API-Policy-Request-ID", requestID)
+	header.Set("X-Codex2API-Policy-Decision-ID", "dec_0123456789abcdef")
+	header.Set("X-Codex2API-Policy-Action", "block")
+	header.Set("X-Codex2API-Policy-Profile", "strict")
+	header.Set("X-Codex2API-Policy-Reason", "direct_target_intrusion_request")
+	header.Set("X-Codex2API-Policy-Severity", "high")
+	header.Set("X-Codex2API-Policy-Strike-Eligible", "true")
+	header.Set("X-Codex2API-Policy-Rule-Version", "0123456789abcdef")
+	header.Set("X-Codex2API-Policy-Evidence-SHA256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	header.Set("X-Codex2API-Policy-Signature-Version", newAPIPolicyDecisionSignatureVersion)
+	canonical := strings.Join([]string{
+		"policy-decision-v1", requestID, "dec_0123456789abcdef", "block", "strict",
+		"direct_target_intrusion_request", "high", "true", "0123456789abcdef",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}, "\n")
+	header.Set("X-Codex2API-Policy-Response-Signature", newAPIHMAC(secret, canonical))
+	return header
 }
 
 func configurePolicyTest(t *testing.T, bindings []newAPIPolicyBinding) {

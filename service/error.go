@@ -85,7 +85,8 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
-	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	options := codex2APIPolicyErrorOptions(resp)
+	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode, options...)
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -117,7 +118,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode, options...)
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
 			}
@@ -130,11 +131,31 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// raw body so the upstream failure remains diagnosable.
 		logger.LogError(ctx, fmt.Sprintf("bad response status code %d with empty error message, body: %s", resp.StatusCode, responseBodyPreview))
 	}
-	newApiErr = types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	newApiErr = types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, resp.StatusCode, options...)
 	if showBodyWhenFail {
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+type codex2APIPolicyViolationContextKey struct{}
+
+func MarkCodex2APIPolicyViolation(resp *http.Response) {
+	if resp == nil || resp.Request == nil {
+		return
+	}
+	resp.Request = resp.Request.WithContext(context.WithValue(resp.Request.Context(), codex2APIPolicyViolationContextKey{}, true))
+}
+
+func codex2APIPolicyErrorOptions(resp *http.Response) []types.NewAPIErrorOptions {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+	verified, _ := resp.Request.Context().Value(codex2APIPolicyViolationContextKey{}).(bool)
+	if !verified {
+		return nil
+	}
+	return []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog()}
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {

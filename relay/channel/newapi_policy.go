@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -50,9 +51,33 @@ type newAPIPolicyBinding struct {
 }
 
 type newAPIPolicyConfig struct {
-	Enabled  bool
-	Bindings []newAPIPolicyBinding
+	Enabled     bool
+	Bindings    []newAPIPolicyBinding
+	Enforcement newAPIPolicyEnforcementConfig
 }
+
+type newAPIPolicyEnforcementConfig struct {
+	AuditEnabled      bool
+	StrikeEnabled     bool
+	AccountBanEnabled bool
+	IPBlockEnabled    bool
+	BanAfter          int
+	WindowSeconds     int
+}
+
+type newAPIPolicyRequestContext struct {
+	RequestID   string
+	UserID      int
+	ClientIP    string
+	PlatformID  string
+	ChannelID   int
+	Secret      string
+	Enforcement newAPIPolicyEnforcementConfig
+}
+
+type newAPIPolicyRequestContextKey struct{}
+
+const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
 	PlatformID       string `json:"platform_id"`
@@ -73,6 +98,9 @@ type newAPIPolicyMeta struct {
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
 	if req == nil {
 		return nil
+	}
+	if c != nil {
+		c.Set(newAPIPolicyRequestContextGinKey, nil)
 	}
 	for _, name := range newAPIPolicyHeaderNames {
 		req.Header.Del(name)
@@ -153,6 +181,13 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	req.Header.Set("X-NewAPI-Signature", newAPIHMAC(binding.Secret, canonical))
 	req.Header.Set("X-NewAPI-Policy-Meta", encodedMeta)
 	req.Header.Set("X-NewAPI-Policy-Meta-Signature", newAPIHMAC(binding.Secret, metaCanonical))
+	requestContext := newAPIPolicyRequestContext{
+		RequestID: requestID, UserID: info.UserId, ClientIP: clientIP,
+		PlatformID: binding.PlatformID, ChannelID: info.ChannelId, Secret: binding.Secret,
+		Enforcement: cfg.Enforcement,
+	}
+	*req = *req.WithContext(context.WithValue(req.Context(), newAPIPolicyRequestContextKey{}, requestContext))
+	c.Set(newAPIPolicyRequestContextGinKey, requestContext)
 	return nil
 }
 
@@ -165,6 +200,11 @@ func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
 	if err != nil || !identityEnabled {
 		return newAPIPolicyConfig{Enabled: false}, err
 	}
+	enforcement, err := loadNewAPIPolicyEnforcementConfig()
+	if err != nil {
+		return newAPIPolicyConfig{}, err
+	}
+	cfg := newAPIPolicyConfig{Enabled: true, Enforcement: enforcement}
 
 	rawBindings := strings.TrimSpace(os.Getenv("CODEX2API_POLICY_BINDINGS"))
 	if rawBindings != "" {
@@ -180,7 +220,8 @@ func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
 				return newAPIPolicyConfig{}, fmt.Errorf("invalid CODEX2API_POLICY_BINDINGS[%d]: %w", i, err)
 			}
 		}
-		return newAPIPolicyConfig{Enabled: true, Bindings: bindings}, nil
+		cfg.Bindings = bindings
+		return cfg, nil
 	}
 
 	secret := strings.TrimSpace(os.Getenv("CODEX2API_POLICY_SECRET"))
@@ -189,7 +230,7 @@ func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
 		return newAPIPolicyConfig{}, err
 	}
 	if secret == "" && len(targets) == 0 {
-		return newAPIPolicyConfig{Enabled: true}, nil
+		return cfg, nil
 	}
 	if len(secret) < 32 {
 		return newAPIPolicyConfig{}, fmt.Errorf("CODEX2API_POLICY_SECRET must contain at least 32 characters")
@@ -211,7 +252,43 @@ func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
 		}
 		bindings = append(bindings, binding)
 	}
-	return newAPIPolicyConfig{Enabled: true, Bindings: bindings}, nil
+	cfg.Bindings = bindings
+	return cfg, nil
+}
+
+func loadNewAPIPolicyEnforcementConfig() (newAPIPolicyEnforcementConfig, error) {
+	auditEnabled, err := policyEnvBool("CODEX2API_POLICY_AUDIT_ENABLED", true)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	strikeEnabled, err := policyEnvBool("CODEX2API_POLICY_STRIKE_ENABLED", false)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	accountBanEnabled, err := policyEnvBool("CODEX2API_POLICY_ACCOUNT_BAN_ENABLED", false)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	ipBlockEnabled, err := policyEnvBool("CODEX2API_POLICY_IP_BLOCK_ENABLED", false)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	if (accountBanEnabled || ipBlockEnabled) && !strikeEnabled {
+		return newAPIPolicyEnforcementConfig{}, fmt.Errorf("CODEX2API_POLICY_STRIKE_ENABLED must be true before enabling account or IP penalties")
+	}
+	banAfter, err := policyEnvInt("CODEX2API_POLICY_BAN_AFTER", 2, 1, 1000)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	windowSeconds, err := policyEnvInt("CODEX2API_POLICY_WINDOW_SECONDS", 86400, 60, 31536000)
+	if err != nil {
+		return newAPIPolicyEnforcementConfig{}, err
+	}
+	return newAPIPolicyEnforcementConfig{
+		AuditEnabled: auditEnabled, StrikeEnabled: strikeEnabled,
+		AccountBanEnabled: accountBanEnabled, IPBlockEnabled: ipBlockEnabled,
+		BanAfter: banAfter, WindowSeconds: windowSeconds,
+	}, nil
 }
 
 func policyEnvBool(name string, defaultValue bool) (bool, error) {
@@ -222,6 +299,18 @@ func policyEnvBool(name string, defaultValue bool) (bool, error) {
 	value, err := strconv.ParseBool(raw)
 	if err != nil {
 		return false, fmt.Errorf("%s must be a boolean", name)
+	}
+	return value, nil
+}
+
+func policyEnvInt(name string, defaultValue int, minimum int, maximum int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be an integer between %d and %d", name, minimum, maximum)
 	}
 	return value, nil
 }

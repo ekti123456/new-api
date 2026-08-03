@@ -12,6 +12,12 @@ NewAPI 环境变量：
 CODEX2API_POLICY_ENABLED=true
 CODEX2API_POLICY_IDENTITY_FORWARD_ENABLED=true
 CODEX2API_POLICY_BINDINGS=[{"platform_id":"primary-newapi","target":"http://127.0.0.1:18095","codex_key_fingerprint":"<Codex2API API Key 的 SHA-256 小写十六进制值>","secret":"<与 Codex2API 绑定完全相同的密钥>","enabled":true}]
+CODEX2API_POLICY_AUDIT_ENABLED=true
+CODEX2API_POLICY_STRIKE_ENABLED=false
+CODEX2API_POLICY_ACCOUNT_BAN_ENABLED=false
+CODEX2API_POLICY_IP_BLOCK_ENABLED=false
+CODEX2API_POLICY_BAN_AFTER=2
+CODEX2API_POLICY_WINDOW_SECONDS=86400
 ```
 
 每个绑定同时校验目标地址和 Codex2API API Key 指纹。原始 API Key 不写入绑定配置。`target` 可以是主机根地址或带路径前缀的地址；路径匹配遵守分段边界，例如 `/v1` 不会匹配 `/v10`。
@@ -26,6 +32,19 @@ try { ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').T
 ```
 
 Codex2API 的 Prompt Filter 总开关、运行模式与绑定的 `require_signed_identity` 仍需在 Codex2API 侧按部署策略配置。NewAPI 发送的 `mode`、`profile` 只是已签名审计元数据，不覆盖 Codex2API 的全局 GuardPipeline 策略。
+
+## 违规决策联动
+
+Codex2API 拒绝 Prompt 后会返回 `policy-decision-v1` HMAC 签名决策。NewAPI 仅接受 Request ID 与当前签名请求一致、且能用该目标和 Key 绑定密钥完成验签的决策。验签成功后会停止渠道重试，防止通过切换上游绕过 Prompt 检查，并只保存规则版本与 Prompt 证据的 SHA-256，不保存 Prompt 原文。
+
+- `CODEX2API_POLICY_AUDIT_ENABLED`：保存已验签决策，默认 `true`。
+- `CODEX2API_POLICY_STRIKE_ENABLED`：在时间窗口内累计可处罚决策，默认 `false`。
+- `CODEX2API_POLICY_ACCOUNT_BAN_ENABLED`：达到阈值后禁用普通用户账号，默认 `false`。
+- `CODEX2API_POLICY_IP_BLOCK_ENABLED`：达到阈值后临时限制来源 IP，默认 `false`。
+- `CODEX2API_POLICY_BAN_AFTER`：时间窗口内触发处罚所需次数，默认 `2`。
+- `CODEX2API_POLICY_WINDOW_SECONDS`：累计窗口及 IP 限制时长，默认 `86400` 秒。
+
+账号或 IP 处罚必须同时显式启用 `CODEX2API_POLICY_STRIKE_ENABLED=true`。管理员和 Root 用户只记录审计，不累计处罚。普通 HTTP、表单请求、WebSocket 握手失败以及 WebSocket 建连后的逐事件违规决策均支持验签；逐事件还会额外验证 `policy-event-v1` 签名。Decision ID 具有数据库唯一约束，用于防止重放导致重复累计。
 
 ## 请求协议
 

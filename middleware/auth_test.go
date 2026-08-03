@@ -249,3 +249,23 @@ func TestTryUserAuthCredentialClassification(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, databaseFailureResponse.Code)
 	assert.Contains(t, databaseFailureResponse.Body.String(), "AUTH_INTERNAL_ERROR")
 }
+
+func TestEnforceCodexPolicyIPBlockRejectsActivePenalty(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.CodexPolicyIPBlock{}))
+	require.NoError(t, model.DB.Create(&model.CodexPolicyIPBlock{
+		IP: "203.0.113.42", UserID: 7, DecisionID: "dec_middleware",
+		CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}).Error)
+	t.Setenv("CODEX2API_POLICY_IP_BLOCK_ENABLED", "true")
+
+	response := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(response)
+	ginContext.Request = httptest.NewRequest(http.MethodPost, "/v1/test", nil)
+	ginContext.Request.RemoteAddr = "203.0.113.42:1234"
+
+	assert.True(t, enforceCodexPolicyIPBlock(ginContext, ginContext.ClientIP()))
+
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.Contains(t, response.Body.String(), "access_denied")
+}

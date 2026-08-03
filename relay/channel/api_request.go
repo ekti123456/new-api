@@ -334,6 +334,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+	processNewAPIPolicyResponse(c, resp)
 	return resp, nil
 }
 
@@ -369,6 +370,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+	processNewAPIPolicyResponse(c, resp)
 	return resp, nil
 }
 
@@ -401,8 +403,13 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
 	}
 	targetHeader = policyRequest.Header
-	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	requestContext, _ := policyRequest.Context().Value(newAPIPolicyRequestContextKey{}).(newAPIPolicyRequestContext)
+	targetConn, policyResponse, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	verifiedPolicyDecision := processNewAPIPolicyResponseWithContext(c, policyResponse, requestContext)
 	if err != nil {
+		if verifiedPolicyDecision && policyResponse != nil {
+			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseStatusCode, policyResponse.StatusCode, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
 	// send request body

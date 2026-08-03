@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -424,9 +427,13 @@ func TokenAuth() func(c *gin.Context) {
 			return
 		}
 
+		clientIp := c.ClientIP()
+		if enforceCodexPolicyIPBlock(c, clientIp) {
+			return
+		}
+
 		allowIps := token.GetIpLimits()
 		if len(allowIps) > 0 {
-			clientIp := c.ClientIP()
 			logger.LogDebug(c, "Token has IP restrictions, checking client IP %s", clientIp)
 			ip := net.ParseIP(clientIp)
 			if ip == nil {
@@ -480,6 +487,29 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+func codexPolicyIPBlockEnabled() bool {
+	enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("CODEX2API_POLICY_IP_BLOCK_ENABLED")))
+	return err == nil && enabled
+}
+
+func enforceCodexPolicyIPBlock(c *gin.Context, clientIP string) bool {
+	if !codexPolicyIPBlockEnabled() {
+		return false
+	}
+	ipBlocked, err := model.IsCodexPolicyIPBlocked(clientIP, time.Now())
+	if err != nil {
+		common.SysLog(fmt.Sprintf("TokenAuth IsCodexPolicyIPBlocked database error for IP %s: %v", clientIP, err))
+		abortWithOpenAiMessage(c, http.StatusInternalServerError,
+			common.TranslateMessage(c, i18n.MsgDatabaseError))
+		return true
+	}
+	if !ipBlocked {
+		return false
+	}
+	abortWithOpenAiMessage(c, http.StatusForbidden, "Access denied due to a verified policy violation", types.ErrorCodeAccessDenied)
+	return true
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {
