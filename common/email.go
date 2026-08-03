@@ -1,14 +1,34 @@
 package common
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
 	"net/smtp"
 	"slices"
 	"strings"
 	"time"
 )
+
+const (
+	emailProviderSMTP   = "smtp"
+	emailProviderZeabur = "zeabur"
+)
+
+var (
+	zeaburEmailAPIURL = "https://api.zeabur.com/api/v1/zsend/emails"
+	zeaburEmailClient = &http.Client{Timeout: 15 * time.Second}
+)
+
+type zeaburEmailRequest struct {
+	From    string   `json:"from"`
+	To      []string `json:"to"`
+	Subject string   `json:"subject"`
+	HTML    string   `json:"html"`
+}
 
 func generateMessageID() (string, error) {
 	split := strings.Split(SMTPFrom, "@")
@@ -76,6 +96,17 @@ func newSMTPClient(addr string) (*smtp.Client, error) {
 }
 
 func SendEmail(subject string, receiver string, content string) error {
+	switch strings.ToLower(strings.TrimSpace(EmailProvider)) {
+	case "", emailProviderSMTP:
+		return sendSMTPEmail(subject, receiver, content)
+	case emailProviderZeabur:
+		return sendZeaburEmail(subject, receiver, content)
+	default:
+		return fmt.Errorf("unsupported email provider: %s", EmailProvider)
+	}
+}
+
+func sendSMTPEmail(subject string, receiver string, content string) error {
 	if SMTPFrom == "" { // for compatibility
 		SMTPFrom = SMTPAccount
 	}
@@ -133,4 +164,60 @@ func SendEmail(subject string, receiver string, content string) error {
 		SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
 	}
 	return err
+}
+
+func sendZeaburEmail(subject string, receiver string, content string) error {
+	if strings.TrimSpace(ZeaburEmailToken) == "" {
+		return fmt.Errorf("Zeabur Email API token is not configured")
+	}
+	if strings.TrimSpace(ZeaburEmailFrom) == "" {
+		return fmt.Errorf("Zeabur Email sender is not configured")
+	}
+
+	receivers := make([]string, 0)
+	for _, address := range strings.Split(receiver, ";") {
+		if address = strings.TrimSpace(address); address != "" {
+			receivers = append(receivers, address)
+		}
+	}
+	if len(receivers) == 0 {
+		return fmt.Errorf("email receiver is empty")
+	}
+
+	payload, err := Marshal(zeaburEmailRequest{
+		From:    strings.TrimSpace(ZeaburEmailFrom),
+		To:      receivers,
+		Subject: subject,
+		HTML:    content,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal Zeabur email request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, zeaburEmailAPIURL, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("create Zeabur email request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(ZeaburEmailToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := zeaburEmailClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send email through Zeabur: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return fmt.Errorf("Zeabur Email API returned HTTP %d", resp.StatusCode)
+		}
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			return fmt.Errorf("Zeabur Email API returned HTTP %d", resp.StatusCode)
+		}
+		return fmt.Errorf("Zeabur Email API returned HTTP %d: %s", resp.StatusCode, message)
+	}
+
+	return nil
 }

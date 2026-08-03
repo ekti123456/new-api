@@ -104,6 +104,9 @@ var SMTPForceAuthLogin = false
 var SMTPAccount = ""
 var SMTPFrom = ""
 var SMTPToken = ""
+var EmailProvider = "smtp"
+var ZeaburEmailFrom = ""
+var ZeaburEmailToken = ""
 
 var GitHubClientId = ""
 var GitHubClientSecret = ""

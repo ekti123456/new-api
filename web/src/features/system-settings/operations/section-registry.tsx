@@ -61,10 +61,11 @@ const OPERATIONS_SECTIONS = [
   },
   {
     id: 'email',
-    titleKey: 'SMTP Email',
+    titleKey: 'Email Delivery',
     build: (settings: OperationsSettings) => (
       <EmailSettingsSection
         defaultValues={{
+          EmailProvider: settings.EmailProvider ?? 'smtp',
           SMTPServer: settings.SMTPServer,
           SMTPPort: settings.SMTPPort,
           SMTPAccount: settings.SMTPAccount,
@@ -74,6 +75,8 @@ const OPERATIONS_SECTIONS = [
           SMTPStartTLSEnabled: settings.SMTPStartTLSEnabled,
           SMTPInsecureSkipVerify: settings.SMTPInsecureSkipVerify,
           SMTPForceAuthLogin: settings.SMTPForceAuthLogin,
+          ZeaburEmailFrom: settings.ZeaburEmailFrom,
+          ZeaburEmailToken: settings.ZeaburEmailToken,
         }}
       />
     ),

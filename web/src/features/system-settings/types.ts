@@ -337,6 +337,7 @@ export type OperationsSettings = {
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
   QuotaRemindThreshold: string
+  EmailProvider: 'smtp' | 'zeabur'
   SMTPServer: string
   SMTPPort: string
   SMTPAccount: string
@@ -346,6 +347,8 @@ export type OperationsSettings = {
   SMTPStartTLSEnabled: boolean
   SMTPInsecureSkipVerify: boolean
   SMTPForceAuthLogin: boolean
+  ZeaburEmailFrom: string
+  ZeaburEmailToken: string
   WorkerUrl: string
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
