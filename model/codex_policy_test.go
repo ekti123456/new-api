@@ -75,6 +75,71 @@ func TestApplyCodexPolicyDecisionDoesNotCountAuditOnlyHistory(t *testing.T) {
 	assert.False(t, result.AccountBanned)
 }
 
+func TestApplyCodexPolicyDecisionDoesNotCountNonCYBDecision(t *testing.T) {
+	truncateTables(t)
+	user := createCodexPolicyTestUser(t, common.RoleCommonUser)
+	input := codexPolicyTestInput(user.Id, "dec_local_prompt", time.Now().Unix())
+	input.Decision.ReasonCode = "prompt_policy_match"
+	input.AccountBanEnabled = true
+	input.BanAfter = 1
+
+	result, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.StrikeCount)
+	assert.False(t, result.AccountBanned)
+
+	var stored CodexPolicyDecision
+	require.NoError(t, DB.Where("decision_id = ?", input.Decision.DecisionID).First(&stored).Error)
+	assert.False(t, stored.StrikeCounted)
+}
+
+func TestApplyCodexPolicyDecisionRebansAfterManualUnbanOnEveryNewCYB(t *testing.T) {
+	truncateTables(t)
+	user := createCodexPolicyTestUser(t, common.RoleCommonUser)
+	createdAt := time.Now().Unix()
+	input := codexPolicyTestInput(user.Id, "dec_cyb_first", createdAt)
+	input.AccountBanEnabled = true
+	input.WindowSeconds = 7 * 24 * 60 * 60
+
+	first, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first.StrikeCount)
+	assert.False(t, first.AccountBanned)
+
+	input.Decision.DecisionID = "dec_cyb_second"
+	input.Decision.CreatedAt++
+	second, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), second.StrikeCount)
+	assert.True(t, second.AccountBanned)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("status", common.UserStatusEnabled).Error)
+	input.Decision.DecisionID = "dec_cyb_third"
+	input.Decision.CreatedAt++
+	third, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), third.StrikeCount)
+	assert.True(t, third.AccountBanned)
+}
+
+func TestApplyCodexPolicyDecisionExpiresCYBOutsideWindow(t *testing.T) {
+	truncateTables(t)
+	user := createCodexPolicyTestUser(t, common.RoleCommonUser)
+	createdAt := time.Now().Unix()
+	input := codexPolicyTestInput(user.Id, "dec_cyb_expired", createdAt-7*24*60*60-1)
+	input.AccountBanEnabled = true
+	input.WindowSeconds = 7 * 24 * 60 * 60
+
+	_, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	input.Decision.DecisionID = "dec_cyb_current"
+	input.Decision.CreatedAt = createdAt
+	result, err := ApplyCodexPolicyDecision(input)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), result.StrikeCount)
+	assert.False(t, result.AccountBanned)
+}
+
 func TestApplyCodexPolicyDecisionCanDisableAccountAndTemporarilyBlockIP(t *testing.T) {
 	truncateTables(t)
 	user := createCodexPolicyTestUser(t, common.RoleCommonUser)
@@ -122,7 +187,7 @@ func codexPolicyTestInput(userID int, decisionID string, createdAt int64) CodexP
 		Decision: CodexPolicyDecision{
 			DecisionID: decisionID, RequestID: "req_policy", UserID: userID,
 			ClientIP: "203.0.113.42", PlatformID: "newapi", ChannelID: 7,
-			Action: "block", Profile: "strict", ReasonCode: "policy_test",
+			Action: "block", Profile: "strict", ReasonCode: CodexPolicyReasonUpstreamCyberPolicy,
 			Severity: "high", StrikeEligible: true, RuleVersion: "0123456789abcdef",
 			EvidenceSHA256:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 			SignatureVersion: "v1", CreatedAt: createdAt,

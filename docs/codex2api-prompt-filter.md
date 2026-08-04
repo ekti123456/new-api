@@ -17,7 +17,7 @@ CODEX2API_POLICY_STRIKE_ENABLED=false
 CODEX2API_POLICY_ACCOUNT_BAN_ENABLED=false
 CODEX2API_POLICY_IP_BLOCK_ENABLED=false
 CODEX2API_POLICY_BAN_AFTER=2
-CODEX2API_POLICY_WINDOW_SECONDS=86400
+CODEX2API_POLICY_WINDOW_SECONDS=604800
 ```
 
 每个绑定同时校验目标地址和 Codex2API API Key 指纹。原始 API Key 不写入绑定配置。`target` 可以是主机根地址或带路径前缀的地址；路径匹配遵守分段边界，例如 `/v1` 不会匹配 `/v10`。
@@ -42,7 +42,7 @@ Codex2API 拒绝 Prompt 后会返回 `policy-decision-v1` HMAC 签名决策。Ne
 - `CODEX2API_POLICY_ACCOUNT_BAN_ENABLED`：达到阈值后禁用普通用户账号，默认 `false`。
 - `CODEX2API_POLICY_IP_BLOCK_ENABLED`：达到阈值后临时限制来源 IP，默认 `false`。
 - `CODEX2API_POLICY_BAN_AFTER`：时间窗口内触发处罚所需次数，默认 `2`。
-- `CODEX2API_POLICY_WINDOW_SECONDS`：累计窗口及 IP 限制时长，默认 `86400` 秒。
+- `CODEX2API_POLICY_WINDOW_SECONDS`：CYB 累计窗口及 IP 限制时长，默认 `604800` 秒（7 天）。
 
 账号或 IP 处罚必须同时显式启用 `CODEX2API_POLICY_STRIKE_ENABLED=true`。管理员和 Root 用户只记录审计，不累计处罚。普通 HTTP、表单请求、WebSocket 握手失败以及 WebSocket 建连后的逐事件违规决策均支持验签；逐事件还会额外验证 `policy-event-v1` 签名。Decision ID 具有数据库唯一约束，用于防止重放导致重复累计。
 

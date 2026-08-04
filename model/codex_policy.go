@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const CodexPolicyReasonUpstreamCyberPolicy = "upstream_cyber_policy"
+
 // CodexPolicyDecision is the durable replay boundary and audit record for a
 // verified Codex2API policy response. It stores only bounded metadata and an
 // evidence digest; prompt text is deliberately not persisted here.
@@ -88,7 +90,11 @@ func ApplyCodexPolicyDecision(input CodexPolicyDecisionInput) (CodexPolicyDecisi
 			result.Duplicate = true
 			return nil
 		}
-		decision.StrikeCounted = input.StrikeEnabled && decision.StrikeEligible && user.Role < common.RoleAdminUser
+		// Account punishment is intentionally narrower than the signed audit
+		// protocol: only an explicit upstream CYB decision may add a strike. Local
+		// prompt rules, external-review verdicts and ordinary upstream 4xx errors
+		// remain auditable but can never disable an account.
+		decision.StrikeCounted = input.StrikeEnabled && decision.StrikeEligible && decision.ReasonCode == CodexPolicyReasonUpstreamCyberPolicy && user.Role < common.RoleAdminUser
 
 		// Strike counting requires durable rows even when the optional audit
 		// display is disabled, otherwise restarts could reset enforcement.
@@ -106,7 +112,7 @@ func ApplyCodexPolicyDecision(input CodexPolicyDecisionInput) (CodexPolicyDecisi
 			result.Protected = true
 			return nil
 		}
-		if !input.StrikeEnabled || !decision.StrikeEligible {
+		if !decision.StrikeCounted {
 			return nil
 		}
 

@@ -18,6 +18,7 @@ import (
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 )
 
@@ -80,19 +81,20 @@ type newAPIPolicyRequestContextKey struct{}
 const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
-	PlatformID       string `json:"platform_id"`
-	UserName         string `json:"user_name,omitempty"`
-	UserEmail        string `json:"user_email,omitempty"`
-	UserGroup        string `json:"user_group,omitempty"`
-	Profile          string `json:"profile"`
-	Mode             string `json:"mode"`
-	Provider         string `json:"provider"`
-	Protocol         string `json:"protocol"`
-	OriginalEndpoint string `json:"original_endpoint,omitempty"`
-	OriginalProtocol string `json:"original_protocol,omitempty"`
-	RequestedModel   string `json:"requested_model,omitempty"`
-	UpstreamModel    string `json:"upstream_model,omitempty"`
-	ChannelID        int    `json:"channel_id,omitempty"`
+	PlatformID         string `json:"platform_id"`
+	UserName           string `json:"user_name,omitempty"`
+	UserEmail          string `json:"user_email,omitempty"`
+	UserGroup          string `json:"user_group,omitempty"`
+	Profile            string `json:"profile"`
+	Mode               string `json:"mode"`
+	Provider           string `json:"provider"`
+	Protocol           string `json:"protocol"`
+	OriginalEndpoint   string `json:"original_endpoint,omitempty"`
+	OriginalProtocol   string `json:"original_protocol,omitempty"`
+	RequestedModel     string `json:"requested_model,omitempty"`
+	UpstreamModel      string `json:"upstream_model,omitempty"`
+	ChannelID          int    `json:"channel_id,omitempty"`
+	SessionFingerprint string `json:"session_fingerprint,omitempty"`
 }
 
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
@@ -163,6 +165,9 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		UpstreamModel:    info.UpstreamModelName,
 		ChannelID:        info.ChannelId,
 	}
+	if sessionID := newAPIPolicyStableSessionID(c, info); sessionID != "" {
+		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
+	}
 	metaJSON, err := common2.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal Codex2API policy metadata: %w", err)
@@ -189,6 +194,113 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	*req = *req.WithContext(context.WithValue(req.Context(), newAPIPolicyRequestContextKey{}, requestContext))
 	c.Set(newAPIPolicyRequestContextGinKey, requestContext)
 	return nil
+}
+
+// newAPIPolicyStableSessionID intentionally accepts only explicit, stable
+// conversation identifiers. previous_response_id is excluded because it
+// changes on every turn and would let a locked conversation escape the lock.
+// Content-derived guesses are also excluded to avoid merging unrelated chats
+// that happen to start with the same prompt.
+func newAPIPolicyStableSessionID(c *gin.Context, info *relaycommon.RelayInfo) string {
+	if c != nil && c.Request != nil {
+		for _, name := range []string{
+			"X-NewAPI-Conversation-ID",
+			"Conversation-Id", "Conversation_id",
+			"Session-Id", "Session_id",
+			"X-Session-ID", "OpenAI-Session-ID",
+		} {
+			if value := normalizeNewAPIPolicySessionID(c.GetHeader(name)); value != "" {
+				return value
+			}
+		}
+	}
+	if info == nil {
+		return ""
+	}
+	switch request := info.Request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		if request == nil {
+			return ""
+		}
+		if value := rawNewAPIPolicyJSONString(request.PromptCacheKey); value != "" {
+			return value
+		}
+		return rawNewAPIPolicyConversationID(request.Conversation)
+	case *dto.OpenAIResponsesCompactionRequest:
+		if request == nil {
+			return ""
+		}
+		return rawNewAPIPolicyJSONString(request.PromptCacheKey)
+	case *dto.GeneralOpenAIRequest:
+		if request == nil {
+			return ""
+		}
+		if value := normalizeNewAPIPolicySessionID(request.PromptCacheKey); value != "" {
+			return value
+		}
+		return rawNewAPIPolicyMetadataSessionID(request.Metadata)
+	default:
+		return ""
+	}
+}
+
+func normalizeNewAPIPolicySessionID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 1024 || strings.ContainsAny(value, "\r\n") {
+		return ""
+	}
+	return value
+}
+
+func rawNewAPIPolicyJSONString(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := common2.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return normalizeNewAPIPolicySessionID(value)
+}
+
+func rawNewAPIPolicyConversationID(raw []byte) string {
+	if value := rawNewAPIPolicyJSONString(raw); value != "" {
+		return value
+	}
+	var value struct {
+		ID string `json:"id"`
+	}
+	if len(raw) == 0 || common2.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	return normalizeNewAPIPolicySessionID(value.ID)
+}
+
+func rawNewAPIPolicyMetadataSessionID(raw []byte) string {
+	var value struct {
+		ConversationID string `json:"conversation_id"`
+		SessionID      string `json:"session_id"`
+	}
+	if len(raw) == 0 || common2.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	if sessionID := normalizeNewAPIPolicySessionID(value.ConversationID); sessionID != "" {
+		return sessionID
+	}
+	return normalizeNewAPIPolicySessionID(value.SessionID)
+}
+
+func newAPIPolicySessionFingerprint(secret, platformID, userID, sessionID string) string {
+	sessionID = normalizeNewAPIPolicySessionID(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	canonical := strings.Join([]string{"policy-session-v1", strings.TrimSpace(platformID), strings.TrimSpace(userID), sessionID}, "\n")
+	fingerprint := newAPIHMAC(secret, canonical)
+	if len(fingerprint) < 32 {
+		return ""
+	}
+	return fingerprint[:32]
 }
 
 func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
@@ -280,7 +392,7 @@ func loadNewAPIPolicyEnforcementConfig() (newAPIPolicyEnforcementConfig, error) 
 	if err != nil {
 		return newAPIPolicyEnforcementConfig{}, err
 	}
-	windowSeconds, err := policyEnvInt("CODEX2API_POLICY_WINDOW_SECONDS", 86400, 60, 31536000)
+	windowSeconds, err := policyEnvInt("CODEX2API_POLICY_WINDOW_SECONDS", 7*24*60*60, 60, 31536000)
 	if err != nil {
 		return newAPIPolicyEnforcementConfig{}, err
 	}

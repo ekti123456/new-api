@@ -16,6 +16,7 @@ import (
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,7 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses?client=true", nil)
 	context.Request.RemoteAddr = "203.0.113.9:4567"
+	context.Request.Header.Set("Session-Id", "conversation-42")
 	common2.SetContextKey(context, constant.ContextKeyUserName, "policy-user")
 
 	body := []byte(`{"model":"gpt-5","input":"hello"}`)
@@ -91,12 +93,47 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	assert.Equal(t, "/v1/responses", meta.OriginalEndpoint)
 	assert.Equal(t, string(types.RelayFormatOpenAIResponses), meta.Protocol)
 	assert.Equal(t, "gpt-5-codex", meta.UpstreamModel)
+	assert.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", "conversation-42"), meta.SessionFingerprint)
+	assert.Len(t, meta.SessionFingerprint, 32)
 	metaCanonical := newAPIPolicyMetaVersion + "\n" + info.RequestId + "\n" + bodyDigestHex + "\n" + encodedMeta
 	assert.Equal(t, newAPIHMAC(secret, metaCanonical), upstreamRequest.Header.Get("X-NewAPI-Policy-Meta-Signature"))
 
 	forwardedBody, err := io.ReadAll(upstreamRequest.Body)
 	require.NoError(t, err)
 	assert.Equal(t, body, forwardedBody)
+}
+
+func TestNewAPIPolicyStableSessionFingerprintUsesExplicitConversationIdentity(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		PromptCacheKey:     []byte(`"body-session"`),
+		PreviousResponseID: "resp_changes_each_turn",
+	}}
+
+	if got := newAPIPolicyStableSessionID(context, info); got != "body-session" {
+		t.Fatalf("stable session id = %q, want body-session", got)
+	}
+	context.Request.Header.Set("Conversation-Id", "header-session")
+	if got := newAPIPolicyStableSessionID(context, info); got != "header-session" {
+		t.Fatalf("header session id = %q, want header-session", got)
+	}
+
+	first := newAPIPolicySessionFingerprint("0123456789abcdef0123456789abcdef", "newapi", "42", "header-session")
+	repeat := newAPIPolicySessionFingerprint("0123456789abcdef0123456789abcdef", "newapi", "42", "header-session")
+	otherUser := newAPIPolicySessionFingerprint("0123456789abcdef0123456789abcdef", "newapi", "43", "header-session")
+	if len(first) != 32 || first != repeat || first == otherUser {
+		t.Fatalf("unexpected scoped fingerprint first=%q repeat=%q other_user=%q", first, repeat, otherUser)
+	}
+}
+
+func TestNewAPIPolicyStableSessionIDDoesNotUsePreviousResponseID(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{PreviousResponseID: "resp_123"}}
+	if got := newAPIPolicyStableSessionID(context, info); got != "" {
+		t.Fatalf("previous_response_id became a session identity: %q", got)
+	}
 }
 
 func TestApplyNewAPIPolicyHeadersHashesReaderOnlyBodyWithoutConsumingIt(t *testing.T) {
@@ -275,7 +312,7 @@ func TestLoadNewAPIPolicyEnforcementDefaultsAreSafe(t *testing.T) {
 	assert.False(t, config.AccountBanEnabled)
 	assert.False(t, config.IPBlockEnabled)
 	assert.Equal(t, 2, config.BanAfter)
-	assert.Equal(t, 86400, config.WindowSeconds)
+	assert.Equal(t, 7*24*60*60, config.WindowSeconds)
 
 	t.Setenv("CODEX2API_POLICY_ACCOUNT_BAN_ENABLED", "true")
 	_, err = loadNewAPIPolicyEnforcementConfig()
