@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 )
 
 const newAPIPolicyDecisionSignatureVersion = "v1"
+const newAPIPolicyStreamLineLimit = 256 << 10
 
 type newAPIPolicyDecision struct {
 	RequestID      string
@@ -62,6 +64,108 @@ type NewAPIPolicyWebSocketResult struct {
 	Terminate bool
 }
 
+type newAPIPolicyStreamCarrier struct {
+	Error    newAPIPolicyStreamError `json:"error"`
+	Response struct {
+		Error newAPIPolicyStreamError `json:"error"`
+	} `json:"response"`
+}
+
+type newAPIPolicyStreamError struct {
+	Details struct {
+		Policy newAPIPolicyWebSocketDetails `json:"codex2api_policy"`
+	} `json:"details"`
+}
+
+type newAPIPolicyStreamBody struct {
+	io.ReadCloser
+	c              *gin.Context
+	resp           *http.Response
+	requestContext newAPIPolicyRequestContext
+	line           []byte
+	discardLine    bool
+	finished       bool
+	seen           map[string]struct{}
+}
+
+func (b *newAPIPolicyStreamBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.observe(p[:n])
+	}
+	if err == io.EOF && !b.finished {
+		b.finished = true
+		if !b.discardLine && len(b.line) > 0 {
+			b.processLine(b.line)
+		}
+		b.line = nil
+	}
+	return n, err
+}
+
+func (b *newAPIPolicyStreamBody) observe(chunk []byte) {
+	for len(chunk) > 0 {
+		newline := bytes.IndexByte(chunk, '\n')
+		if newline < 0 {
+			b.appendLine(chunk)
+			return
+		}
+		b.appendLine(chunk[:newline])
+		if !b.discardLine {
+			b.processLine(b.line)
+		}
+		b.line = b.line[:0]
+		b.discardLine = false
+		chunk = chunk[newline+1:]
+	}
+}
+
+func (b *newAPIPolicyStreamBody) appendLine(fragment []byte) {
+	if b.discardLine {
+		return
+	}
+	if len(b.line)+len(fragment) > newAPIPolicyStreamLineLimit {
+		b.line = b.line[:0]
+		b.discardLine = true
+		return
+	}
+	b.line = append(b.line, fragment...)
+}
+
+func (b *newAPIPolicyStreamBody) processLine(line []byte) {
+	line = bytes.TrimSpace(line)
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return
+	}
+	data := bytes.TrimSpace(line[len("data:"):])
+	if !bytes.Contains(data, []byte(`"codex2api_policy"`)) {
+		return
+	}
+	var carrier newAPIPolicyStreamCarrier
+	if err := common.Unmarshal(data, &carrier); err != nil {
+		logger.LogWarn(b.c, "ignored malformed Codex2API stream policy decision")
+		return
+	}
+	details := carrier.Error.Details.Policy
+	if details.DecisionID == "" {
+		details = carrier.Response.Error.Details.Policy
+	}
+	if details.DecisionID == "" {
+		return
+	}
+	if _, duplicate := b.seen[details.DecisionID]; duplicate {
+		return
+	}
+	decision, err := verifyNewAPIPolicyDecisionDetails(details, b.requestContext)
+	if err != nil {
+		logger.LogWarn(b.c, fmt.Sprintf("ignored invalid Codex2API stream policy decision: %s", err.Error()))
+		return
+	}
+	b.seen[details.DecisionID] = struct{}{}
+	service.MarkCodex2APIPolicyViolation(b.resp)
+	applyVerifiedNewAPIPolicyDecision(b.c, decision, b.requestContext)
+}
+
 func processNewAPIPolicyResponse(c *gin.Context, resp *http.Response) bool {
 	if resp == nil || resp.Request == nil {
 		return false
@@ -70,7 +174,14 @@ func processNewAPIPolicyResponse(c *gin.Context, resp *http.Response) bool {
 	if !ok {
 		return false
 	}
-	return processNewAPIPolicyResponseWithContext(c, resp, requestContext)
+	processed := processNewAPIPolicyResponseWithContext(c, resp, requestContext)
+	if !processed && resp.Body != nil && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		resp.Body = &newAPIPolicyStreamBody{
+			ReadCloser: resp.Body, c: c, resp: resp, requestContext: requestContext,
+			seen: make(map[string]struct{}),
+		}
+	}
+	return processed
 }
 
 func processNewAPIPolicyResponseWithContext(c *gin.Context, resp *http.Response, requestContext newAPIPolicyRequestContext) bool {
@@ -141,19 +252,7 @@ func ProcessNewAPIPolicyWebSocketMessage(c *gin.Context, message []byte) NewAPIP
 		return NewAPIPolicyWebSocketResult{}
 	}
 	details := envelope.Error.Details
-	header := make(http.Header)
-	header.Set("X-Codex2API-Policy-Request-ID", details.RequestID)
-	header.Set("X-Codex2API-Policy-Decision-ID", details.DecisionID)
-	header.Set("X-Codex2API-Policy-Action", details.Action)
-	header.Set("X-Codex2API-Policy-Profile", details.Profile)
-	header.Set("X-Codex2API-Policy-Reason", details.ReasonCode)
-	header.Set("X-Codex2API-Policy-Severity", details.Severity)
-	header.Set("X-Codex2API-Policy-Strike-Eligible", strconv.FormatBool(details.StrikeEligible))
-	header.Set("X-Codex2API-Policy-Rule-Version", details.RuleVersion)
-	header.Set("X-Codex2API-Policy-Evidence-SHA256", details.EvidenceSHA256)
-	header.Set("X-Codex2API-Policy-Signature-Version", details.SignatureVersion)
-	header.Set("X-Codex2API-Policy-Response-Signature", details.ResponseSignature)
-	decision, err := verifyNewAPIPolicyDecision(header, requestContext)
+	decision, err := verifyNewAPIPolicyDecisionDetails(details, requestContext)
 	if err != nil {
 		logger.LogWarn(c, fmt.Sprintf("ignored invalid Codex2API WebSocket policy decision: %s", err.Error()))
 		return NewAPIPolicyWebSocketResult{}
@@ -172,6 +271,22 @@ func ProcessNewAPIPolicyWebSocketMessage(c *gin.Context, message []byte) NewAPIP
 		return NewAPIPolicyWebSocketResult{}
 	}
 	return applyVerifiedNewAPIPolicyDecision(c, decision, requestContext)
+}
+
+func verifyNewAPIPolicyDecisionDetails(details newAPIPolicyWebSocketDetails, requestContext newAPIPolicyRequestContext) (newAPIPolicyDecision, error) {
+	header := make(http.Header)
+	header.Set("X-Codex2API-Policy-Request-ID", details.RequestID)
+	header.Set("X-Codex2API-Policy-Decision-ID", details.DecisionID)
+	header.Set("X-Codex2API-Policy-Action", details.Action)
+	header.Set("X-Codex2API-Policy-Profile", details.Profile)
+	header.Set("X-Codex2API-Policy-Reason", details.ReasonCode)
+	header.Set("X-Codex2API-Policy-Severity", details.Severity)
+	header.Set("X-Codex2API-Policy-Strike-Eligible", strconv.FormatBool(details.StrikeEligible))
+	header.Set("X-Codex2API-Policy-Rule-Version", details.RuleVersion)
+	header.Set("X-Codex2API-Policy-Evidence-SHA256", details.EvidenceSHA256)
+	header.Set("X-Codex2API-Policy-Signature-Version", details.SignatureVersion)
+	header.Set("X-Codex2API-Policy-Response-Signature", details.ResponseSignature)
+	return verifyNewAPIPolicyDecision(header, requestContext)
 }
 
 func verifyNewAPIPolicyDecision(header http.Header, requestContext newAPIPolicyRequestContext) (newAPIPolicyDecision, error) {

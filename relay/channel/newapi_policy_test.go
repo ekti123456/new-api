@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -294,6 +295,51 @@ func TestVerifiedNewAPIPolicyDecisionSkipsChannelRetry(t *testing.T) {
 	newAPIError := service.RelayErrorHandler(ginContext, response, false)
 	assert.True(t, types.IsSkipRetryError(newAPIError))
 	assert.False(t, types.IsRecordErrorLog(newAPIError))
+}
+
+func TestProcessNewAPIPolicyResponseVerifiesSignedDecisionFromFragmentedSSE(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef"
+	requestContext := newAPIPolicyRequestContext{
+		RequestID: "req-policy-response", Secret: secret,
+		Enforcement: newAPIPolicyEnforcementConfig{BanAfter: 2, WindowSeconds: 86400},
+	}
+	header := signedPolicyDecisionHeader(secret, requestContext.RequestID)
+	policyDetails := map[string]any{
+		"request_id": requestContext.RequestID, "decision_id": header.Get("X-Codex2API-Policy-Decision-ID"),
+		"action": header.Get("X-Codex2API-Policy-Action"), "profile": header.Get("X-Codex2API-Policy-Profile"),
+		"reason_code": header.Get("X-Codex2API-Policy-Reason"), "severity": header.Get("X-Codex2API-Policy-Severity"),
+		"strike_eligible": true, "rule_version": header.Get("X-Codex2API-Policy-Rule-Version"),
+		"evidence_sha256":   header.Get("X-Codex2API-Policy-Evidence-SHA256"),
+		"signature_version": "v1", "response_signature": header.Get("X-Codex2API-Policy-Response-Signature"),
+	}
+	event, err := common2.Marshal(map[string]any{
+		"type": "response.failed",
+		"response": map[string]any{"error": map[string]any{
+			"code": "cyber_policy", "details": map[string]any{"codex2api_policy": policyDetails},
+		}},
+	})
+	require.NoError(t, err)
+	stream := "data: " + string(event) + "\n\ndata: [DONE]\n\n"
+
+	request, err := http.NewRequest(http.MethodPost, "http://codex2api.example/v1/responses", nil)
+	require.NoError(t, err)
+	request = request.WithContext(context.WithValue(request.Context(), newAPIPolicyRequestContextKey{}, requestContext))
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(iotest.OneByteReader(strings.NewReader(stream))),
+		Request:    request,
+	}
+	ginContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	assert.False(t, processNewAPIPolicyResponse(ginContext, response))
+	streamBody, ok := response.Body.(*newAPIPolicyStreamBody)
+	require.True(t, ok)
+	forwarded, err := io.ReadAll(streamBody)
+	require.NoError(t, err)
+	assert.Equal(t, stream, string(forwarded))
+	_, verified := streamBody.seen[header.Get("X-Codex2API-Policy-Decision-ID")]
+	assert.True(t, verified)
 }
 
 func TestLoadNewAPIPolicyEnforcementDefaultsAreSafe(t *testing.T) {
