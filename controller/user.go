@@ -377,6 +377,7 @@ type adminUserResponse struct {
 	EffectiveConcurrencyLimit *int   `json:"effective_concurrency_limit,omitempty"`
 	ConcurrencySource         string `json:"concurrency_source,omitempty"`
 	CurrentConcurrency        *int   `json:"current_concurrency,omitempty"`
+	OccupiedConcurrency       *int   `json:"occupied_concurrency,omitempty"`
 	CurrentRPM                *int   `json:"current_rpm,omitempty"`
 }
 
@@ -404,6 +405,11 @@ func GetUser(c *gin.Context) {
 			common.ApiError(c, concurrencyErr)
 			return
 		}
+		occupiedConcurrency, concurrencyErr := middleware.GetUserOccupiedConcurrency(c.Request.Context(), user.Id)
+		if concurrencyErr != nil {
+			common.ApiError(c, concurrencyErr)
+			return
+		}
 		rawConcurrencyLimit := -1
 		if user.ConcurrencyLimit != nil {
 			rawConcurrencyLimit = *user.ConcurrencyLimit
@@ -417,6 +423,7 @@ func GetUser(c *gin.Context) {
 		response.EffectiveConcurrencyLimit = &effectiveConcurrencyLimit
 		response.ConcurrencySource = concurrencySource
 		response.CurrentConcurrency = &currentConcurrency
+		response.OccupiedConcurrency = &occupiedConcurrency
 		response.CurrentRPM = &currentRPM
 	}
 	c.JSON(http.StatusOK, gin.H{

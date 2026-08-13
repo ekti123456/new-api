@@ -108,6 +108,11 @@ export function CommonLogsStats() {
         value={stats?.current_concurrency || 0}
         accent='bg-amber-500/70'
       />
+      <StatBadge
+        label={t('Occupied Concurrency')}
+        value={stats?.occupied_concurrency || 0}
+        accent='bg-violet-500/70'
+      />
     </div>
   )
 }

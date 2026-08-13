@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -18,7 +19,22 @@ import (
 func resetLocalUserConcurrencyForTest() {
 	localUserConcurrency.mu.Lock()
 	localUserConcurrency.active = make(map[int]map[string]struct{})
+	localUserConcurrency.cooling = make(map[int]map[string]time.Time)
 	localUserConcurrency.mu.Unlock()
+}
+
+func TestLocalUserConcurrencyCooldown(t *testing.T) {
+	resetLocalUserConcurrencyForTest()
+	t.Cleanup(resetLocalUserConcurrencyForTest)
+
+	require.True(t, acquireLocalUserConcurrency(10, 1, "req-1"))
+	releaseLocalUserConcurrency(10, "req-1", 50*time.Millisecond)
+	require.Zero(t, getLocalUserConcurrency(10))
+	require.Equal(t, 1, getLocalUserOccupiedConcurrency(10))
+	require.False(t, acquireLocalUserConcurrency(10, 1, "req-2"))
+	require.Eventually(t, func() bool {
+		return acquireLocalUserConcurrency(10, 1, "req-2")
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestEffectiveUserConcurrencyLimit(t *testing.T) {
@@ -51,7 +67,7 @@ func TestLocalUserConcurrencyAcquireRelease(t *testing.T) {
 	require.True(t, acquireLocalUserConcurrency(9, 0, "req-unlimited"))
 	require.Equal(t, 3, getLocalTotalConcurrency())
 
-	releaseLocalUserConcurrency(7, "req-1")
+	releaseLocalUserConcurrency(7, "req-1", 0)
 	require.True(t, acquireLocalUserConcurrency(7, 2, "req-3"))
 	require.Equal(t, 2, getLocalUserConcurrency(7))
 	require.Equal(t, 3, getLocalTotalConcurrency())
@@ -87,8 +103,11 @@ func TestRedisUserConcurrencyAcquireRelease(t *testing.T) {
 	total, err := GetTotalCurrentConcurrency(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, total)
+	occupied, err := GetTotalOccupiedConcurrency(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, occupied)
 
-	releaseUserConcurrency(8, "req-1")
+	releaseUserConcurrency(8, "req-1", 0)
 	total, err = GetTotalCurrentConcurrency(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
@@ -98,6 +117,43 @@ func TestRedisUserConcurrencyAcquireRelease(t *testing.T) {
 	total, err = GetTotalCurrentConcurrency(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, total)
+}
+
+func TestRedisUserConcurrencyCooldown(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	previousRedis := common.RedisEnabled
+	previousClient := common.RDB
+	common.RedisEnabled = true
+	common.RDB = client
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedis
+		common.RDB = previousClient
+		_ = client.Close()
+	})
+
+	ctx := t.Context()
+	baseTime := time.Unix(1_800_000_000, 0)
+	redisServer.SetTime(baseTime)
+	acquired, err := acquireUserConcurrency(ctx, 11, 1, "req-1")
+	require.NoError(t, err)
+	require.True(t, acquired)
+	releaseUserConcurrency(11, "req-1", 3*time.Second)
+
+	active, err := GetUserCurrentConcurrency(ctx, 11)
+	require.NoError(t, err)
+	require.Zero(t, active)
+	occupied, err := GetUserOccupiedConcurrency(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, 1, occupied)
+	acquired, err = acquireUserConcurrency(ctx, 11, 1, "req-2")
+	require.NoError(t, err)
+	require.False(t, acquired)
+
+	redisServer.SetTime(baseTime.Add(4 * time.Second))
+	acquired, err = acquireUserConcurrency(ctx, 11, 1, "req-2")
+	require.NoError(t, err)
+	require.True(t, acquired)
 }
 
 func TestModelRequestConcurrencyTracksWhenLimitDisabled(t *testing.T) {

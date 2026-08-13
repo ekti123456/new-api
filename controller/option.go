@@ -317,6 +317,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "UserConcurrencyCooldownSeconds":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value < 0 || value > 60 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user concurrency cooldown must be between 0 and 60 seconds",
+			})
+			return
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {

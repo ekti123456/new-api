@@ -71,6 +71,7 @@ const createRateLimitSchema = (t: (key: string) => string) =>
     ModelRequestRateLimitEnabled: z.boolean(),
     ModelRequestConcurrencyLimitEnabled: z.boolean(),
     DefaultUserConcurrencyLimit: z.number().int().min(1).max(100000),
+    UserConcurrencyCooldownSeconds: z.number().int().min(0).max(60),
     ModelRequestRateLimitDurationMinutes: z.number().min(0),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
     ModelRequestRateLimitSuccessCount: z.number().min(1).max(100000000),
@@ -191,6 +192,39 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                 </FormControl>
                 <FormDescription>
                   {t('Used by users that inherit the system default')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='UserConcurrencyCooldownSeconds'
+            render={({ field }) => (
+              <FormItem className='max-w-sm'>
+                <FormLabel>{t('Concurrency slot cooldown')}</FormLabel>
+                <FormControl>
+                  <div className='flex items-center gap-2'>
+                    <Input
+                      type='number'
+                      min={0}
+                      max={60}
+                      step={1}
+                      {...field}
+                      onChange={(e) =>
+                        field.onChange(Number.parseInt(e.target.value) || 0)
+                      }
+                    />
+                    <span className='text-muted-foreground text-sm'>
+                      {t('seconds')}
+                    </span>
+                  </div>
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Keep the slot occupied after a request finishes without delaying its response. Set to 0 to release immediately.'
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

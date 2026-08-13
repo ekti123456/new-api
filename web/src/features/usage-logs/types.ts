@@ -251,6 +251,7 @@ export interface LogStatistics {
   rpm: number
   tpm: number
   current_concurrency: number
+  occupied_concurrency: number
 }
 
 // ============================================================================
@@ -414,6 +415,7 @@ export interface UserInfo {
   remark?: string
   current_rpm: number
   current_concurrency: number
+  occupied_concurrency: number
   effective_concurrency_limit: number
   concurrency_source: 'default' | 'user' | 'unlimited'
 }

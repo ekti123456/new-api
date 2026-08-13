@@ -24,6 +24,10 @@ var ModelRequestConcurrencyLimitEnabled = true
 // DefaultUserConcurrencyLimit is used when a user has no explicit override.
 var DefaultUserConcurrencyLimit = 5
 
+// UserConcurrencyCooldownSeconds keeps a completed request's slot occupied for
+// a short cooldown period. The response is not delayed.
+var UserConcurrencyCooldownSeconds = 3
+
 func ModelRequestRateLimitGroup2JSONString() string {
 	ModelRequestRateLimitMutex.RLock()
 	defer ModelRequestRateLimitMutex.RUnlock()

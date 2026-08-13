@@ -165,6 +165,11 @@ export function UserInfoDialog({
           </div>
 
           <InfoItem
+            label={t('Occupied Concurrency')}
+            value={userInfo.occupied_concurrency}
+          />
+
+          <InfoItem
             label={t('Concurrency Configuration')}
             value={concurrencyConfiguration}
           />

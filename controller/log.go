@@ -115,15 +115,21 @@ func GetLogsStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	occupiedConcurrency, err := middleware.GetTotalOccupiedConcurrency(c.Request.Context())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota":               stat.Quota,
-			"rpm":                 stat.Rpm,
-			"tpm":                 stat.Tpm,
-			"current_concurrency": currentConcurrency,
+			"quota":                stat.Quota,
+			"rpm":                  stat.Rpm,
+			"tpm":                  stat.Tpm,
+			"current_concurrency":  currentConcurrency,
+			"occupied_concurrency": occupiedConcurrency,
 		},
 	})
 	return
@@ -148,15 +154,21 @@ func GetLogsSelfStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	occupiedConcurrency, err := middleware.GetUserOccupiedConcurrency(c.Request.Context(), c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota":               quotaNum.Quota,
-			"rpm":                 quotaNum.Rpm,
-			"tpm":                 quotaNum.Tpm,
-			"current_concurrency": currentConcurrency,
+			"quota":                quotaNum.Quota,
+			"rpm":                  quotaNum.Rpm,
+			"tpm":                  quotaNum.Tpm,
+			"current_concurrency":  currentConcurrency,
+			"occupied_concurrency": occupiedConcurrency,
 			//"token": tokenNum,
 		},
 	})
