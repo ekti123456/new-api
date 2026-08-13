@@ -411,4 +411,8 @@ export interface UserInfo {
   aff_count?: number
   aff_quota?: number
   remark?: string
+  current_rpm: number
+  current_concurrency: number
+  effective_concurrency_limit: number
+  concurrency_source: 'default' | 'user' | 'unlimited'
 }

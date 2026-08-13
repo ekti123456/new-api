@@ -16,6 +16,14 @@ var ModelRequestRateLimitSuccessCount = 1000
 var ModelRequestRateLimitGroup = map[string][2]int{}
 var ModelRequestRateLimitMutex sync.RWMutex
 
+// ModelRequestConcurrencyLimitEnabled controls per-user active request limits.
+// The default is enabled so new installations protect long-lived streaming
+// requests even when the time-window request limiter is disabled.
+var ModelRequestConcurrencyLimitEnabled = true
+
+// DefaultUserConcurrencyLimit is used when a user has no explicit override.
+var DefaultUserConcurrencyLimit = 5
+
 func ModelRequestRateLimitGroup2JSONString() string {
 	ModelRequestRateLimitMutex.RLock()
 	defer ModelRequestRateLimitMutex.RUnlock()

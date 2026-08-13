@@ -96,6 +96,7 @@ type User struct {
 	UsedQuota        int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	ConcurrencyLimit *int                       `json:"concurrency_limit" gorm:"column:concurrency_limit;default:null"`
 	AffCode          string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
@@ -114,14 +115,20 @@ type User struct {
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:          user.Id,
-		Group:       user.Group,
-		Quota:       user.Quota,
-		Status:      user.Status,
-		Role:        user.Role,
-		Username:    user.Username,
-		Setting:     user.Setting,
-		Email:       user.Email,
+		Id:       user.Id,
+		Group:    user.Group,
+		Quota:    user.Quota,
+		Status:   user.Status,
+		Role:     user.Role,
+		Username: user.Username,
+		Setting:  user.Setting,
+		Email:    user.Email,
+		ConcurrencyLimit: func() int {
+			if user.ConcurrencyLimit == nil {
+				return -1
+			}
+			return *user.ConcurrencyLimit
+		}(),
 		AuthVersion: user.AuthVersion,
 		CacheSchema: userCacheSchemaVersion,
 	}
@@ -785,10 +792,11 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 
 	newUser := *user
 	updates := map[string]interface{}{
-		"username":     newUser.Username,
-		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
-		"remark":       newUser.Remark,
+		"username":          newUser.Username,
+		"display_name":      newUser.DisplayName,
+		"group":             newUser.Group,
+		"remark":            newUser.Remark,
+		"concurrency_limit": newUser.ConcurrencyLimit,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password

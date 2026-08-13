@@ -40,6 +40,7 @@ export const userFormSchema = z.object({
   role: z.number().optional(),
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
+  concurrency_limit: z.number().int().min(-1).max(100000).optional(),
   remark: z.string().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
@@ -59,6 +60,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   role: 1, // Default to common user
   quota_dollars: 0,
   group: DEFAULT_GROUP,
+  concurrency_limit: -1,
   remark: '',
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
@@ -100,6 +102,7 @@ export function transformFormDataToPayload(
   } else {
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
+    payload.concurrency_limit = data.concurrency_limit
     payload.remark = data.remark || undefined
     payload.id = userId
   }
@@ -120,6 +123,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     role: user.role,
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
+    concurrency_limit: user.concurrency_limit ?? -1,
     remark: user.remark || '',
     admin_permissions: user.admin_permissions ?? {},
   }

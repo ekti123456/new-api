@@ -62,6 +62,27 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	assert.Equal(t, 4, got.RequestCount)
 }
 
+func TestUserEditPersistsConcurrencyLimit(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	limit := 9
+	user := User{
+		Id:       9,
+		Username: "concurrency-user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	user.ConcurrencyLimit = &limit
+	require.NoError(t, user.EditWithTx(DB, false))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	require.NotNil(t, got.ConcurrencyLimit)
+	assert.Equal(t, 9, *got.ConcurrencyLimit)
+}
+
 func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	setupUserUpdateTestState(t)
 

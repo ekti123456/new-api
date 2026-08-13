@@ -87,7 +87,7 @@ export const getUserLogStats = (
 export async function getUserInfo(
   userId: number
 ): Promise<{ success: boolean; message?: string; data?: UserInfo }> {
-  const res = await api.get(`/api/user/${userId}`)
+  const res = await api.get(`/api/user/${userId}?include_runtime=true`)
   return res.data
 }
 

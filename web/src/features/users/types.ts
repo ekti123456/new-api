@@ -46,6 +46,7 @@ export const userSchema = z.object({
   used_quota: z.number(),
   request_count: z.number(),
   group: z.string(),
+  concurrency_limit: z.number().nullable().optional(),
   aff_code: z.string().optional(),
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
@@ -124,6 +125,7 @@ export interface UserFormData {
   role?: number // Only used when creating user
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
+  concurrency_limit?: number // -1 inherits, 0 is unlimited
   remark?: string // Only used when updating user
   admin_permissions?: AdminPermissionMatrix
 }

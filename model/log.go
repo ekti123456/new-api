@@ -615,6 +615,14 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
+// GetUserRPM returns completed consume requests for a user in the last 60 seconds.
+// It is intentionally used only by the on-demand admin user information card.
+func GetUserRPM(userID int) (int, error) {
+	var rpm int64
+	err := LOG_DB.Table("logs").Where("user_id = ? AND type = ? AND created_at >= ?", userID, LogTypeConsume, time.Now().Add(-60*time.Second).Unix()).Count(&rpm).Error
+	return int(rpm), err
+}
+
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
 

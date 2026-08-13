@@ -391,6 +391,34 @@ export function UsersMutateDrawer({
 
                   <FormField
                     control={form.control}
+                    name='concurrency_limit'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('User concurrency limit')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={-1}
+                            max={100000}
+                            step={1}
+                            value={field.value ?? -1}
+                            onChange={(e) =>
+                              field.onChange(Number.parseInt(e.target.value) || 0)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            '-1 = inherit system default, 0 = unlimited, positive value = user-specific limit'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
                     name='quota_dollars'
                     render={({ field }) => (
                       <FormItem>

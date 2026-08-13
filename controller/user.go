@@ -372,6 +372,14 @@ func canManageTargetRole(myRole int, targetRole int) bool {
 	return myRole == common.RoleRootUser || myRole > targetRole
 }
 
+type adminUserResponse struct {
+	*model.User
+	EffectiveConcurrencyLimit *int   `json:"effective_concurrency_limit,omitempty"`
+	ConcurrencySource         string `json:"concurrency_source,omitempty"`
+	CurrentConcurrency        *int   `json:"current_concurrency,omitempty"`
+	CurrentRPM                *int   `json:"current_rpm,omitempty"`
+}
+
 func GetUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -389,10 +397,32 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	response := adminUserResponse{User: user}
+	if c.Query("include_runtime") == "true" {
+		currentConcurrency, concurrencyErr := middleware.GetUserCurrentConcurrency(c.Request.Context(), user.Id)
+		if concurrencyErr != nil {
+			common.ApiError(c, concurrencyErr)
+			return
+		}
+		rawConcurrencyLimit := -1
+		if user.ConcurrencyLimit != nil {
+			rawConcurrencyLimit = *user.ConcurrencyLimit
+		}
+		effectiveConcurrencyLimit, concurrencySource := middleware.EffectiveUserConcurrencyLimit(rawConcurrencyLimit)
+		currentRPM, rpmErr := model.GetUserRPM(user.Id)
+		if rpmErr != nil {
+			common.ApiError(c, rpmErr)
+			return
+		}
+		response.EffectiveConcurrencyLimit = &effectiveConcurrencyLimit
+		response.ConcurrencySource = concurrencySource
+		response.CurrentConcurrency = &currentConcurrency
+		response.CurrentRPM = &currentRPM
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    user,
+		"data":    response,
 	})
 	return
 }
@@ -684,6 +714,10 @@ func UpdateUser(c *gin.Context) {
 	if updatedUser.Password == "" {
 		updatedUser.Password = "$I_LOVE_U" // make Validator happy :)
 	}
+	if updatedUser.ConcurrencyLimit != nil && (*updatedUser.ConcurrencyLimit < -1 || *updatedUser.ConcurrencyLimit > 100000) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
 	if err := common.Validate.Struct(&updatedUser); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
 		return
@@ -692,6 +726,13 @@ func UpdateUser(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if updatedUser.ConcurrencyLimit == nil {
+		// Older clients do not send this field; preserve the existing override.
+		updatedUser.ConcurrencyLimit = originUser.ConcurrencyLimit
+	} else if *updatedUser.ConcurrencyLimit == -1 {
+		// -1 is the API sentinel for inheriting the system default; persist it as NULL.
+		updatedUser.ConcurrencyLimit = nil
 	}
 	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)

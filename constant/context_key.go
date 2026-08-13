@@ -52,6 +52,9 @@ const (
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
+	// ContextKeyUserConcurrencyLimit stores the raw per-user override:
+	// -1 inherits the system default, 0 is unlimited, and positive values are explicit limits.
+	ContextKeyUserConcurrencyLimit ContextKey = "user_concurrency_limit"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

@@ -83,6 +83,26 @@ export function UserInfoDialog({
     </div>
   )
 
+  let concurrencyValue = ''
+  if (userInfo?.concurrency_source === 'unlimited') {
+    concurrencyValue = `${userInfo.current_concurrency} / ${t('Unlimited')}`
+  } else if (userInfo) {
+    concurrencyValue = `${userInfo.current_concurrency} / ${userInfo.effective_concurrency_limit}`
+  }
+
+  let concurrencyConfiguration = ''
+  if (userInfo?.concurrency_source === 'default') {
+    concurrencyConfiguration = t('Inherits system default ({{limit}})', {
+      limit: userInfo.effective_concurrency_limit,
+    })
+  } else if (userInfo?.concurrency_source === 'unlimited') {
+    concurrencyConfiguration = t('Unlimited')
+  } else if (userInfo) {
+    concurrencyConfiguration = t('User-specific limit ({{limit}})', {
+      limit: userInfo.effective_concurrency_limit,
+    })
+  }
+
   return (
     <Dialog
       open={open}
@@ -134,6 +154,20 @@ export function UserInfoDialog({
               <InfoItem label={t('User Group')} value={userInfo.group} />
             )}
           </div>
+
+          {/* On-demand request activity */}
+          <div className='grid grid-cols-2 gap-4'>
+            <InfoItem label={t('Current RPM')} value={userInfo.current_rpm} />
+            <InfoItem
+              label={t('Current Concurrency')}
+              value={concurrencyValue}
+            />
+          </div>
+
+          <InfoItem
+            label={t('Concurrency Configuration')}
+            value={concurrencyConfiguration}
+          />
 
           {/* Invitation Info */}
           {(userInfo.aff_code ||

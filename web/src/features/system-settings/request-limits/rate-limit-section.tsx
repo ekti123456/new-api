@@ -69,6 +69,8 @@ const isValidJSON = (value: string | undefined) => {
 const createRateLimitSchema = (t: (key: string) => string) =>
   z.object({
     ModelRequestRateLimitEnabled: z.boolean(),
+    ModelRequestConcurrencyLimitEnabled: z.boolean(),
+    DefaultUserConcurrencyLimit: z.number().int().min(1).max(100000),
     ModelRequestRateLimitDurationMinutes: z.number().min(0),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
     ModelRequestRateLimitSuccessCount: z.number().min(1).max(100000000),
@@ -143,6 +145,55 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                   />
                 </FormControl>
               </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='ModelRequestConcurrencyLimitEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Enable user concurrency limiting')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Limit active model requests per user. Streaming and WebSocket requests keep a slot until the connection ends.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='DefaultUserConcurrencyLimit'
+            render={({ field }) => (
+              <FormItem className='max-w-sm'>
+                <FormLabel>{t('Default user concurrency')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={100000}
+                    step={1}
+                    {...field}
+                    onChange={(e) =>
+                      field.onChange(Number.parseInt(e.target.value) || 1)
+                    }
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t('Used by users that inherit the system default')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
             )}
           />
 

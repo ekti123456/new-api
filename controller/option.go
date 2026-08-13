@@ -308,6 +308,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "DefaultUserConcurrencyLimit":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value < 1 || value > 100000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "default user concurrency limit must be between 1 and 100000",
+			})
+			return
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {
