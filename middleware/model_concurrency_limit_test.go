@@ -47,10 +47,14 @@ func TestLocalUserConcurrencyAcquireRelease(t *testing.T) {
 	require.True(t, acquireLocalUserConcurrency(7, 2, "req-2"))
 	require.False(t, acquireLocalUserConcurrency(7, 2, "req-3"))
 	require.Equal(t, 2, getLocalUserConcurrency(7))
+	require.Equal(t, 2, getLocalTotalConcurrency())
+	require.True(t, acquireLocalUserConcurrency(9, 0, "req-unlimited"))
+	require.Equal(t, 3, getLocalTotalConcurrency())
 
 	releaseLocalUserConcurrency(7, "req-1")
 	require.True(t, acquireLocalUserConcurrency(7, 2, "req-3"))
 	require.Equal(t, 2, getLocalUserConcurrency(7))
+	require.Equal(t, 3, getLocalTotalConcurrency())
 }
 
 func TestRedisUserConcurrencyAcquireRelease(t *testing.T) {
@@ -80,11 +84,62 @@ func TestRedisUserConcurrencyAcquireRelease(t *testing.T) {
 	current, err := GetUserCurrentConcurrency(ctx, 8)
 	require.NoError(t, err)
 	require.Equal(t, 2, current)
+	total, err := GetTotalCurrentConcurrency(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
 
 	releaseUserConcurrency(8, "req-1")
+	total, err = GetTotalCurrentConcurrency(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
 	acquired, err = acquireUserConcurrency(ctx, 8, 2, "req-3")
 	require.NoError(t, err)
 	require.True(t, acquired)
+	total, err = GetTotalCurrentConcurrency(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, total)
+}
+
+func TestModelRequestConcurrencyTracksWhenLimitDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousRedis := common.RedisEnabled
+	previousEnabled := setting.ModelRequestConcurrencyLimitEnabled
+	common.RedisEnabled = false
+	setting.ModelRequestConcurrencyLimitEnabled = false
+	resetLocalUserConcurrencyForTest()
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedis
+		setting.ModelRequestConcurrencyLimitEnabled = previousEnabled
+		resetLocalUserConcurrencyForTest()
+	})
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	router := gin.New()
+	router.Use(RequestId())
+	router.Use(func(c *gin.Context) {
+		c.Set("id", 43)
+		common.SetContextKey(c, constant.ContextKeyUserConcurrencyLimit, -1)
+		c.Next()
+	})
+	router.Use(ModelRequestConcurrencyLimit())
+	router.GET("/tracked", func(c *gin.Context) {
+		close(started)
+		<-release
+		c.Status(http.StatusOK)
+	})
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/tracked", nil))
+		done <- recorder
+	}()
+	<-started
+	require.Equal(t, 1, getLocalTotalConcurrency())
+	close(release)
+	require.Equal(t, http.StatusOK, (<-done).Code)
+	require.Zero(t, getLocalTotalConcurrency())
 }
 
 func TestModelRequestConcurrencyLimitBlocksUntilSlotReleased(t *testing.T) {
