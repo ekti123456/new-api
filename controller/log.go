@@ -149,26 +149,14 @@ func GetLogsSelfStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	currentConcurrency, err := middleware.GetUserCurrentConcurrency(c.Request.Context(), c.GetInt("id"))
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	occupiedConcurrency, err := middleware.GetUserOccupiedConcurrency(c.Request.Context(), c.GetInt("id"))
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"quota":                quotaNum.Quota,
-			"rpm":                  quotaNum.Rpm,
-			"tpm":                  quotaNum.Tpm,
-			"current_concurrency":  currentConcurrency,
-			"occupied_concurrency": occupiedConcurrency,
+			"quota": quotaNum.Quota,
+			"rpm":   quotaNum.Rpm,
+			"tpm":   quotaNum.Tpm,
 			//"token": tokenNum,
 		},
 	})

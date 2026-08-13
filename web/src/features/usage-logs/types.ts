@@ -250,8 +250,8 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
-  current_concurrency: number
-  occupied_concurrency: number
+  current_concurrency?: number
+  occupied_concurrency?: number
 }
 
 // ============================================================================

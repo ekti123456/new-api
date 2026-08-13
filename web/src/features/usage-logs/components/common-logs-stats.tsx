@@ -81,7 +81,12 @@ export function CommonLogsStats() {
         <Skeleton className='h-7 w-[150px] rounded-md' />
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
-        <Skeleton className='h-7 w-[120px] rounded-md' />
+        {isAdmin && (
+          <>
+            <Skeleton className='h-7 w-[120px] rounded-md' />
+            <Skeleton className='h-7 w-[120px] rounded-md' />
+          </>
+        )}
       </div>
     )
   }
@@ -103,16 +108,20 @@ export function CommonLogsStats() {
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
       />
-      <StatBadge
-        label={t('Current Concurrency')}
-        value={stats?.current_concurrency || 0}
-        accent='bg-amber-500/70'
-      />
-      <StatBadge
-        label={t('Occupied Concurrency')}
-        value={stats?.occupied_concurrency || 0}
-        accent='bg-violet-500/70'
-      />
+      {isAdmin && (
+        <>
+          <StatBadge
+            label={t('Current Concurrency')}
+            value={stats?.current_concurrency || 0}
+            accent='bg-amber-500/70'
+          />
+          <StatBadge
+            label={t('Occupied Concurrency')}
+            value={stats?.occupied_concurrency || 0}
+            accent='bg-violet-500/70'
+          />
+        </>
+      )}
     </div>
   )
 }
