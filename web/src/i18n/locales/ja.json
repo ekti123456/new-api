@@ -2145,7 +2145,7 @@
     "Grok": "Grok",
     "Grok Settings": "Grok 設定",
     "Group": "グループ",
-    "Grouped by client family; clients below 5% are combined as Other.": "クライアントファミリー別に集計し、5%未満のクライアントは「その他」にまとめます。",
+    "Shows the top 9 client families; all remaining clients are combined as Other.": "上位9件のクライアントファミリーを表示し、それ以外は「その他」にまとめます。",
     "Request clients (User-Agent)": "リクエストクライアント（User-Agent）",
     "Group & Quota": "グループとクォータ",
     "Group added. Click \"Save Settings\" to apply.": "グループが追加されました。「Save Settings」をクリックして適用してください。",

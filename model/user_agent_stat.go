@@ -15,7 +15,7 @@ const (
 	unknownUserAgentFamily  = "Unknown"
 	otherUserAgentFamily    = "Other"
 	maxUserAgentFamilyBytes = 64
-	userAgentOtherThreshold = 0.05
+	maxUserAgentFamilies    = 9
 )
 
 type UserAgentStat struct {
@@ -160,9 +160,9 @@ func GetUserAgentStats(startTime int64, endTime int64, username string) (*UserAg
 	})
 	items := make([]UserAgentStatItem, 0, len(rows))
 	var otherCount int64
-	for _, row := range rows {
+	for index, row := range rows {
 		percentage := float64(row.Count) / float64(total) * 100
-		if percentage < userAgentOtherThreshold*100 {
+		if index >= maxUserAgentFamilies {
 			otherCount += row.Count
 			continue
 		}

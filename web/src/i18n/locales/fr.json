@@ -2145,7 +2145,7 @@
     "Grok": "Grok",
     "Grok Settings": "Paramètres Grok",
     "Group": "Groupe",
-    "Grouped by client family; clients below 5% are combined as Other.": "Regroupés par famille de clients ; les clients sous 5 % sont combinés dans Autres.",
+    "Shows the top 9 client families; all remaining clients are combined as Other.": "Affiche les 9 principales familles de clients ; toutes les autres sont regroupées dans Autres.",
     "Request clients (User-Agent)": "Clients de requête (User-Agent)",
     "Group & Quota": "Groupe et Quota",
     "Group added. Click \"Save Settings\" to apply.": "Groupe ajouté. Cliquez sur \"Enregistrer les paramètres\" pour appliquer.",

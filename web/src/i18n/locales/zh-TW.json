@@ -2145,7 +2145,7 @@
     "Grok": "Grok",
     "Grok Settings": "Grok 設定",
     "Group": "分組",
-    "Grouped by client family; clients below 5% are combined as Other.": "依用戶端類型歸類；占比低於 5% 的用戶端合併為「其他」。",
+    "Shows the top 9 client families; all remaining clients are combined as Other.": "依請求數顯示前 9 個用戶端類型，其餘全部合併為「其他」。",
     "Request clients (User-Agent)": "請求用戶端（User-Agent）",
     "Group & Quota": "分組與配額",
     "Group added. Click \"Save Settings\" to apply.": "組已新增。點擊「儲存設定」以套用。",

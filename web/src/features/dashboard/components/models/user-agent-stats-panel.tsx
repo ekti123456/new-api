@@ -70,7 +70,7 @@ export function UserAgentStatsPanel(props: UserAgentStatsPanelProps) {
             </div>
             <div className='text-muted-foreground text-xs'>
               {t(
-                'Grouped by client family; clients below 5% are combined as Other.'
+                'Shows the top 9 client families; all remaining clients are combined as Other.'
               )}
             </div>
           </div>

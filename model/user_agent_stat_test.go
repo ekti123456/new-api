@@ -34,7 +34,7 @@ func TestNormalizeUserAgentFamily(t *testing.T) {
 	}
 }
 
-func TestUserAgentStatsAggregateVersionsAndSmallFamilies(t *testing.T) {
+func TestUserAgentStatsAggregateVersionsWithoutPercentageCutoff(t *testing.T) {
 	truncateTables(t)
 	userAgentStatCacheLock.Lock()
 	userAgentStatCache = make(map[string]*UserAgentStat)
@@ -60,7 +60,8 @@ func TestUserAgentStatsAggregateVersionsAndSmallFamilies(t *testing.T) {
 	require.Equal(t, []UserAgentStatItem{
 		{ClientFamily: "Codex Desktop", Count: 80, Percentage: 80},
 		{ClientFamily: "codex-tui", Count: 15, Percentage: 15},
-		{ClientFamily: "Other", Count: 5, Percentage: 5, IsOther: true},
+		{ClientFamily: "curl", Count: 3, Percentage: 3},
+		{ClientFamily: "Unknown", Count: 2, Percentage: 2},
 	}, stats.Items)
 
 	aliceStats, err := GetUserAgentStats(3600, 7200, "alice")
@@ -68,4 +69,34 @@ func TestUserAgentStatsAggregateVersionsAndSmallFamilies(t *testing.T) {
 	require.Equal(t, int64(85), aliceStats.Total)
 	require.Equal(t, "Codex Desktop", aliceStats.Items[0].ClientFamily)
 	require.Equal(t, int64(80), aliceStats.Items[0].Count)
+}
+
+func TestUserAgentStatsKeepTopNineAndCombineRemainder(t *testing.T) {
+	truncateTables(t)
+	rows := make([]UserAgentStat, 0, 11)
+	for i := 1; i <= 11; i++ {
+		rows = append(rows, UserAgentStat{
+			UserID:       i,
+			Username:     "user",
+			CreatedAt:    3600,
+			ClientFamily: "client-" + string(rune('a'+i-1)),
+			Count:        int64(12 - i),
+		})
+	}
+	require.NoError(t, DB.Create(&rows).Error)
+
+	stats, err := GetUserAgentStats(3600, 7200, "")
+
+	require.NoError(t, err)
+	require.Len(t, stats.Items, 10)
+	for index := 0; index < maxUserAgentFamilies; index++ {
+		require.Equal(t, rows[index].ClientFamily, stats.Items[index].ClientFamily)
+		require.False(t, stats.Items[index].IsOther)
+	}
+	require.Equal(t, UserAgentStatItem{
+		ClientFamily: "Other",
+		Count:        3,
+		Percentage:   float64(3) / float64(66) * 100,
+		IsOther:      true,
+	}, stats.Items[9])
 }
