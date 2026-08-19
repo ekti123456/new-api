@@ -19,8 +19,67 @@ import (
 const (
 	ModelRequestRateLimitCountMark        = "MRRL"
 	ModelRequestRateLimitSuccessCountMark = "MRRLS"
+	modelRPMRateLimitMark                 = "MODEL_RPM"
 	modelRateLimitTimeFormat              = "2006-01-02T15:04:05.000Z"
 )
+
+func modelRPMRateLimitKey(userID int, modelName string) string {
+	return fmt.Sprintf("%s:user:%s:%d:%x", redisRateLimitNamespace, modelRPMRateLimitMark, userID, common.Sha256Raw([]byte(modelName)))
+}
+
+func enforceModelRPMRateLimit(c *gin.Context, modelName string) bool {
+	if !setting.ModelRPMRateLimitEnabled || modelName == "" {
+		return true
+	}
+	rpm, found := setting.GetModelRPMLimit(modelName)
+	if !found {
+		return true
+	}
+
+	key := modelRPMRateLimitKey(c.GetInt("id"), modelName)
+	allowed := false
+	retryAfterSeconds := int64(60)
+	if common.RedisEnabled {
+		var err error
+		allowed, _, retryAfterSeconds, err = redisFixedWindowTake(c.Request.Context(), key, rpm, 60)
+		if err != nil {
+			abortWithOpenAiMessage(c, http.StatusInternalServerError, "model_rate_limit_check_failed")
+			return false
+		}
+	} else {
+		inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+		allowed = inMemoryRateLimiter.Request(key, rpm, 60)
+	}
+	if allowed {
+		return true
+	}
+	if retryAfterSeconds > 0 {
+		c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
+	}
+	abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("模型 %s 已达到速率限制：每分钟最多请求 %d 次", modelName, rpm))
+	return false
+}
+
+// SpecifiedModelRPMRateLimit parses the original requested model before the
+// general request and concurrency limiters run. This keeps rejected requests
+// from consuming a concurrency slot or its cooldown period.
+func SpecifiedModelRPMRateLimit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !setting.ModelRPMRateLimitEnabled {
+			c.Next()
+			return
+		}
+		modelRequest, _, err := getModelRequest(c)
+		if err != nil || modelRequest == nil || modelRequest.Model == "" {
+			c.Next()
+			return
+		}
+		if !enforceModelRPMRateLimit(c, modelRequest.Model) {
+			return
+		}
+		c.Next()
+	}
+}
 
 // 检查Redis中的请求限制
 func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (bool, error) {

@@ -45,6 +45,7 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { ModelRPMLimitEditor } from './model-rpm-limit-editor'
 import { RateLimitVisualEditor } from './rate-limit-visual-editor'
 
 const isValidJSON = (value: string | undefined) => {
@@ -69,6 +70,7 @@ const isValidJSON = (value: string | undefined) => {
 const createRateLimitSchema = (t: (key: string) => string) =>
   z.object({
     ModelRequestRateLimitEnabled: z.boolean(),
+    ModelRPMRateLimitEnabled: z.boolean(),
     ModelRequestConcurrencyLimitEnabled: z.boolean(),
     DefaultUserConcurrencyLimit: z.number().int().min(1).max(100000),
     UserConcurrencyCooldownSeconds: z.number().int().min(0).max(60),
@@ -81,6 +83,29 @@ const createRateLimitSchema = (t: (key: string) => string) =>
       .refine(isValidJSON, {
         message: t('Invalid JSON format or values out of allowed range'),
       }),
+    ModelRPMRateLimitModels: z
+      .string()
+      .optional()
+      .refine((value) => {
+        if (!value || value.trim() === '') return true
+        try {
+          const parsed = JSON.parse(value) as unknown
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return false
+          }
+          return Object.entries(parsed).every(([modelName, rpm]) => {
+            return (
+              modelName.trim() !== '' &&
+              typeof rpm === 'number' &&
+              Number.isInteger(rpm) &&
+              rpm >= 1 &&
+              rpm <= 2147483647
+            )
+          })
+        } catch {
+          return false
+        }
+      }, t('Each model must have an integer RPM limit of at least 1')),
   })
 
 type RateLimitFormValues = z.infer<ReturnType<typeof createRateLimitSchema>>
@@ -146,6 +171,53 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                   />
                 </FormControl>
               </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='ModelRPMRateLimitEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Enable specified-model RPM limits')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Only configured models are limited. Limits are counted independently per user and model.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='ModelRPMRateLimitModels'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Specified-model RPM limits')}</FormLabel>
+                <FormDescription>
+                  {t(
+                    'The RPM window is 60 seconds. Requests rejected by this rule do not affect other models.'
+                  )}
+                </FormDescription>
+                <FormControl>
+                  <ModelRPMLimitEditor
+                    value={field.value || ''}
+                    onChange={field.onChange}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
             )}
           />
 

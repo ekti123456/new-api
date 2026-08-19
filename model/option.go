@@ -143,6 +143,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
 	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
+	common.OptionMap["ModelRPMRateLimitModels"] = setting.ModelRPMRateLimitModels2JSONString()
 	common.OptionMap["DefaultUserConcurrencyLimit"] = strconv.Itoa(setting.DefaultUserConcurrencyLimit)
 	common.OptionMap["UserConcurrencyCooldownSeconds"] = strconv.Itoa(setting.UserConcurrencyCooldownSeconds)
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
@@ -173,6 +174,7 @@ func InitOptionMap() {
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
+	common.OptionMap["ModelRPMRateLimitEnabled"] = strconv.FormatBool(setting.ModelRPMRateLimitEnabled)
 	common.OptionMap["ModelRequestConcurrencyLimitEnabled"] = strconv.FormatBool(setting.ModelRequestConcurrencyLimitEnabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
@@ -379,6 +381,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
+		case "ModelRPMRateLimitEnabled":
+			setting.ModelRPMRateLimitEnabled = boolValue
 		case "ModelRequestConcurrencyLimitEnabled":
 			setting.ModelRequestConcurrencyLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
@@ -559,6 +563,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitGroup":
 		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
+	case "ModelRPMRateLimitModels":
+		err = setting.UpdateModelRPMRateLimitModelsByJSONString(value)
 	case "DefaultUserConcurrencyLimit":
 		setting.DefaultUserConcurrencyLimit, _ = strconv.Atoi(value)
 	case "UserConcurrencyCooldownSeconds":

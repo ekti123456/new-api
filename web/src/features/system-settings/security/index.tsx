@@ -26,6 +26,8 @@ import {
 
 const defaultSecuritySettings: SecuritySettings = {
   ModelRequestRateLimitEnabled: false,
+  ModelRPMRateLimitEnabled: false,
+  ModelRPMRateLimitModels: '{}',
   ModelRequestConcurrencyLimitEnabled: true,
   DefaultUserConcurrencyLimit: 5,
   UserConcurrencyCooldownSeconds: 3,

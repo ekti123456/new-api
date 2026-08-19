@@ -31,6 +31,8 @@ const SECURITY_SECTIONS = [
       <RateLimitSection
         defaultValues={{
           ModelRequestRateLimitEnabled: settings.ModelRequestRateLimitEnabled,
+          ModelRPMRateLimitEnabled: settings.ModelRPMRateLimitEnabled,
+          ModelRPMRateLimitModels: settings.ModelRPMRateLimitModels,
           ModelRequestConcurrencyLimitEnabled:
             settings.ModelRequestConcurrencyLimitEnabled,
           DefaultUserConcurrencyLimit: settings.DefaultUserConcurrencyLimit,

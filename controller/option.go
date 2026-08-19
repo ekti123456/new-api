@@ -308,6 +308,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ModelRPMRateLimitModels":
+		err = setting.CheckModelRPMRateLimitModels(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "DefaultUserConcurrencyLimit":
 		value, parseErr := strconv.Atoi(option.Value.(string))
 		if parseErr != nil || value < 1 || value > 100000 {
