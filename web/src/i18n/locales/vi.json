@@ -2145,6 +2145,8 @@
     "Grok": "Grok",
     "Grok Settings": "Cài đặt Grok",
     "Group": "Nhóm",
+    "Grouped by client family; clients below 5% are combined as Other.": "Được nhóm theo họ ứng dụng; các ứng dụng dưới 5% được gộp vào Khác.",
+    "Request clients (User-Agent)": "Ứng dụng gửi yêu cầu (User-Agent)",
     "Group & Quota": "Nhóm & Hạn mức",
     "Group added. Click \"Save Settings\" to apply.": "Nhóm đã được thêm. Nhấp vào \"Lưu Cài đặt\" để áp dụng.",
     "Group channels by tag for batch operations": "Nhóm kênh theo thẻ để thực hiện các thao tác hàng loạt",

@@ -43,6 +43,7 @@ func UpdateQuotaData() {
 		if common.DataExportEnabled {
 			common.SysLog("正在更新数据看板数据...")
 			SaveQuotaDataCache()
+			SaveUserAgentStatCache()
 		}
 		time.Sleep(time.Duration(common.DataExportInterval) * time.Minute)
 	}

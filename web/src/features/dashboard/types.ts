@@ -48,6 +48,18 @@ export interface FlowQuotaDataItem {
   quota?: number
 }
 
+export interface UserAgentStatItem {
+  client_family: string
+  count: number
+  percentage: number
+  is_other?: boolean
+}
+
+export interface UserAgentStatsData {
+  total: number
+  items: UserAgentStatItem[]
+}
+
 export type FlowMetric = 'quota' | 'tokens' | 'requests'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'

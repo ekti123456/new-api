@@ -2145,6 +2145,8 @@
     "Grok": "Grok",
     "Grok Settings": "Grok Settings",
     "Group": "Group",
+    "Grouped by client family; clients below 5% are combined as Other.": "Grouped by client family; clients below 5% are combined as Other.",
+    "Request clients (User-Agent)": "Request clients (User-Agent)",
     "Group & Quota": "Group & Quota",
     "Group added. Click \"Save Settings\" to apply.": "Group added. Click \"Save Settings\" to apply.",
     "Group channels by tag for batch operations": "Group channels by tag for batch operations",

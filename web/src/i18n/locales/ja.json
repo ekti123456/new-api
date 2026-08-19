@@ -2145,6 +2145,8 @@
     "Grok": "Grok",
     "Grok Settings": "Grok 設定",
     "Group": "グループ",
+    "Grouped by client family; clients below 5% are combined as Other.": "クライアントファミリー別に集計し、5%未満のクライアントは「その他」にまとめます。",
+    "Request clients (User-Agent)": "リクエストクライアント（User-Agent）",
     "Group & Quota": "グループとクォータ",
     "Group added. Click \"Save Settings\" to apply.": "グループが追加されました。「Save Settings」をクリックして適用してください。",
     "Group channels by tag for batch operations": "バッチ操作のためにタグでチャネルをグループ化",

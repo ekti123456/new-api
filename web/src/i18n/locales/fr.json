@@ -2145,6 +2145,8 @@
     "Grok": "Grok",
     "Grok Settings": "Paramètres Grok",
     "Group": "Groupe",
+    "Grouped by client family; clients below 5% are combined as Other.": "Regroupés par famille de clients ; les clients sous 5 % sont combinés dans Autres.",
+    "Request clients (User-Agent)": "Clients de requête (User-Agent)",
     "Group & Quota": "Groupe et Quota",
     "Group added. Click \"Save Settings\" to apply.": "Groupe ajouté. Cliquez sur \"Enregistrer les paramètres\" pour appliquer.",
     "Group channels by tag for batch operations": "Regrouper les canaux par étiquette pour les opérations par lots",

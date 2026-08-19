@@ -2145,6 +2145,8 @@
     "Grok": "Grok",
     "Grok Settings": "Grok 設定",
     "Group": "分組",
+    "Grouped by client family; clients below 5% are combined as Other.": "依用戶端類型歸類；占比低於 5% 的用戶端合併為「其他」。",
+    "Request clients (User-Agent)": "請求用戶端（User-Agent）",
     "Group & Quota": "分組與配額",
     "Group added. Click \"Save Settings\" to apply.": "組已新增。點擊「儲存設定」以套用。",
     "Group channels by tag for batch operations": "按標籤對渠道進行分組以進行大量操作",
