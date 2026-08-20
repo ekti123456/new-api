@@ -44,6 +44,8 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 
 import { SettingsSwitchField } from '../../components/settings-form-layout'
+import { getChannels } from '@/features/channels/api'
+import type { Channel } from '@/features/channels/types'
 import { RULE_TEMPLATES } from './constants'
 import type { AffinityRule, KeySource } from './types'
 
@@ -118,6 +120,10 @@ export function RuleEditorDialog(props: Props) {
   const [keySources, setKeySources] = useState<KeySourceRow[]>(() => [
     createKeySourceRow(),
   ])
+  const [channelIDs, setChannelIDs] = useState<number[]>([])
+  const [userAgentOther, setUserAgentOther] = useState(false)
+  const [channels, setChannels] = useState<Channel[]>([])
+  const [channelSearch, setChannelSearch] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const form = useForm<RuleFormValues>({
@@ -161,6 +167,16 @@ export function RuleEditorDialog(props: Props) {
         ? sources.map(createKeySourceRow)
         : [createKeySourceRow()]
     )
+    setChannelIDs(
+      Array.from(
+        new Set(
+          (r.channel_ids || []).filter(
+            (id): id is number => Number.isInteger(id) && id > 0
+          )
+        )
+      )
+    )
+    setUserAgentOther(!!r.user_agent_other)
     if (r.param_override_template) setAdvancedOpen(true)
   }
 
@@ -186,9 +202,35 @@ export function RuleEditorDialog(props: Props) {
         param_override_template_json: '',
       })
       setKeySources([createKeySourceRow()])
+      setChannelIDs([])
+      setUserAgentOther(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.rule, props.templateKey])
+
+  useEffect(() => {
+    if (!props.open) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const pageSize = 100
+        const first = await getChannels({ p: 1, page_size: pageSize })
+        const all = [...(first.data?.items || [])]
+        const total = first.data?.total || all.length
+        const pages = Math.ceil(total / pageSize)
+        for (let page = 2; page <= pages && !cancelled; page += 1) {
+          const next = await getChannels({ p: page, page_size: pageSize })
+          all.push(...(next.data?.items || []))
+        }
+        if (!cancelled) setChannels(all)
+      } catch {
+        if (!cancelled) setChannels([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [props.open])
 
   const handleSave = (values: RuleFormValues) => {
     const modelRegex = normalizeStringList(values.model_regex_text)
@@ -230,6 +272,8 @@ export function RuleEditorDialog(props: Props) {
       model_regex: modelRegex,
       path_regex: normalizeStringList(values.path_regex_text),
       user_agent_include: normalizeStringList(values.user_agent_include_text),
+      user_agent_other: userAgentOther,
+      channel_ids: channelIDs,
       key_sources: validKeySources,
       value_regex: values.value_regex.trim(),
       ttl_seconds: Number(values.ttl_seconds || 0),
@@ -417,6 +461,73 @@ export function RuleEditorDialog(props: Props) {
                 placeholder='curl&#10;PostmanRuntime'
                 {...form.register('user_agent_include_text')}
               />
+              <SettingsSwitchField
+                checked={userAgentOther}
+                onCheckedChange={setUserAgentOther}
+                label={t('Match other unlisted User-Agents')}
+                description={t('When enabled, this rule matches UAs not listed above; put it after specific UA rules.')}
+              />
+            </div>
+
+            <div className='grid gap-2'>
+              <Label>{t('Selected channels (multi-select)')}</Label>
+              <p className='text-muted-foreground text-xs'>
+                {t('Matching requests use only the selected channels. If all are unavailable, the request returns no available channel. Leave empty to use normal affinity dispatch.')}
+              </p>
+              <Input
+                value={channelSearch}
+                onChange={(e) => setChannelSearch(e.target.value)}
+                placeholder={t('Search channels by name or URL')}
+              />
+              <div className='max-h-48 space-y-1 overflow-y-auto rounded-md border p-2'>
+                {channels
+                  .filter((channel) => {
+                    const query = channelSearch.trim().toLowerCase()
+                    if (!query) return true
+                    return (
+                      channel.name.toLowerCase().includes(query) ||
+                      (channel.base_url || '').toLowerCase().includes(query) ||
+                      String(channel.id).includes(query)
+                    )
+                  })
+                  .map((channel) => {
+                    const checked = channelIDs.includes(channel.id)
+                    return (
+                      <label
+                        key={channel.id}
+                        className='hover:bg-muted flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm'
+                      >
+                        <input
+                          type='checkbox'
+                          checked={checked}
+                          onChange={() =>
+                            setChannelIDs((prev) =>
+                              checked
+                                ? prev.filter((id) => id !== channel.id)
+                                : [...prev, channel.id]
+                            )
+                          }
+                        />
+                        <span className='min-w-0 flex-1 truncate'>
+                          {channel.name}
+                        </span>
+                        <span className='text-muted-foreground shrink-0 font-mono text-xs'>
+                          #{channel.id}
+                        </span>
+                      </label>
+                    )
+                  })}
+                {channels.length === 0 && (
+                  <p className='text-muted-foreground px-2 py-3 text-xs'>
+                    {t('Unable to load channels; enter channel_ids in JSON mode.')}
+                  </p>
+                )}
+              </div>
+              {channelIDs.length > 0 && (
+                <p className='text-muted-foreground text-xs'>
+                  {t('Selected')}: {channelIDs.join(', ')}
+                </p>
+              )}
             </div>
 
             <div className='grid gap-3 sm:grid-cols-2'>

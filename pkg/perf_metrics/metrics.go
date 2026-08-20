@@ -25,7 +25,7 @@ func Init() {
 }
 
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
-	if info == nil {
+	if info == nil || info.ExcludeFromPerformanceMetrics {
 		return
 	}
 	now := time.Now()

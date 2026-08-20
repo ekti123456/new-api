@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -167,6 +169,21 @@ func TestShouldSkipRetryAfterChannelAffinityFailure(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "configured channel pool is always strict",
+			ctx: func() *gin.Context {
+				ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
+					RuleName:   "ua-channel-pool",
+					SkipRetry:  false,
+					ChannelIDs: []int{101, 202},
+					UsingGroup: "default",
+					ModelName:  "gpt-5",
+				})
+				ctx.Set(ginKeyChannelAffinitySkipRetry, false)
+				return ctx
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -234,6 +251,52 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	require.Equal(t, "request_header", meta.KeySourceType)
 	require.Equal(t, "X-Affinity-Key", meta.KeySourceKey)
 	require.Equal(t, buildChannelAffinityKeyHint(affinityValue), meta.KeyHint)
+}
+
+func TestGetPreferredChannelByAffinity_UARoutingWhitelistUsesNormalDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const userAgent = "NovelRepair/1.0"
+	rule := operation_setting.ChannelAffinityRule{
+		Name:             "novel-repair-routing",
+		ModelRegex:       []string{"^gpt-5$"},
+		PathRegex:        []string{"^/v1/responses$"},
+		UserAgentInclude: []string{"NovelRepair"},
+		ChannelIDs:       []int{9528},
+	}
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, "gpt-5", "default", userAgent)
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9528, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalEnabled := setting.Enabled
+	originalRules := setting.Rules
+	setting.Enabled = true
+	setting.Rules = []operation_setting.ChannelAffinityRule{rule}
+	t.Cleanup(func() {
+		setting.Enabled = originalEnabled
+		setting.Rules = originalRules
+	})
+
+	regular, _ := gin.CreateTestContext(httptest.NewRecorder())
+	regular.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	regular.Request.Header.Set("User-Agent", userAgent)
+	channelID, found := GetPreferredChannelByAffinity(regular, "gpt-5", "default")
+	require.True(t, found)
+	require.Equal(t, 9528, channelID)
+	require.True(t, RequiresConfiguredAffinityPool(regular))
+
+	whitelisted, _ := gin.CreateTestContext(httptest.NewRecorder())
+	whitelisted.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	whitelisted.Request.Header.Set("User-Agent", userAgent)
+	common.SetContextKey(whitelisted, constant.ContextKeyUserAgentRoutingWhitelist, true)
+	channelID, found = GetPreferredChannelByAffinity(whitelisted, "gpt-5", "default")
+	require.False(t, found)
+	require.Zero(t, channelID)
+	require.False(t, RequiresConfiguredAffinityPool(whitelisted))
 }
 
 func TestClearCurrentChannelAffinityCache(t *testing.T) {

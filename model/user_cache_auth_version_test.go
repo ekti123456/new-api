@@ -101,6 +101,19 @@ func TestUserAuthFieldUpdateRejectsVersionMismatch(t *testing.T) {
 	assert.Equal(t, "current", group)
 }
 
+func TestUserCachePreservesUARoutingWhitelist(t *testing.T) {
+	useUserCacheMiniRedis(t)
+	const userID = 4203
+	require.NoError(t, writeUserCache(&UserBase{
+		Id: userID, Group: "default", Username: "ua-whitelist", AuthVersion: 1,
+		UARoutingWhitelist: true,
+	}, true))
+
+	cached, err := cacheGetUserBase(userID)
+	require.NoError(t, err)
+	assert.True(t, cached.UARoutingWhitelist)
+}
+
 func TestRefreshUserGroupCacheRepairsDelayedSameVersionWrite(t *testing.T) {
 	truncateTables(t)
 	useUserCacheMiniRedis(t)

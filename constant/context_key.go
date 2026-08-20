@@ -38,6 +38,10 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	// ContextKeyChannelAffinityUserAgentRouted marks requests routed by a
+	// User-Agent/channel-pool rule. These requests remain visible in consume
+	// and error logs but are excluded from model performance metrics.
+	ContextKeyChannelAffinityUserAgentRouted ContextKey = "channel_affinity_user_agent_routed"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
@@ -52,6 +56,9 @@ const (
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
+	// ContextKeyUserAgentRoutingWhitelist bypasses User-Agent channel routing
+	// for the authenticated user and leaves the request on normal dispatch.
+	ContextKeyUserAgentRoutingWhitelist ContextKey = "user_agent_routing_whitelist"
 	// ContextKeyUserConcurrencyLimit stores the raw per-user override:
 	// -1 inherits the system default, 0 is unlimited, and positive values are explicit limits.
 	ContextKeyUserConcurrencyLimit ContextKey = "user_concurrency_limit"

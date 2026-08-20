@@ -83,6 +83,28 @@ func TestUserEditPersistsConcurrencyLimit(t *testing.T) {
 	assert.Equal(t, 9, *got.ConcurrencyLimit)
 }
 
+func TestUserEditPersistsUARoutingWhitelist(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	enabled := true
+	user := User{
+		Id:       10,
+		Username: "ua-routing-whitelist-user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	user.UARoutingWhitelist = &enabled
+	require.NoError(t, user.EditWithTx(DB, false))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	require.NotNil(t, got.UARoutingWhitelist)
+	assert.True(t, *got.UARoutingWhitelist)
+	assert.True(t, got.ToBaseUser().UARoutingWhitelist)
+}
+
 func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	setupUserUpdateTestState(t)
 

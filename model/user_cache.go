@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const userCacheSchemaVersion = 3
+const userCacheSchemaVersion = 4
 
 type UserBase struct {
 	Id       int    `json:"id"`
@@ -24,9 +24,10 @@ type UserBase struct {
 	Setting  string `json:"setting"`
 	// ConcurrencyLimit is the raw user override: -1 inherits the system default,
 	// 0 is unlimited, and positive values are explicit limits.
-	ConcurrencyLimit int   `json:"concurrency_limit"`
-	AuthVersion      int64 `json:"-"`
-	CacheSchema      int   `json:"-"`
+	ConcurrencyLimit   int   `json:"concurrency_limit"`
+	UARoutingWhitelist bool  `json:"ua_routing_whitelist"`
+	AuthVersion        int64 `json:"-"`
+	CacheSchema        int   `json:"-"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -36,6 +37,7 @@ func (user *UserBase) WriteContext(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyUserEmail, user.Email)
 	common.SetContextKey(c, constant.ContextKeyUserName, user.Username)
 	common.SetContextKey(c, constant.ContextKeyUserConcurrencyLimit, user.ConcurrencyLimit)
+	common.SetContextKey(c, constant.ContextKeyUserAgentRoutingWhitelist, user.UARoutingWhitelist)
 	common.SetContextKey(c, constant.ContextKeyUserSetting, user.GetSetting())
 }
 

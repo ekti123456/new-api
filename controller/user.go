@@ -741,6 +741,10 @@ func UpdateUser(c *gin.Context) {
 		// -1 is the API sentinel for inheriting the system default; persist it as NULL.
 		updatedUser.ConcurrencyLimit = nil
 	}
+	if updatedUser.UARoutingWhitelist == nil {
+		// Older clients do not send this field; preserve the existing value.
+		updatedUser.UARoutingWhitelist = originUser.UARoutingWhitelist
+	}
 	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return

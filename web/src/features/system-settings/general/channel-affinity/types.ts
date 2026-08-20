@@ -28,6 +28,8 @@ export interface AffinityRule {
   model_regex: string[]
   path_regex: string[]
   user_agent_include?: string[]
+  user_agent_other?: boolean
+  channel_ids?: number[]
   key_sources: KeySource[]
   value_regex?: string
   ttl_seconds: number

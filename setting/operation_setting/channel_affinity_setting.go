@@ -9,11 +9,16 @@ type ChannelAffinityKeySource struct {
 }
 
 type ChannelAffinityRule struct {
-	Name             string                     `json:"name"`
-	ModelRegex       []string                   `json:"model_regex"`
-	PathRegex        []string                   `json:"path_regex"`
-	UserAgentInclude []string                   `json:"user_agent_include,omitempty"`
-	KeySources       []ChannelAffinityKeySource `json:"key_sources"`
+	Name             string   `json:"name"`
+	ModelRegex       []string `json:"model_regex"`
+	PathRegex        []string `json:"path_regex"`
+	UserAgentInclude []string `json:"user_agent_include,omitempty"`
+	UserAgentOther   bool     `json:"user_agent_other,omitempty"`
+	// ChannelIDs optionally limits this affinity rule to a selectable pool of
+	// channels. A matching request is pinned to one of these channels until the
+	// affinity entry expires or the channel becomes unusable.
+	ChannelIDs []int                      `json:"channel_ids,omitempty"`
+	KeySources []ChannelAffinityKeySource `json:"key_sources"`
 
 	ValueRegex string `json:"value_regex"`
 	TTLSeconds int    `json:"ttl_seconds"`

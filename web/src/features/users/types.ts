@@ -47,6 +47,7 @@ export const userSchema = z.object({
   request_count: z.number(),
   group: z.string(),
   concurrency_limit: z.number().nullable().optional(),
+  ua_routing_whitelist: z.boolean().nullable().optional(),
   aff_code: z.string().optional(),
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
@@ -126,6 +127,7 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   concurrency_limit?: number // -1 inherits, 0 is unlimited
+  ua_routing_whitelist?: boolean // bypass User-Agent channel routing
   remark?: string // Only used when updating user
   admin_permissions?: AdminPermissionMatrix
 }

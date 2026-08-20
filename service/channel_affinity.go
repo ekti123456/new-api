@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -25,6 +27,7 @@ const (
 	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
 	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
 	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinityHardPool   = "channel_affinity_hard_pool"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -54,6 +57,7 @@ type channelAffinityMeta struct {
 	UsingGroup     string
 	ModelName      string
 	RequestPath    string
+	ChannelIDs     []int
 }
 
 type ChannelAffinityStatsContext struct {
@@ -560,16 +564,23 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	if c != nil && c.Request != nil {
 		userAgent = c.Request.UserAgent()
 	}
+	uaRoutingWhitelisted := common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingWhitelist)
 
 	for _, rule := range setting.Rules {
+		if uaRoutingWhitelisted && (len(rule.UserAgentInclude) > 0 || rule.UserAgentOther) {
+			continue
+		}
 		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
 			continue
 		}
 		if len(rule.PathRegex) > 0 && !matchAnyRegexCached(rule.PathRegex, path) {
 			continue
 		}
-		if len(rule.UserAgentInclude) > 0 && !matchAnyIncludeFold(rule.UserAgentInclude, userAgent) {
-			continue
+		if len(rule.UserAgentInclude) > 0 {
+			uaListed := matchAnyIncludeFold(rule.UserAgentInclude, userAgent)
+			if rule.UserAgentOther == uaListed {
+				continue
+			}
 		}
 		var affinityValue string
 		var usedSource operation_setting.ChannelAffinityKeySource
@@ -580,11 +591,27 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 				break
 			}
 		}
+		// A UA routing rule may omit an explicit key source. In that case use
+		// the normalized User-Agent as its affinity key so all requests from
+		// that client family share the selected channel pool.
+		if affinityValue == "" && len(rule.ChannelIDs) > 0 && userAgent != "" && (len(rule.UserAgentInclude) > 0 || rule.UserAgentOther) {
+			affinityValue = strings.TrimSpace(userAgent)
+			usedSource = operation_setting.ChannelAffinityKeySource{Type: "request_header", Key: "User-Agent"}
+		}
 		if affinityValue == "" {
 			continue
 		}
 		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
 			continue
+		}
+		// Set this only after every rule predicate has matched. Otherwise a
+		// value-regex mismatch could accidentally disable normal dispatch for a
+		// request that did not match this rule.
+		if len(rule.ChannelIDs) > 0 {
+			c.Set(ginKeyChannelAffinityHardPool, true)
+			if len(rule.UserAgentInclude) > 0 || rule.UserAgentOther {
+				common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
+			}
 		}
 
 		ttlSeconds := rule.TTLSeconds
@@ -607,6 +634,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			UsingGroup:     usingGroup,
 			ModelName:      modelName,
 			RequestPath:    path,
+			ChannelIDs:     append([]int(nil), rule.ChannelIDs...),
 		})
 
 		cache := getChannelAffinityCache()
@@ -616,29 +644,120 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			return 0, false
 		}
 		if found {
-			return channelID, true
+			if len(rule.ChannelIDs) == 0 || containsChannelID(rule.ChannelIDs, channelID) {
+				return channelID, true
+			}
+			// A changed rule must not keep routing to a channel removed from its
+			// selectable pool; treat the old cache value as a miss.
+		}
+		if len(rule.ChannelIDs) > 0 {
+			if channelID, ok := chooseConfiguredAffinityChannel(c, rule.ChannelIDs, modelName, usingGroup, affinityValue); ok {
+				return channelID, true
+			}
 		}
 		return 0, false
 	}
 	return 0, false
 }
 
+// RequiresConfiguredAffinityPool reports whether this request matched a rule
+// that explicitly selected a channel pool. Such rules are strict: if every
+// configured channel is unavailable, normal dispatch must not silently route
+// the request to an unrelated channel.
+func RequiresConfiguredAffinityPool(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(ginKeyChannelAffinityHardPool)
+	b, _ := v.(bool)
+	return ok && b
+}
+
+func containsChannelID(ids []int, wanted int) bool {
+	if wanted <= 0 {
+		return false
+	}
+	for _, id := range ids {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// chooseConfiguredAffinityChannel selects a usable channel from the rule's
+// explicit pool. The hash keeps the choice stable before the affinity cache is
+// populated, while still distributing different UA/session keys across the
+// configured channels.
+func chooseConfiguredAffinityChannel(c *gin.Context, ids []int, modelName, usingGroup, affinityValue string) (int, bool) {
+	if len(ids) == 0 {
+		return 0, false
+	}
+	groups := []string{usingGroup}
+	if usingGroup == "auto" {
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		groups = GetRequestAutoGroups(c, userGroup)
+	}
+	eligible := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		channel, err := model.CacheGetChannel(id)
+		if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if usingGroup == "auto" {
+			if !model.IsChannelEnabledForAnyGroupModel(groups, modelName, id) {
+				continue
+			}
+		} else if !model.IsChannelEnabledForGroupModel(usingGroup, modelName, id) {
+			continue
+		}
+		eligible = append(eligible, id)
+	}
+	if len(eligible) == 0 {
+		return 0, false
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.TrimSpace(affinityValue)))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(modelName))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(usingGroup))
+	return eligible[int(h.Sum32())%len(eligible)], true
+}
+
 func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 	if c == nil {
 		return false
 	}
+	var explicitSkipRetry *bool
 	v, ok := c.Get(ginKeyChannelAffinitySkipRetry)
 	if ok {
 		b, ok := v.(bool)
 		if ok {
-			return b
+			explicitSkipRetry = &b
 		}
 	}
 	meta, ok := getChannelAffinityMeta(c)
-	if !ok {
-		return false
+	if ok {
+		// An explicitly configured UA/channel pool is a strict routing rule. If
+		// its selected channel returns an upstream error, preserve that error
+		// instead of retrying through the normal global channel scheduler.
+		if len(meta.ChannelIDs) > 0 {
+			return true
+		}
+		if explicitSkipRetry == nil {
+			return meta.SkipRetry
+		}
 	}
-	return meta.SkipRetry
+	return explicitSkipRetry != nil && *explicitSkipRetry
 }
 
 func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
@@ -690,6 +809,7 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 		"model":          meta.ModelName,
 		"request_path":   meta.RequestPath,
 		"channel_id":     channelID,
+		"channel_pool":   append([]int(nil), meta.ChannelIDs...),
 		"key_source":     meta.KeySourceType,
 		"key_key":        meta.KeySourceKey,
 		"key_path":       meta.KeySourcePath,
@@ -725,6 +845,11 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	}
 	cacheKey, ttlSeconds, ok := getChannelAffinityContext(c)
 	if !ok {
+		return
+	}
+	if meta, hasMeta := getChannelAffinityMeta(c); hasMeta && len(meta.ChannelIDs) > 0 && !containsChannelID(meta.ChannelIDs, channelID) {
+		// Do not cache a normal-dispatch fallback into an explicitly configured
+		// UA/channel pool. The next request should retry the configured pool.
 		return
 	}
 	if ttlSeconds <= 0 {

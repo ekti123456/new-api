@@ -143,11 +143,14 @@ type RelayInfo struct {
 	SubscriptionAmountUsedAfterPreConsume int64
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
-	RetryIndex                            int
-	LastError                             *types.NewAPIError
-	RuntimeHeadersOverride                map[string]interface{}
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
+	// ExcludeFromPerformanceMetrics keeps User-Agent-routed traffic out of the
+	// model performance dashboard while preserving normal consume/error logs.
+	ExcludeFromPerformanceMetrics bool
+	RetryIndex                    int
+	LastError                     *types.NewAPIError
+	RuntimeHeadersOverride        map[string]interface{}
+	UseRuntimeHeadersOverride     bool
+	ParamOverrideAudit            []string
 
 	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
 	// body. It is set when the body is wrapped in a BodyStorage (see
@@ -489,11 +492,12 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
 		TokenGroup:     tokenGroup,
 
-		isFirstResponse: true,
-		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
-		RequestURLPath:  c.Request.URL.String(),
-		RequestHeaders:  cloneRequestHeaders(c),
-		IsStream:        isStream,
+		isFirstResponse:               true,
+		RelayMode:                     relayconstant.Path2RelayMode(c.Request.URL.Path),
+		RequestURLPath:                c.Request.URL.String(),
+		RequestHeaders:                cloneRequestHeaders(c),
+		IsStream:                      isStream,
+		ExcludeFromPerformanceMetrics: common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted),
 
 		StartTime:         startTime,
 		FirstResponseTime: startTime.Add(-time.Second),
