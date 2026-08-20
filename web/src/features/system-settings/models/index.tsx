@@ -80,6 +80,9 @@ const defaultModelSettings: ModelSettings = {
   'channel_affinity_setting.max_entries': 100000,
   'channel_affinity_setting.default_ttl_seconds': 3600,
   'channel_affinity_setting.rules': '[]',
+  'user_agent_routing_setting.enabled': false,
+  'user_agent_routing_setting.user_agent_whitelist': '[]',
+  'user_agent_routing_setting.channel_ids': '[]',
   'model_deployment.ionet.api_key': '',
   'model_deployment.ionet.enabled': false,
 }

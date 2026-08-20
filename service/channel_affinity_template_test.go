@@ -299,6 +299,34 @@ func TestGetPreferredChannelByAffinity_UARoutingWhitelistUsesNormalDispatch(t *t
 	require.False(t, RequiresConfiguredAffinityPool(whitelisted))
 }
 
+func TestGetPreferredChannelByUserAgentRouting_AllowlistAndStrictPool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setting := operation_setting.GetUserAgentRoutingSetting()
+	original := *setting
+	setting.Enabled = true
+	setting.UserAgentWhitelist = []string{"Claude"}
+	setting.ChannelIDs = []int{999999}
+	t.Cleanup(func() { *setting = original })
+
+	allowlisted, _ := gin.CreateTestContext(httptest.NewRecorder())
+	allowlisted.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	allowlisted.Request.Header.Set("User-Agent", "Claude/1.0")
+	channelID, found := GetPreferredChannelByUserAgentRouting(allowlisted, "claude-sonnet", "default")
+	require.False(t, found)
+	require.Zero(t, channelID)
+	require.False(t, RequiresConfiguredAffinityPool(allowlisted))
+	require.True(t, common.GetContextKeyBool(allowlisted, constant.ContextKeyUserAgentRoutingSystemWhitelist))
+
+	unlisted, _ := gin.CreateTestContext(httptest.NewRecorder())
+	unlisted.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	unlisted.Request.Header.Set("User-Agent", "NovelRepair/1.0")
+	channelID, found = GetPreferredChannelByUserAgentRouting(unlisted, "claude-sonnet", "default")
+	require.False(t, found)
+	require.Zero(t, channelID)
+	require.True(t, RequiresConfiguredAffinityPool(unlisted))
+	require.True(t, ShouldSkipRetryAfterChannelAffinityFailure(unlisted))
+}
+
 func TestClearCurrentChannelAffinityCache(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

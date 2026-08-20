@@ -565,9 +565,10 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		userAgent = c.Request.UserAgent()
 	}
 	uaRoutingWhitelisted := common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingWhitelist)
+	systemUaRoutingWhitelisted := common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingSystemWhitelist)
 
 	for _, rule := range setting.Rules {
-		if uaRoutingWhitelisted && (len(rule.UserAgentInclude) > 0 || rule.UserAgentOther) {
+		if (uaRoutingWhitelisted || systemUaRoutingWhitelisted) && (len(rule.UserAgentInclude) > 0 || rule.UserAgentOther) {
 			continue
 		}
 		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
@@ -658,6 +659,34 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		return 0, false
 	}
 	return 0, false
+}
+
+// GetPreferredChannelByUserAgentRouting applies the simple UA split policy.
+// It deliberately runs outside channel affinity: an allowlisted UA or user
+// returns no match so the normal scheduler and legacy affinity can proceed.
+func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usingGroup string) (int, bool) {
+	setting := operation_setting.GetUserAgentRoutingSetting()
+	if setting == nil || !setting.Enabled || len(setting.ChannelIDs) == 0 {
+		return 0, false
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingWhitelist) {
+		return 0, false
+	}
+	userAgent := ""
+	if c != nil && c.Request != nil {
+		userAgent = c.Request.UserAgent()
+	}
+	if matchAnyIncludeFold(setting.UserAgentWhitelist, userAgent) {
+		common.SetContextKey(c, constant.ContextKeyUserAgentRoutingSystemWhitelist, true)
+		return 0, false
+	}
+	// Mark the request as strict before selecting. This also makes an empty or
+	// fully-disabled pool return 503 instead of falling through to normal
+	// dispatch.
+	c.Set(ginKeyChannelAffinityHardPool, true)
+	c.Set(ginKeyChannelAffinitySkipRetry, true)
+	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
+	return chooseConfiguredAffinityChannel(c, setting.ChannelIDs, modelName, usingGroup, userAgent)
 }
 
 // RequiresConfiguredAffinityPool reports whether this request matched a rule

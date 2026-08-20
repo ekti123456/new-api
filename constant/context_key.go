@@ -42,6 +42,10 @@ const (
 	// User-Agent/channel-pool rule. These requests remain visible in consume
 	// and error logs but are excluded from model performance metrics.
 	ContextKeyChannelAffinityUserAgentRouted ContextKey = "channel_affinity_user_agent_routed"
+	// ContextKeyUserAgentRoutingSystemWhitelist marks a request whose UA matched
+	// the global UA routing allowlist. Legacy UA affinity rules must not
+	// override that allowlist, while non-UA Codex/Claude affinity can continue.
+	ContextKeyUserAgentRoutingSystemWhitelist ContextKey = "user_agent_routing_system_whitelist"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
