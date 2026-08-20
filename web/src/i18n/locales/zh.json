@@ -4829,6 +4829,8 @@
     "Unable to estimate price for this deployment.": "无法为该部署估算价格。",
     "Unable to generate chat link. Please contact your administrator.": "无法生成聊天链接。请联系您的管理员。",
     "Unable to load groups": "无法加载分组",
+    "UA routing only": "仅用于 UA 分流",
+    "Only UA-routed requests can use this channel; normal dispatch excludes it.": "只有 UA 分流请求可以使用此渠道，普通调度不会进入此渠道。",
     "Unable to load login sessions": "无法加载登录会话",
     "Unable to load rankings": "无法加载排行榜",
     "Unable to load rankings data": "无法加载排行榜数据",

@@ -614,6 +614,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 				common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
 			}
 		}
+		uaRoutingRule := len(rule.UserAgentInclude) > 0 || rule.UserAgentOther
 
 		ttlSeconds := rule.TTLSeconds
 		if ttlSeconds <= 0 {
@@ -645,14 +646,20 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			return 0, false
 		}
 		if found {
-			if len(rule.ChannelIDs) == 0 || containsChannelID(rule.ChannelIDs, channelID) {
+			if len(rule.ChannelIDs) == 0 {
 				return channelID, true
 			}
+			if containsChannelID(rule.ChannelIDs, channelID) {
+				channel, channelErr := model.CacheGetChannel(channelID)
+				if channelErr == nil && channel != nil && channel.Status == common.ChannelStatusEnabled && channel.UARoutingOnly == uaRoutingRule {
+					return channelID, true
+				}
+			}
 			// A changed rule must not keep routing to a channel removed from its
-			// selectable pool; treat the old cache value as a miss.
+			// selectable pool or the wrong routing mode; treat it as a miss.
 		}
 		if len(rule.ChannelIDs) > 0 {
-			if channelID, ok := chooseConfiguredAffinityChannel(c, rule.ChannelIDs, modelName, usingGroup, affinityValue); ok {
+			if channelID, ok := chooseConfiguredAffinityChannel(c, rule.ChannelIDs, modelName, usingGroup, affinityValue, uaRoutingRule); ok {
 				return channelID, true
 			}
 		}
@@ -689,7 +696,7 @@ func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usi
 	c.Set(ginKeyChannelAffinityHardPool, true)
 	c.Set(ginKeyChannelAffinitySkipRetry, true)
 	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
-	return chooseConfiguredAffinityChannel(c, setting.ChannelIDs, modelName, usingGroup, userAgent)
+	return chooseConfiguredAffinityChannel(c, setting.ChannelIDs, modelName, usingGroup, userAgent, true)
 }
 
 func userAgentRoutingGroupMatches(c *gin.Context, configuredGroups []string, usingGroup string) bool {
@@ -750,7 +757,7 @@ func containsChannelID(ids []int, wanted int) bool {
 // explicit pool. The hash keeps the choice stable before the affinity cache is
 // populated, while still distributing different UA/session keys across the
 // configured channels.
-func chooseConfiguredAffinityChannel(c *gin.Context, ids []int, modelName, usingGroup, affinityValue string) (int, bool) {
+func chooseConfiguredAffinityChannel(c *gin.Context, ids []int, modelName, usingGroup, affinityValue string, uaRoutingOnly bool) (int, bool) {
 	if len(ids) == 0 {
 		return 0, false
 	}
@@ -770,7 +777,7 @@ func chooseConfiguredAffinityChannel(c *gin.Context, ids []int, modelName, using
 		}
 		seen[id] = struct{}{}
 		channel, err := model.CacheGetChannel(id)
-		if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
+		if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled || channel.UARoutingOnly != uaRoutingOnly {
 			continue
 		}
 		if usingGroup == "auto" {

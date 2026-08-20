@@ -44,6 +44,7 @@ type Channel struct {
 	StatusCodeMapping *string `json:"status_code_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority          *int64  `json:"priority" gorm:"bigint;default:0"`
 	AutoBan           *int    `json:"auto_ban" gorm:"default:1"`
+	UARoutingOnly     bool    `json:"ua_routing_only" gorm:"default:false;index"`
 	OtherInfo         string  `json:"other_info"`
 	Tag               *string `json:"tag" gorm:"index"`
 	Setting           *string `json:"setting" gorm:"type:text"` // 渠道额外设置
@@ -576,6 +577,13 @@ func (channel *Channel) Update() error {
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
 	err = channel.UpdateAbilities(nil)
 	return err
+}
+
+// UpdateChannelUARoutingOnly explicitly persists both true and false values.
+// GORM's struct Updates omits false boolean values, so this field cannot rely
+// on Channel.Update when an administrator turns the switch off.
+func UpdateChannelUARoutingOnly(id int, enabled bool) error {
+	return DB.Model(&Channel{}).Where("id = ?", id).Update("ua_routing_only", enabled).Error
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {

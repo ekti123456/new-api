@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -255,6 +256,25 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 
 func TestGetPreferredChannelByAffinity_UARoutingWhitelistUsesNormalDispatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	require.NoError(t, model.DB.AutoMigrate(&model.Ability{}))
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:            9528,
+		Name:          "ua-routing-test",
+		Status:        common.ChannelStatusEnabled,
+		Group:         "default",
+		Models:        "gpt-5",
+		UARoutingOnly: true,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-5",
+		ChannelId: 9528,
+		Enabled:   true,
+	}).Error)
+	t.Cleanup(func() {
+		model.DB.Delete(&model.Ability{}, "channel_id = ?", 9528)
+		model.DB.Delete(&model.Channel{}, "id = ?", 9528)
+	})
 
 	const userAgent = "NovelRepair/1.0"
 	rule := operation_setting.ChannelAffinityRule{

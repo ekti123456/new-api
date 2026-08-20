@@ -112,9 +112,13 @@ func SyncChannelCache(frequency int) {
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	return GetRandomSatisfiedChannelWithRoutingMode(group, model, retry, requestPath, false)
+}
+
+func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, requestPath)
+		return GetChannelWithRoutingMode(group, model, retry, requestPath, uaRoutingOnly)
 	}
 
 	channelSyncLock.RLock()
@@ -122,11 +126,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 
 	// First, try to find channels with the exact model name.
 	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][model], requestPath, model)
+	channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, model)
+		channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
 	}
 
 	if len(channels) == 0 {
@@ -206,6 +212,19 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+func filterChannelsByUARoutingMode(channelIDs []int, uaRoutingOnly bool) []int {
+	if len(channelIDs) == 0 {
+		return channelIDs
+	}
+	filtered := make([]int, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if channel, ok := channelsIDM[channelID]; ok && channel.UARoutingOnly == uaRoutingOnly {
+			filtered = append(filtered, channelID)
+		}
+	}
+	return filtered
 }
 
 // filterChannelsByRequestPathAndModel restricts candidates by request path and

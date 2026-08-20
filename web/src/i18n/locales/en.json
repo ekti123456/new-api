@@ -4816,6 +4816,8 @@
     "Unable to estimate price for this deployment.": "Unable to estimate price for this deployment.",
     "Unable to generate chat link. Please contact your administrator.": "Unable to generate chat link. Please contact your administrator.",
     "Unable to load groups": "Unable to load groups",
+    "UA routing only": "UA routing only",
+    "Only UA-routed requests can use this channel; normal dispatch excludes it.": "Only UA-routed requests can use this channel; normal dispatch excludes it.",
     "Unable to load login sessions": "Unable to load login sessions",
     "Unable to load rankings": "Unable to load rankings",
     "Unable to load rankings data": "Unable to load rankings data",

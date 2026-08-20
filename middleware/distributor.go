@@ -104,7 +104,7 @@ func Distribute() func(c *gin.Context) {
 
 				if routedChannelID, found := service.GetPreferredChannelByUserAgentRouting(c, modelRequest.Model, usingGroup); found {
 					preferred, preferredErr := model.CacheGetChannel(routedChannelID)
-					if preferredErr != nil || preferred == nil || preferred.Status != common.ChannelStatusEnabled ||
+					if preferredErr != nil || preferred == nil || preferred.Status != common.ChannelStatusEnabled || !preferred.UARoutingOnly ||
 						!channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
@@ -139,6 +139,7 @@ func Distribute() func(c *gin.Context) {
 						affinityUsable := false
 						preferred, err := model.CacheGetChannel(preferredChannelID)
 						if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
+							preferred.UARoutingOnly == common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted) &&
 							channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
 							if usingGroup == "auto" {
 								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
@@ -198,6 +199,10 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 			}
+		}
+		if channel != nil && channel.UARoutingOnly != common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted) {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+			return
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)

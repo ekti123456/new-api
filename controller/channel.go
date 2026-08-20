@@ -1088,6 +1088,18 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if rawValue, provided := requestData["ua_routing_only"]; provided {
+		uaRoutingOnly, ok := rawValue.(bool)
+		if !ok {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		if err := model.UpdateChannelUARoutingOnly(channel.Id, uaRoutingOnly); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		channel.UARoutingOnly = uaRoutingOnly
+	}
 	model.InitChannelCache()
 	if proxyChanged {
 		service.InvalidateProxyClient(originProxy)
@@ -1102,6 +1114,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.Type != originChannel.Type {
 		changedFields = append(changedFields, "type")
+	}
+	if channel.UARoutingOnly != originChannel.UARoutingOnly {
+		changedFields = append(changedFields, "ua_routing_only")
 	}
 	if !equalStringPtr(channel.BaseURL, originChannel.BaseURL) {
 		changedFields = append(changedFields, "base_url")

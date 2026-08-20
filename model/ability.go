@@ -60,12 +60,13 @@ func GetAllEnableAbilities() []Ability {
 	return abilities
 }
 
-func getPriority(group string, model string, retry int) (int, error) {
+func getPriority(group string, model string, retry int, uaRoutingOnly bool) (int, error) {
 
 	var priorities []int
 	err := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
 		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
+		Where("channel_id IN (?)", DB.Model(&Channel{}).Select("id").Where("ua_routing_only = ?", uaRoutingOnly)).
 		Order("priority DESC").              // 按优先级降序排序
 		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
 
@@ -90,15 +91,23 @@ func getPriority(group string, model string, retry int) (int, error) {
 	return priorityToUse, nil
 }
 
-func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
-	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
+func getChannelQuery(group string, model string, retry int, uaRoutingOnly bool) (*gorm.DB, error) {
+	matchingChannelIDs := DB.Model(&Channel{}).Select("id").Where("ua_routing_only = ?", uaRoutingOnly)
+	maxPrioritySubQuery := DB.Model(&Ability{}).
+		Select("MAX(priority)").
+		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
+		Where("channel_id IN (?)", matchingChannelIDs)
+	channelQuery := DB.
+		Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery).
+		Where("channel_id IN (?)", matchingChannelIDs)
 	if retry != 0 {
-		priority, err := getPriority(group, model, retry)
+		priority, err := getPriority(group, model, retry, uaRoutingOnly)
 		if err != nil {
 			return nil, err
 		} else {
-			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
+			channelQuery = DB.
+				Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority).
+				Where("channel_id IN (?)", matchingChannelIDs)
 		}
 	}
 
@@ -106,10 +115,16 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	return GetChannelWithRoutingMode(group, model, retry, requestPath, false)
+}
+
+// GetChannelWithRoutingMode strictly separates normal channels from channels
+// reserved for User-Agent routing.
+func GetChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
+	channelQuery, err := getChannelQuery(group, model, retry, uaRoutingOnly)
 	if err != nil {
 		return nil, err
 	}
