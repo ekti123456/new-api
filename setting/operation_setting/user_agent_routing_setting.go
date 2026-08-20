@@ -2,13 +2,13 @@ package operation_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
-// UserAgentRoutingSetting routes every request whose User-Agent is not on the
-// allowlist into one explicit channel pool. User-level allowlisting is carried
-// separately in the authenticated user cache.
+// UserAgentRoutingSetting routes requests in selected channel groups whose
+// User-Agent is not on the allowlist into one explicit channel pool.
 type UserAgentRoutingSetting struct {
 	Enabled            bool     `json:"enabled"`
 	UserAgentWhitelist []string `json:"user_agent_whitelist"`
 	ChannelIDs         []int    `json:"channel_ids"`
+	GroupNames         []string `json:"group_names"`
 }
 
 var userAgentRoutingSetting = UserAgentRoutingSetting{}

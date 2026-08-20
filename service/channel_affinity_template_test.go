@@ -327,6 +327,16 @@ func TestGetPreferredChannelByUserAgentRouting_AllowlistAndStrictPool(t *testing
 	require.True(t, ShouldSkipRetryAfterChannelAffinityFailure(unlisted))
 }
 
+func TestUserAgentRoutingGroupMatchesSelectedGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	require.True(t, userAgentRoutingGroupMatches(ctx, nil, "claude"))
+	require.True(t, userAgentRoutingGroupMatches(ctx, []string{"gpt-pro"}, "gpt-pro"))
+	require.False(t, userAgentRoutingGroupMatches(ctx, []string{"gpt-pro"}, "claude"))
+	require.True(t, userAgentRoutingGroupMatches(ctx, []string{"auto"}, "auto"))
+}
+
 func TestClearCurrentChannelAffinityCache(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -155,6 +155,7 @@ const MODELS_SECTIONS = [
           whitelist:
             settings['user_agent_routing_setting.user_agent_whitelist'],
           channelIds: settings['user_agent_routing_setting.channel_ids'],
+          groupNames: settings['user_agent_routing_setting.group_names'],
         }}
       />
     ),

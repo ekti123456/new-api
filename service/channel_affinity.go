@@ -669,6 +669,9 @@ func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usi
 	if setting == nil || !setting.Enabled || len(setting.ChannelIDs) == 0 {
 		return 0, false
 	}
+	if !userAgentRoutingGroupMatches(c, setting.GroupNames, usingGroup) {
+		return 0, false
+	}
 	if common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingWhitelist) {
 		return 0, false
 	}
@@ -687,6 +690,35 @@ func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usi
 	c.Set(ginKeyChannelAffinitySkipRetry, true)
 	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
 	return chooseConfiguredAffinityChannel(c, setting.ChannelIDs, modelName, usingGroup, userAgent)
+}
+
+func userAgentRoutingGroupMatches(c *gin.Context, configuredGroups []string, usingGroup string) bool {
+	if len(configuredGroups) == 0 {
+		return true
+	}
+	configured := make(map[string]struct{}, len(configuredGroups))
+	for _, group := range configuredGroups {
+		group = strings.TrimSpace(group)
+		if group != "" {
+			configured[group] = struct{}{}
+		}
+	}
+	if len(configured) == 0 {
+		return true
+	}
+	if _, ok := configured[usingGroup]; ok {
+		return true
+	}
+	if usingGroup != "auto" {
+		return false
+	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	for _, group := range GetRequestAutoGroups(c, userGroup) {
+		if _, ok := configured[group]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // RequiresConfiguredAffinityPool reports whether this request matched a rule

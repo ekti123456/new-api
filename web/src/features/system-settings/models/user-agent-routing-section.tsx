@@ -30,6 +30,7 @@ import { getChannels } from '@/features/channels/api'
 import type { Channel } from '@/features/channels/types'
 import { getUserAgentStats } from '@/features/dashboard/api'
 import type { UserAgentStatItem } from '@/features/dashboard/types'
+import { getGroups } from '@/features/users/api'
 
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -40,6 +41,7 @@ type Props = {
     enabled: boolean
     whitelist: string
     channelIds: string
+    groupNames: string
   }
 }
 
@@ -75,10 +77,13 @@ export function UserAgentRoutingSection(props: Props) {
   const [search, setSearch] = useState('')
   const [uaStats, setUaStats] = useState<UserAgentStatItem[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
+  const [groups, setGroups] = useState<string[]>([])
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([])
 
   useEffect(() => {
     setEnabled(props.defaultValues.enabled)
     setWhitelist(parseStringList(props.defaultValues.whitelist).join('\n'))
+    setSelectedGroups(parseStringList(props.defaultValues.groupNames))
     try {
       const parsed = JSON.parse(props.defaultValues.channelIds || '[]')
       setChannelIds(
@@ -90,6 +95,12 @@ export function UserAgentRoutingSection(props: Props) {
       setChannelIds([])
     }
   }, [props.defaultValues])
+
+  useEffect(() => {
+    void getGroups()
+      .then((response) => setGroups(response.data || []))
+      .catch(() => toast.error(t('Unable to load groups')))
+  }, [t])
 
   useEffect(() => {
     let cancelled = false
@@ -126,6 +137,10 @@ export function UserAgentRoutingSection(props: Props) {
       await updateOption.mutateAsync({
         key: 'user_agent_routing_setting.channel_ids',
         value: JSON.stringify(channelIds),
+      })
+      await updateOption.mutateAsync({
+        key: 'user_agent_routing_setting.group_names',
+        value: JSON.stringify(selectedGroups),
       })
       await updateOption.mutateAsync({
         key: 'user_agent_routing_setting.enabled',
@@ -184,7 +199,7 @@ export function UserAgentRoutingSection(props: Props) {
       <div className='space-y-4'>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Whitelisted User-Agents keep normal channel dispatch; all other traffic uses only the selected routing channels.'
+            'For selected channel groups, whitelisted User-Agents keep normal dispatch and other traffic uses only the routing pool.'
           )}
         </p>
         <label className='flex items-start gap-3 rounded-md border p-3'>
@@ -198,7 +213,7 @@ export function UserAgentRoutingSection(props: Props) {
             </span>
             <span className='text-muted-foreground text-xs'>
               {t(
-                'For example, adding Claude means Claude requests use normal dispatch while unmatched clients enter the routing pool.'
+                'Select channel groups below; only requests in those groups will be checked for UA routing.'
               )}
             </span>
           </span>
@@ -263,6 +278,34 @@ export function UserAgentRoutingSection(props: Props) {
               })}
             </div>
           )}
+        </div>
+        <div className='grid gap-2'>
+          <Label>{t('Apply UA routing to channel groups')}</Label>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Only requests using the selected groups will enter UA routing. Leave empty to apply to all groups.'
+            )}
+          </p>
+          <div className='grid gap-1 rounded-md border p-2 sm:grid-cols-2'>
+            {groups.map((group) => (
+              <label
+                key={group}
+                className='hover:bg-muted flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm'
+              >
+                <Checkbox
+                  checked={selectedGroups.includes(group)}
+                  onCheckedChange={(checked) =>
+                    setSelectedGroups((current) =>
+                      checked === true
+                        ? [...new Set([...current, group])]
+                        : current.filter((item) => item !== group)
+                    )
+                  }
+                />
+                <span>{group}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div className='grid gap-2'>
           <Label>{t('Routing channels')}</Label>

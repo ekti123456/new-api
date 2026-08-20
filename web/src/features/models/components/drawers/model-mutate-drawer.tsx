@@ -345,6 +345,7 @@ export function ModelMutateDrawer({
       'user_agent_routing_setting.enabled': false,
       'user_agent_routing_setting.user_agent_whitelist': '[]',
       'user_agent_routing_setting.channel_ids': '[]',
+      'user_agent_routing_setting.group_names': '[]',
       'model_deployment.ionet.api_key': '',
       'model_deployment.ionet.enabled': false,
     }

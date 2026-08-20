@@ -245,6 +245,7 @@ export type ModelSettings = {
   'user_agent_routing_setting.enabled': boolean
   'user_agent_routing_setting.user_agent_whitelist': string
   'user_agent_routing_setting.channel_ids': string
+  'user_agent_routing_setting.group_names': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
 }
