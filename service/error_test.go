@@ -122,6 +122,39 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 	require.Equal(t, message, newAPIError.Error())
 }
 
+func TestRelayErrorHandlerSkipsRetryForFullCodex2APISessionWindow(t *testing.T) {
+	const message = "当前时间窗口内最多可创建 3 个会话，请复用已有会话或稍后再试"
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header: http.Header{
+			"X-Codex2api-Session-Limit":          []string{"3"},
+			"X-Codex2api-Session-Used":           []string{"3"},
+			"X-Codex2api-Session-Window-Seconds": []string{"4800"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"session_creation_limit_exceeded"}}`)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
+	require.Equal(t, message, newAPIError.Error())
+	require.Equal(t, types.ErrorCode("session_creation_limit_exceeded"), newAPIError.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(newAPIError))
+}
+
+func TestRelayErrorHandlerDoesNotTrustSessionLimitCodeWithoutFullWindowHeaders(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited","type":"invalid_request_error","code":"session_creation_limit_exceeded"}}`)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.False(t, types.IsSkipRetryError(newAPIError))
+}
+
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	withDebugEnabled(t, true)
 

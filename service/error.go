@@ -118,6 +118,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
+			options = append(options, codex2APISessionLimitErrorOptions(resp, oaiError)...)
 			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode, options...)
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
@@ -156,6 +157,26 @@ func codex2APIPolicyErrorOptions(resp *http.Response) []types.NewAPIErrorOptions
 		return nil
 	}
 	return []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog()}
+}
+
+func codex2APISessionLimitErrorOptions(resp *http.Response, openAIError *types.OpenAIError) []types.NewAPIErrorOptions {
+	if resp == nil || openAIError == nil || resp.StatusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	code, ok := openAIError.Code.(string)
+	if !ok || !strings.EqualFold(strings.TrimSpace(code), "session_creation_limit_exceeded") {
+		return nil
+	}
+	limit, limitErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Limit")))
+	used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Used")))
+	windowSeconds, windowErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Window-Seconds")))
+	if limitErr != nil || usedErr != nil || windowErr != nil || limit <= 0 || used < limit || windowSeconds <= 0 {
+		return nil
+	}
+	// A full per-user Codex2API session window is deterministic for every
+	// channel retry. Preserve its structured message instead of retrying and
+	// potentially replacing it with a later generic 429.
+	return []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry()}
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
