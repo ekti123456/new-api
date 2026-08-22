@@ -2,7 +2,9 @@ package controller
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -74,6 +76,93 @@ func GetUserAgentStats(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    stats,
+	})
+}
+
+type fullUserSessionWindowItem struct {
+	UserID          int                                   `json:"user_id"`
+	Username        string                                `json:"username"`
+	DisplayName     string                                `json:"display_name,omitempty"`
+	Group           string                                `json:"group,omitempty"`
+	FullTargetCount int                                   `json:"full_target_count"`
+	UpdatedAt       time.Time                             `json:"updated_at"`
+	Targets         []model.UserSessionWindowTargetStatus `json:"targets"`
+}
+
+// GetFullUserSessionWindows exposes the latest Codex2API session-capacity
+// snapshots to the Root dashboard. Status is grouped by person for display,
+// but every target remains separate so one full target cannot be hidden by
+// another target that still has spare capacity.
+func GetFullUserSessionWindows(c *gin.Context) {
+	targets := model.ListUserSessionWindowTargetStatuses(true)
+	if len(targets) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    gin.H{"full_user_count": 0, "full_target_count": 0, "items": []fullUserSessionWindowItem{}},
+		})
+		return
+	}
+
+	userIDs := make([]int, 0, len(targets))
+	seenUserIDs := make(map[int]struct{}, len(targets))
+	for _, target := range targets {
+		if _, exists := seenUserIDs[target.UserID]; exists {
+			continue
+		}
+		seenUserIDs[target.UserID] = struct{}{}
+		userIDs = append(userIDs, target.UserID)
+	}
+	users := make([]model.User, 0, len(userIDs))
+	if err := model.DB.Model(&model.User{}).
+		Select("id", "username", "display_name", "group").
+		Where("id IN ?", userIDs).
+		Find(&users).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	usersByID := make(map[int]model.User, len(users))
+	for _, user := range users {
+		usersByID[user.Id] = user
+	}
+
+	itemsByUserID := make(map[int]*fullUserSessionWindowItem, len(userIDs))
+	for _, target := range targets {
+		item := itemsByUserID[target.UserID]
+		if item == nil {
+			user := usersByID[target.UserID]
+			item = &fullUserSessionWindowItem{
+				UserID: target.UserID, Username: user.Username, DisplayName: user.DisplayName,
+				Group: user.Group, Targets: make([]model.UserSessionWindowTargetStatus, 0, 1),
+			}
+			itemsByUserID[target.UserID] = item
+		}
+		item.Targets = append(item.Targets, target)
+		item.FullTargetCount++
+		if target.UpdatedAt.After(item.UpdatedAt) {
+			item.UpdatedAt = target.UpdatedAt
+		}
+	}
+	items := make([]fullUserSessionWindowItem, 0, len(itemsByUserID))
+	for _, item := range itemsByUserID {
+		items = append(items, *item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].FullTargetCount != items[j].FullTargetCount {
+			return items[i].FullTargetCount > items[j].FullTargetCount
+		}
+		if !items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		}
+		return items[i].UserID < items[j].UserID
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"full_user_count": len(items), "full_target_count": len(targets), "items": items,
+		},
 	})
 }
 

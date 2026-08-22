@@ -60,6 +60,32 @@ export interface UserAgentStatsData {
   items: UserAgentStatItem[]
 }
 
+export interface FullSessionWindowTarget {
+  user_id: number
+  target: string
+  session_window_used: number
+  session_window_limit: number
+  session_window_seconds: number
+  session_window_updated_at: string
+  full: boolean
+}
+
+export interface FullSessionWindowUser {
+  user_id: number
+  username: string
+  display_name?: string
+  group?: string
+  full_target_count: number
+  updated_at: string
+  targets: FullSessionWindowTarget[]
+}
+
+export interface FullSessionWindowsData {
+  full_user_count: number
+  full_target_count: number
+  items: FullSessionWindowUser[]
+}
+
 export type FlowMetric = 'quota' | 'tokens' | 'requests'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'

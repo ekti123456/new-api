@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 
 import type {
   FlowQuotaDataItem,
+  FullSessionWindowsData,
   QuotaDataItem,
   UptimeGroupResult,
   UserAgentStatsData,
@@ -76,6 +77,14 @@ export async function getUserAgentStats(params: {
     success: boolean
     data: UserAgentStatsData
   }>('/api/data/user-agents', { params })
+  return res.data
+}
+
+export async function getFullSessionWindows() {
+  const res = await api.get<{
+    success: boolean
+    data: FullSessionWindowsData
+  }>('/api/data/session-windows/full')
   return res.data
 }
 

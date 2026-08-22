@@ -432,6 +432,9 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	targetHeader = policyRequest.Header
 	requestContext, _ := policyRequest.Context().Value(newAPIPolicyRequestContextKey{}).(newAPIPolicyRequestContext)
 	targetConn, policyResponse, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	if policyResponse != nil && policyRequest.URL != nil {
+		model.UpdateUserSessionWindowFromHeader(info.UserId, policyRequest.URL.Scheme+"://"+policyRequest.URL.Host, policyResponse.Header)
+	}
 	verifiedPolicyDecision := processNewAPIPolicyResponseWithContext(c, policyResponse, requestContext)
 	if err != nil {
 		if verifiedPolicyDecision && policyResponse != nil {

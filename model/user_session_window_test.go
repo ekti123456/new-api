@@ -34,3 +34,32 @@ func TestUserSessionWindowAggregatesDistinctTargets(t *testing.T) {
 		t.Fatalf("unexpected aggregate: ok=%v status=%+v", ok, status)
 	}
 }
+
+func TestListFullUserSessionWindowTargetsDoesNotUseAggregate(t *testing.T) {
+	userID := 12347
+	full := http.Header{}
+	full.Set("X-Codex2API-Session-Limit", "5")
+	full.Set("X-Codex2API-Session-Used", "5")
+	full.Set("X-Codex2API-Session-Window-Seconds", "3600")
+	available := http.Header{}
+	available.Set("X-Codex2API-Session-Limit", "5")
+	available.Set("X-Codex2API-Session-Used", "0")
+	available.Set("X-Codex2API-Session-Window-Seconds", "3600")
+	UpdateUserSessionWindowFromHeader(userID, "https://codex-full.example", full)
+	UpdateUserSessionWindowFromHeader(userID, "https://codex-available.example", available)
+
+	aggregated, ok := GetUserSessionWindowStatus(userID)
+	if !ok || aggregated.Used != 5 || aggregated.Limit != 10 {
+		t.Fatalf("unexpected aggregate: ok=%v status=%+v", ok, aggregated)
+	}
+	items := ListUserSessionWindowTargetStatuses(true)
+	matched := make([]UserSessionWindowTargetStatus, 0, 1)
+	for _, item := range items {
+		if item.UserID == userID {
+			matched = append(matched, item)
+		}
+	}
+	if len(matched) != 1 || matched[0].Target != "https://codex-full.example" || !matched[0].Full {
+		t.Fatalf("full target list=%+v, want only codex-full", matched)
+	}
+}

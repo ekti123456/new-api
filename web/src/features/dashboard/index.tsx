@@ -107,6 +107,12 @@ const LazyUserAgentStatsPanel = lazy(() =>
   }))
 )
 
+const LazyFullSessionWindowsPanel = lazy(() =>
+  import('./components/models/full-session-windows-panel').then((m) => ({
+    default: m.FullSessionWindowsPanel,
+  }))
+)
+
 const LazyUserCharts = lazy(() =>
   import('./components/users/user-charts').then((m) => ({
     default: m.UserCharts,
@@ -251,6 +257,7 @@ export function Dashboard() {
 
   const meta = SECTION_META[activeSection] ?? SECTION_META.overview
   const isAdmin = Boolean(userRole && userRole >= ROLE.ADMIN)
+  const isRoot = Boolean(userRole && userRole >= ROLE.SUPER_ADMIN)
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
@@ -362,18 +369,25 @@ export function Dashboard() {
                 </Suspense>
               </FadeIn>
               {isAdmin && (
-                <>
-                  <FadeIn delay={0.05}>
-                    <Suspense fallback={<PerformanceOverviewFallback />}>
-                      <LazyPerformanceOverview />
+                <FadeIn delay={0.05}>
+                  <Suspense fallback={<PerformanceOverviewFallback />}>
+                    <LazyPerformanceOverview />
+                  </Suspense>
+                </FadeIn>
+              )}
+              {isRoot && (
+                <div className='grid gap-4 xl:grid-cols-2'>
+                  <FadeIn delay={0.1}>
+                    <Suspense fallback={<ModelChartsFallback />}>
+                      <LazyFullSessionWindowsPanel />
                     </Suspense>
                   </FadeIn>
-                  <FadeIn delay={0.1}>
+                  <FadeIn delay={0.12}>
                     <Suspense fallback={<ModelChartsFallback />}>
                       <LazyUserAgentStatsPanel filters={modelFilters} />
                     </Suspense>
                   </FadeIn>
-                </>
+                </div>
               )}
               <FadeIn delay={0.15}>
                 <Suspense fallback={<ModelChartsFallback />}>
