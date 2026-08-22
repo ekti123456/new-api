@@ -174,6 +174,19 @@ export function UserInfoDialog({
             value={concurrencyConfiguration}
           />
 
+          {userInfo.session_window_limit !== undefined && (
+            <div className='grid grid-cols-2 gap-4'>
+              <InfoItem
+                label={t('Session window usage')}
+                value={`${userInfo.session_window_used ?? 0} / ${userInfo.session_window_limit}`}
+              />
+              <InfoItem
+                label={t('Session window duration')}
+                value={`${userInfo.session_window_seconds ?? 0}s`}
+              />
+            </div>
+          )}
+
           {/* Invitation Info */}
           {(userInfo.aff_code ||
             userInfo.aff_count !== undefined ||

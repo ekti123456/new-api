@@ -951,6 +951,8 @@
     "Confidence": "置信度",
     "Configuration": "配置",
     "Concurrency Configuration": "并发配置",
+    "Session window usage": "会话窗口用量",
+    "Session window duration": "会话窗口周期",
     "Concurrency slot cooldown": "并发槽冷却时间",
     "Configuration File": "配置文件",
     "Configuration for Creem payment integration": "Creem 支付集成的配置",

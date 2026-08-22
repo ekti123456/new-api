@@ -379,6 +379,10 @@ type adminUserResponse struct {
 	CurrentConcurrency        *int   `json:"current_concurrency,omitempty"`
 	OccupiedConcurrency       *int   `json:"occupied_concurrency,omitempty"`
 	CurrentRPM                *int   `json:"current_rpm,omitempty"`
+	SessionWindowUsed         *int   `json:"session_window_used,omitempty"`
+	SessionWindowLimit        *int   `json:"session_window_limit,omitempty"`
+	SessionWindowSeconds      *int   `json:"session_window_seconds,omitempty"`
+	SessionWindowUpdatedAt    string `json:"session_window_updated_at,omitempty"`
 }
 
 func GetUser(c *gin.Context) {
@@ -425,6 +429,12 @@ func GetUser(c *gin.Context) {
 		response.CurrentConcurrency = &currentConcurrency
 		response.OccupiedConcurrency = &occupiedConcurrency
 		response.CurrentRPM = &currentRPM
+		if sessionWindow, ok := model.GetUserSessionWindowStatus(user.Id); ok {
+			response.SessionWindowUsed = &sessionWindow.Used
+			response.SessionWindowLimit = &sessionWindow.Limit
+			response.SessionWindowSeconds = &sessionWindow.WindowSeconds
+			response.SessionWindowUpdatedAt = sessionWindow.UpdatedAt.Format(time.RFC3339)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

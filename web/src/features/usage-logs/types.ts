@@ -421,4 +421,8 @@ export interface UserInfo {
   occupied_concurrency: number
   effective_concurrency_limit: number
   concurrency_source: 'default' | 'user' | 'unlimited'
+  session_window_used?: number
+  session_window_limit?: number
+  session_window_seconds?: number
+  session_window_updated_at?: string
 }

@@ -13,6 +13,7 @@ import (
 
 	common2 "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -52,6 +53,29 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 		req.Set("Accept", c.Request.Header.Get("Accept"))
 		if info.IsStream && c.Request.Header.Get("Accept") == "" {
 			req.Set("Accept", "text/event-stream")
+		}
+	}
+}
+
+var stableConversationHeaderNames = []string{
+	"Session-Id",
+	"Thread-Id",
+	"X-Client-Request-Id",
+	"X-Codex-Turn-Metadata",
+	"X-Codex-Window-Id",
+	"X-Codex-Parent-Thread-Id",
+}
+
+// applyStableConversationHeaders is independent from body parameter override.
+// Consequently enabling raw request-body passthrough cannot silently remove
+// the conversation graph required by Codex2API affinity and session limits.
+func applyStableConversationHeaders(c *gin.Context, req *http.Request) {
+	if c == nil || c.Request == nil || req == nil {
+		return
+	}
+	for _, name := range stableConversationHeaderNames {
+		if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+			req.Header.Set(name, value)
 		}
 	}
 }
@@ -327,6 +351,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	applyStableConversationHeaders(c, req)
 	if err := applyNewAPIPolicyHeaders(c, req, info, requestBody); err != nil {
 		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
 	}
@@ -334,6 +359,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+	model.UpdateUserSessionWindowFromHeader(info.UserId, req.URL.Scheme+"://"+req.URL.Host, resp.Header)
 	processNewAPIPolicyResponse(c, resp)
 	return resp, nil
 }
@@ -370,6 +396,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+	model.UpdateUserSessionWindowFromHeader(info.UserId, req.URL.Scheme+"://"+req.URL.Host, resp.Header)
 	processNewAPIPolicyResponse(c, resp)
 	return resp, nil
 }

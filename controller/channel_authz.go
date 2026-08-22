@@ -76,7 +76,8 @@ var channelSensitiveFields = map[string]struct{}{
 // channelOperationalFields lists fields managed by operation endpoints instead
 // of the general channel edit endpoint.
 var channelOperationalFields = map[string]struct{}{
-	"status": {},
+	"status":          {},
+	"ua_routing_only": {},
 }
 
 // channelReadOnlyFields lists server-managed/accounting fields that the general

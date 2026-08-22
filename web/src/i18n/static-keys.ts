@@ -572,4 +572,6 @@ export const STATIC_I18N_KEYS = [
   'This user account is disabled.',
   'Telegram binding failed. Please try again.',
   'Verification scope is missing',
+  'Session window usage',
+  'Session window duration',
 ] as const
