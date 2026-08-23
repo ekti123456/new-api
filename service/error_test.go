@@ -137,7 +137,7 @@ func TestRelayErrorHandlerSkipsRetryForFullCodex2APISessionWindow(t *testing.T) 
 	newAPIError := RelayErrorHandler(context.Background(), resp, false)
 
 	require.NotNil(t, newAPIError)
-	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
+	require.Equal(t, http.StatusBadRequest, newAPIError.StatusCode)
 	require.Equal(t, message, newAPIError.Error())
 	require.Equal(t, types.ErrorCode("session_creation_limit_exceeded"), newAPIError.GetErrorCode())
 	require.True(t, types.IsSkipRetryError(newAPIError))
@@ -152,7 +152,24 @@ func TestRelayErrorHandlerDoesNotTrustSessionLimitCodeWithoutFullWindowHeaders(t
 	newAPIError := RelayErrorHandler(context.Background(), resp, false)
 
 	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
 	require.False(t, types.IsSkipRetryError(newAPIError))
+}
+
+func TestRelayErrorHandlerKeepsAccountSessionCapacityMessage(t *testing.T) {
+	const message = "上游账号的活跃会话容量已满，请复用已有会话或稍后再试"
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"account_session_capacity_exceeded"}}`)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusBadRequest, newAPIError.StatusCode)
+	require.Equal(t, message, newAPIError.Error())
+	require.Equal(t, types.ErrorCode("account_session_capacity_exceeded"), newAPIError.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(newAPIError))
 }
 
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {

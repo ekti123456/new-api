@@ -118,8 +118,17 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			options = append(options, codex2APISessionLimitErrorOptions(resp, oaiError)...)
-			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode, options...)
+			statusCode := resp.StatusCode
+			if isCodex2APINonRetryableSessionError(resp, oaiError) {
+				options = append(options, types.ErrOptionWithSkipRetry())
+				// Codex clients retry every HTTP 429 themselves and eventually replace
+				// the structured upstream message with a generic "exceeded retry
+				// limit" error. A full session window is deterministic and
+				// cannot be fixed by retrying, so expose it as a non-retryable request
+				// error while preserving the original code and message.
+				statusCode = http.StatusBadRequest
+			}
+			newApiErr = types.WithOpenAIError(*oaiError, statusCode, options...)
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
 			}
@@ -159,24 +168,33 @@ func codex2APIPolicyErrorOptions(resp *http.Response) []types.NewAPIErrorOptions
 	return []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog()}
 }
 
-func codex2APISessionLimitErrorOptions(resp *http.Response, openAIError *types.OpenAIError) []types.NewAPIErrorOptions {
-	if resp == nil || openAIError == nil || resp.StatusCode != http.StatusTooManyRequests {
-		return nil
+func isCodex2APINonRetryableSessionError(resp *http.Response, openAIError *types.OpenAIError) bool {
+	if resp == nil || openAIError == nil {
+		return false
 	}
 	code, ok := openAIError.Code.(string)
-	if !ok || !strings.EqualFold(strings.TrimSpace(code), "session_creation_limit_exceeded") {
-		return nil
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "account_session_capacity_exceeded":
+		return resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusTooManyRequests
+	case "session_creation_limit_exceeded":
+		// Older Codex2API versions report this deterministic limit as 429. The
+		// signed capacity headers distinguish it from an ordinary rate limit.
+		if resp.StatusCode != http.StatusTooManyRequests {
+			return resp.StatusCode == http.StatusBadRequest
+		}
+	default:
+		return false
 	}
 	limit, limitErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Limit")))
 	used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Used")))
 	windowSeconds, windowErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Codex2API-Session-Window-Seconds")))
 	if limitErr != nil || usedErr != nil || windowErr != nil || limit <= 0 || used < limit || windowSeconds <= 0 {
-		return nil
+		return false
 	}
-	// A full per-user Codex2API session window is deterministic for every
-	// channel retry. Preserve its structured message instead of retrying and
-	// potentially replacing it with a later generic 429.
-	return []types.NewAPIErrorOptions{types.ErrOptionWithSkipRetry()}
+	return true
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
