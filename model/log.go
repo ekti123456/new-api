@@ -324,13 +324,6 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = appendRequestUserAgent(c, other)
 	otherStr := common.MapToJsonStr(other)
-	// 判断是否需要记录 IP
-	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
-		}
-	}
 	log := &Log{
 		UserId:           userId,
 		Username:         username,
@@ -348,7 +341,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		IsStream:         isStream,
 		Group:            group,
 		Ip: func() string {
-			if needRecordIp {
+			if common.RequestIPLogEnabled {
 				return c.ClientIP()
 			}
 			return ""
@@ -389,13 +382,6 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	createdAt := common.GetTimestamp()
 	params.Other = appendRequestUserAgent(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
-	// 判断是否需要记录 IP
-	needRecordIp := false
-	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
-			needRecordIp = true
-		}
-	}
 	log := &Log{
 		UserId:           userId,
 		Username:         username,
@@ -413,7 +399,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		IsStream:         params.IsStream,
 		Group:            params.Group,
 		Ip: func() string {
-			if needRecordIp {
+			if common.RequestIPLogEnabled {
 				return c.ClientIP()
 			}
 			return ""

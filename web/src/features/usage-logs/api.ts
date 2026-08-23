@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import { buildQueryParams } from './lib/utils'
+import { buildQueryParams } from './lib/query-params'
 import type {
   GetLogsParams,
   GetLogsResponse,
@@ -88,6 +88,33 @@ export async function getUserInfo(
   userId: number
 ): Promise<{ success: boolean; message?: string; data?: UserInfo }> {
   const res = await api.get(`/api/user/${userId}?include_runtime=true`)
+  return res.data
+}
+
+export interface LogIPLocation {
+  ip: string
+  country?: string
+  region?: string
+  city?: string
+  isp?: string
+  location: string
+  local?: boolean
+}
+
+export async function getLogIPLocation(
+  ip: string,
+  lang?: string
+): Promise<{
+  success: boolean
+  message?: string
+  data?: LogIPLocation
+}> {
+  const res = await api.get('/api/log/ip-location', {
+    params: { ip, lang },
+    disableDuplicate: true,
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
   return res.data
 }
 

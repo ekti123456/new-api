@@ -49,8 +49,12 @@ import {
   UserCog,
   Info,
   LogIn,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
@@ -63,6 +67,7 @@ import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { getLogIPLocation, type LogIPLocation } from '../../api'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
@@ -477,8 +482,10 @@ interface DetailsDialogProps {
 }
 
 export function DetailsDialog(props: DetailsDialogProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+  const [ipLocation, setIpLocation] = useState<LogIPLocation | null>(null)
+  const [ipLocationLoading, setIpLocationLoading] = useState(false)
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
   const typeConfig = getLogTypeConfig(props.log.type)
@@ -498,6 +505,34 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
+
+  useEffect(() => {
+    setIpLocation(null)
+    setIpLocationLoading(false)
+  }, [props.log.ip, props.open])
+
+  const refreshIPLocation = async () => {
+    if (!props.log.ip || ipLocationLoading) return
+    setIpLocationLoading(true)
+    try {
+      const response = await getLogIPLocation(
+        props.log.ip,
+        i18n.resolvedLanguage || i18n.language
+      )
+      if (!response.success || !response.data) {
+        throw new Error(response.message || t('Failed to query IP location'))
+      }
+      setIpLocation(response.data)
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to query IP location')
+      )
+    } finally {
+      setIpLocationLoading(false)
+    }
+  }
   const adminInfo = other?.admin_info
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
@@ -694,9 +729,34 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow
               label={t('IP Address')}
               value={
-                <span className='flex items-center gap-1'>
+                <span className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1'>
                   <Globe className='size-3 text-amber-500' aria-hidden='true' />
-                  {props.log.ip}
+                  <span>{props.log.ip}</span>
+                  {ipLocation && (
+                    <span className='text-muted-foreground font-sans'>
+                      · {ipLocation.location}
+                      {ipLocation.isp ? ` · ${ipLocation.isp}` : ''}
+                    </span>
+                  )}
+                  {props.isAdmin && (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      className='h-6 gap-1 px-1.5 font-sans text-xs'
+                      disabled={ipLocationLoading}
+                      onClick={() => void refreshIPLocation()}
+                      title={t('Refresh IP location')}
+                      aria-label={t('Refresh IP location')}
+                    >
+                      {ipLocationLoading ? (
+                        <Loader2 className='size-3 animate-spin' />
+                      ) : (
+                        <RefreshCw className='size-3' />
+                      )}
+                      {t('Refresh location')}
+                    </Button>
+                  )}
                 </span>
               }
               mono
