@@ -81,6 +81,37 @@ export async function getNotice(): Promise<{
   return res.data
 }
 
+export interface PersonalNotification {
+  id: number
+  user_id: number
+  title: string
+  content: string
+  created_at: number
+  read_at: number
+}
+
+export async function getPersonalNotifications(): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    items: PersonalNotification[]
+    unread_count: number
+  }
+}> {
+  const res = await api.get('/api/user/notifications/personal', {
+    skipErrorHandler: true,
+  })
+  return res.data
+}
+
+export async function markPersonalNotificationsRead(): Promise<{
+  success: boolean
+  message?: string
+}> {
+  const res = await api.post('/api/user/notifications/personal/read')
+  return res.data
+}
+
 // ============================================================================
 // 2FA Management APIs
 // ============================================================================

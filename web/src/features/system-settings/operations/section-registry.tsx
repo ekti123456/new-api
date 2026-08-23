@@ -55,6 +55,13 @@ const OPERATIONS_SECTIONS = [
             settings['perf_metrics_setting.bucket_time'] ?? 'hour',
           'perf_metrics_setting.retention_days':
             settings['perf_metrics_setting.retention_days'] ?? 0,
+          'perf_metrics_setting.user_anomaly_monitored_groups':
+            settings['perf_metrics_setting.user_anomaly_monitored_groups'] ??
+            [],
+          'perf_metrics_setting.user_anomaly_min_requests':
+            settings['perf_metrics_setting.user_anomaly_min_requests'] ?? 10,
+          'perf_metrics_setting.user_error_rate_threshold':
+            settings['perf_metrics_setting.user_error_rate_threshold'] ?? 5,
         }}
       />
     ),

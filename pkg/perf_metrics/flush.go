@@ -15,6 +15,8 @@ func flushLoop() {
 		interval := perf_metrics_setting.GetFlushIntervalMinutes()
 		time.Sleep(time.Duration(interval) * time.Minute)
 		setting := perf_metrics_setting.GetSetting()
+		flushUserMetricSamples()
+		cleanupExpiredUserMetricSamples()
 		if !setting.Enabled {
 			continue
 		}

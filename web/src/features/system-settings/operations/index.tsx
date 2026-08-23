@@ -60,6 +60,9 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
+  'perf_metrics_setting.user_anomaly_monitored_groups': [],
+  'perf_metrics_setting.user_anomaly_min_requests': 10,
+  'perf_metrics_setting.user_error_rate_threshold': 5,
 }
 
 export function OperationsSettings() {

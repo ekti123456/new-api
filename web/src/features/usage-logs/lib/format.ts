@@ -167,6 +167,17 @@ export function parseLogOther(other: string): LogOtherData | null {
   }
 }
 
+export function getAdminAccessURL(
+  other: LogOtherData | null | undefined,
+  isAdmin: boolean
+): string | null {
+  if (!isAdmin) return null
+  const accessURL = other?.admin_info?.access_url
+  if (typeof accessURL !== 'string') return null
+  const trimmedAccessURL = accessURL.trim()
+  return trimmedAccessURL || null
+}
+
 /**
  * Get time color based on duration (in seconds)
  */

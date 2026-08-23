@@ -20,8 +20,15 @@ import { useQuery } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
 
 import { useStatus } from '@/hooks/use-status'
-import { getNotice } from '@/lib/api'
+import {
+  getNotice,
+  getPersonalNotifications,
+  markPersonalNotificationsRead,
+} from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import { useNotificationStore } from '@/stores/notification-store'
+
+export type NotificationTab = 'personal' | 'notice' | 'announcements'
 
 function hashString(input: string): string {
   let hash = 0
@@ -64,9 +71,8 @@ function getAnnouncementKey(item: Record<string, unknown>): string {
  */
 export function useNotifications() {
   const [popoverOpen, setPopoverOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'notice' | 'announcements'>(
-    'notice'
-  )
+  const [activeTab, setActiveTab] = useState<NotificationTab>('notice')
+  const userId = useAuthStore((state) => state.auth.user?.id)
 
   // Fetch Notice from API
   const {
@@ -82,10 +88,35 @@ export function useNotifications() {
   // Fetch Announcements from status
   const { status, loading: statusLoading } = useStatus()
   const announcementsEnabled = status?.announcements_enabled ?? false
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const announcements: Record<string, unknown>[] = announcementsEnabled
-    ? ((status?.announcements || []) as Record<string, unknown>[]).slice(0, 20)
+  const announcements: Record<string, unknown>[] = useMemo(
+    () =>
+      announcementsEnabled
+        ? ((status?.announcements || []) as Record<string, unknown>[]).slice(
+            0,
+            20
+          )
+        : [],
+    [announcementsEnabled, status?.announcements]
+  )
+
+  const {
+    data: personalResponse,
+    isLoading: personalLoading,
+    refetch: refetchPersonal,
+  } = useQuery({
+    queryKey: ['personal-notifications', userId],
+    queryFn: getPersonalNotifications,
+    enabled: Boolean(userId),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: false,
+  })
+  const personalNotifications = userId
+    ? (personalResponse?.data?.items ?? [])
     : []
+  const personalUnreadCount = userId
+    ? (personalResponse?.data?.unread_count ?? 0)
+    : 0
 
   // Notification store
   const {
@@ -115,9 +146,16 @@ export function useNotifications() {
     return {
       notice: noticeUnread,
       announcements: announcementsUnread,
-      total: noticeUnread + announcementsUnread,
+      personal: personalUnreadCount,
+      total: noticeUnread + announcementsUnread + personalUnreadCount,
     }
-  }, [noticeContent, lastReadNotice, announcements, isAnnouncementRead])
+  }, [
+    noticeContent,
+    lastReadNotice,
+    announcements,
+    isAnnouncementRead,
+    personalUnreadCount,
+  ])
 
   const markAnnouncementsAsRead = () => {
     if (announcements.length > 0) {
@@ -128,8 +166,15 @@ export function useNotifications() {
     }
   }
 
+  const markPersonalAsRead = () => {
+    if (!userId || personalUnreadCount <= 0) return
+    void markPersonalNotificationsRead()
+      .then(() => refetchPersonal())
+      .catch(() => undefined)
+  }
+
   // Handle popover open
-  const handleOpenPopover = (tab?: 'notice' | 'announcements') => {
+  const handleOpenPopover = (tab?: NotificationTab) => {
     const nextTab = tab || activeTab
 
     // Mark currently visible content as read when opening the notification center
@@ -138,6 +183,9 @@ export function useNotifications() {
     }
     if (nextTab === 'announcements') {
       markAnnouncementsAsRead()
+    }
+    if (nextTab === 'personal') {
+      markPersonalAsRead()
     }
 
     setActiveTab(nextTab)
@@ -154,11 +202,14 @@ export function useNotifications() {
   }
 
   // Handle tab change - mark announcements as read when switching to that tab
-  const handleTabChange = (tab: 'notice' | 'announcements') => {
+  const handleTabChange = (tab: NotificationTab) => {
     setActiveTab(tab)
 
     if (tab === 'announcements') {
       markAnnouncementsAsRead()
+    }
+    if (tab === 'personal') {
+      markPersonalAsRead()
     }
   }
 
@@ -166,12 +217,16 @@ export function useNotifications() {
     // Data
     notice: noticeContent,
     announcements,
-    loading: noticeLoading || statusLoading,
+    personalNotifications,
+    personalEnabled: Boolean(userId),
+    loading:
+      noticeLoading || statusLoading || (Boolean(userId) && personalLoading),
 
     // Unread counts
     unreadCount: unreadCounts.total,
     unreadNoticeCount: unreadCounts.notice,
     unreadAnnouncementsCount: unreadCounts.announcements,
+    unreadPersonalCount: unreadCounts.personal,
 
     // Popover state
     popoverOpen,
@@ -183,5 +238,6 @@ export function useNotifications() {
     openPopover: handleOpenPopover,
     closePopover: () => setPopoverOpen(false),
     refetchNotice,
+    refetchPersonal,
   }
 }

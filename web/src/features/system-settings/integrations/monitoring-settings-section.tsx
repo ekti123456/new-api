@@ -17,12 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { MultiSelect } from '@/components/multi-select'
 import {
   Form,
   FormControl,
@@ -42,6 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { getGroups } from '@/features/users/api'
 
 import {
   SettingsForm,
@@ -67,6 +69,9 @@ const monitoringSchema = z.object({
     flush_interval: z.coerce.number().min(1),
     bucket_time: z.enum(['minute', '5min', 'hour']),
     retention_days: z.coerce.number().min(0),
+    user_anomaly_monitored_groups: z.array(z.string()),
+    user_anomaly_min_requests: z.coerce.number().int().min(1).max(100000),
+    user_error_rate_threshold: z.coerce.number().gt(0).max(100),
   }),
 })
 
@@ -79,6 +84,9 @@ type FlatMonitoringDefaults = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'minute' | '5min' | 'hour'
   'perf_metrics_setting.retention_days': number
+  'perf_metrics_setting.user_anomaly_monitored_groups': string[]
+  'perf_metrics_setting.user_anomaly_min_requests': number
+  'perf_metrics_setting.user_error_rate_threshold': number
 }
 
 type MonitoringSettingsSectionProps = {
@@ -94,6 +102,12 @@ const buildFormDefaults = (
     flush_interval: defaults['perf_metrics_setting.flush_interval'],
     bucket_time: defaults['perf_metrics_setting.bucket_time'],
     retention_days: defaults['perf_metrics_setting.retention_days'],
+    user_anomaly_monitored_groups:
+      defaults['perf_metrics_setting.user_anomaly_monitored_groups'],
+    user_anomaly_min_requests:
+      defaults['perf_metrics_setting.user_anomaly_min_requests'],
+    user_error_rate_threshold:
+      defaults['perf_metrics_setting.user_error_rate_threshold'],
   },
 })
 
@@ -108,6 +122,13 @@ const normalizeDefaults = (
     defaults['perf_metrics_setting.bucket_time'],
   'perf_metrics_setting.retention_days':
     defaults['perf_metrics_setting.retention_days'],
+  'perf_metrics_setting.user_anomaly_monitored_groups': [
+    ...defaults['perf_metrics_setting.user_anomaly_monitored_groups'],
+  ].sort(),
+  'perf_metrics_setting.user_anomaly_min_requests':
+    defaults['perf_metrics_setting.user_anomaly_min_requests'],
+  'perf_metrics_setting.user_error_rate_threshold':
+    defaults['perf_metrics_setting.user_error_rate_threshold'],
 })
 
 const normalizeFormValues = (
@@ -120,6 +141,13 @@ const normalizeFormValues = (
   'perf_metrics_setting.bucket_time': values.perf_metrics_setting.bucket_time,
   'perf_metrics_setting.retention_days':
     values.perf_metrics_setting.retention_days,
+  'perf_metrics_setting.user_anomaly_monitored_groups': [
+    ...new Set(values.perf_metrics_setting.user_anomaly_monitored_groups),
+  ].sort(),
+  'perf_metrics_setting.user_anomaly_min_requests':
+    values.perf_metrics_setting.user_anomaly_min_requests,
+  'perf_metrics_setting.user_error_rate_threshold':
+    values.perf_metrics_setting.user_error_rate_threshold,
 })
 
 export function MonitoringSettingsSection({
@@ -127,6 +155,7 @@ export function MonitoringSettingsSection({
 }: MonitoringSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [availableGroups, setAvailableGroups] = useState<string[]>([])
   const baselineRef = useRef<FlatMonitoringDefaults>(
     normalizeDefaults(defaultValues)
   )
@@ -156,11 +185,29 @@ export function MonitoringSettingsSection({
 
   const perfMetricsEnabled = form.watch('perf_metrics_setting.enabled')
 
+  useEffect(() => {
+    let cancelled = false
+    void getGroups()
+      .then((response) => {
+        if (!cancelled) setAvailableGroups(response.data ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) toast.error(t('Unable to load groups'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [t])
+
   const onSubmit = async (values: MonitoringFormValues) => {
     const normalized = normalizeFormValues(values)
     const updates = (
       Object.keys(normalized) as Array<keyof FlatMonitoringDefaults>
-    ).filter((key) => normalized[key] !== baselineRef.current[key])
+    ).filter(
+      (key) =>
+        JSON.stringify(normalized[key]) !==
+        JSON.stringify(baselineRef.current[key])
+    )
 
     if (updates.length === 0) {
       toast.info(t('No changes to save'))
@@ -170,7 +217,9 @@ export function MonitoringSettingsSection({
     for (const key of updates) {
       await updateOption.mutateAsync({
         key,
-        value: normalized[key],
+        value: Array.isArray(normalized[key])
+          ? JSON.stringify(normalized[key])
+          : normalized[key],
       })
     }
 
@@ -312,6 +361,96 @@ export function MonitoringSettingsSection({
                 </FormItem>
               )}
             />
+          </div>
+
+          <div className='space-y-4 rounded-lg border p-4'>
+            <div>
+              <h4 className='font-medium'>
+                {t('User performance anomaly monitoring')}
+              </h4>
+              <p className='text-muted-foreground mt-1 text-xs'>
+                {t(
+                  'Only selected groups are sampled. Samples are retained for two hours and are visible only to the root administrator.'
+                )}
+              </p>
+            </div>
+            <FormField
+              control={form.control}
+              name='perf_metrics_setting.user_anomaly_monitored_groups'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Monitored groups')}</FormLabel>
+                  <FormControl>
+                    <MultiSelect
+                      options={availableGroups.map((group) => ({
+                        value: group,
+                        label: group,
+                      }))}
+                      selected={field.value}
+                      onChange={field.onChange}
+                      placeholder={t('Select groups to monitor')}
+                      disabled={!perfMetricsEnabled}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Leave empty to disable user anomaly monitoring.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <div className='grid gap-4 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='perf_metrics_setting.user_anomaly_min_requests'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Minimum request samples')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={100000}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                        disabled={!perfMetricsEnabled}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'The same minimum protects both first-token and error-rate detection from one-off requests.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='perf_metrics_setting.user_error_rate_threshold'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('User error-rate threshold (%)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0.01}
+                        max={100}
+                        step={0.1}
+                        {...safeNumberFieldProps(field)}
+                        disabled={!perfMetricsEnabled}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Users above this error rate are shown after reaching the minimum request count.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           </div>
         </SettingsForm>
       </Form>

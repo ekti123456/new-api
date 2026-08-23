@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-import { Bell, Megaphone } from 'lucide-react'
+import { Bell, BellRing, Megaphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { RichContent } from '@/components/rich-content'
@@ -40,9 +40,12 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type { PersonalNotification } from '@/lib/api'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
+
+type NotificationTab = 'personal' | 'notice' | 'announcements'
 
 interface AnnouncementItem {
   id?: number | string
@@ -56,12 +59,71 @@ interface NotificationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   unreadCount: number
-  activeTab: 'notice' | 'announcements'
-  onTabChange: (tab: 'notice' | 'announcements') => void
+  activeTab: NotificationTab
+  onTabChange: (tab: NotificationTab) => void
   notice: string
   announcements: AnnouncementItem[]
+  personalNotifications: PersonalNotification[]
+  personalEnabled: boolean
   loading: boolean
   className?: string
+}
+
+function PersonalNotificationsContent({
+  notifications,
+  loading,
+  t,
+}: {
+  notifications: PersonalNotification[]
+  loading: boolean
+  t: TFunction
+}) {
+  if (loading) {
+    return (
+      <EmptyState
+        icon={<BellRing />}
+        title={t('Loading...')}
+        description={t('Messages sent directly to you')}
+      />
+    )
+  }
+
+  if (notifications.length === 0) {
+    return (
+      <EmptyState icon={<BellRing />} title={t('No personal notifications')} />
+    )
+  }
+
+  return (
+    <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
+      <div className='flex flex-col'>
+        {notifications.map((item, index) => (
+          <div key={item.id}>
+            <div className='py-3'>
+              <div className='flex items-start gap-3'>
+                <span
+                  className={cn(
+                    'mt-1.5 inline-block size-2 shrink-0 rounded-full',
+                    item.read_at > 0 ? 'bg-muted-foreground/35' : 'bg-sky-500'
+                  )}
+                />
+                <div className='flex min-w-0 flex-1 flex-col gap-2'>
+                  <div className='text-sm font-semibold'>{item.title}</div>
+                  <div className='text-sm'>
+                    <RichContent breaks content={item.content} />
+                  </div>
+                  <div className='text-muted-foreground text-xs'>
+                    {formatDateTimeObject(new Date(item.created_at * 1000))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {index < notifications.length - 1 ? <Separator /> : null}
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  )
 }
 
 /**
@@ -298,10 +360,14 @@ export function NotificationPopover({
   onTabChange,
   notice,
   announcements,
+  personalNotifications,
+  personalEnabled,
   loading,
   className,
 }: NotificationPopoverProps) {
   const { t } = useTranslation()
+  const resolvedActiveTab =
+    !personalEnabled && activeTab === 'personal' ? 'notice' : activeTab
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
@@ -331,17 +397,28 @@ export function NotificationPopover({
         className='w-[min(26rem,calc(100vw-1rem))] gap-3 p-3'
       >
         <PopoverHeader className='gap-1 px-1'>
-          <PopoverTitle>{t('System Announcements')}</PopoverTitle>
+          <PopoverTitle>{t('Notifications')}</PopoverTitle>
           <p className='text-muted-foreground text-xs'>
             {t('Latest platform updates and notices')}
           </p>
         </PopoverHeader>
 
         <Tabs
-          value={activeTab}
+          value={resolvedActiveTab}
           onValueChange={onTabChange as (value: string) => void}
         >
-          <TabsList className='grid w-full grid-cols-2'>
+          <TabsList
+            className={cn(
+              'grid w-full',
+              personalEnabled ? 'grid-cols-3' : 'grid-cols-2'
+            )}
+          >
+            {personalEnabled ? (
+              <TabsTrigger value='personal' className='gap-1.5'>
+                <BellRing className='size-3.5' />
+                {t('Personal notification')}
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value='notice' className='gap-1.5'>
               <Bell className='size-3.5' />
               {t('Notice')}
@@ -351,6 +428,16 @@ export function NotificationPopover({
               {t('Timeline')}
             </TabsTrigger>
           </TabsList>
+
+          {personalEnabled ? (
+            <TabsContent value='personal' className='mt-2'>
+              <PersonalNotificationsContent
+                notifications={personalNotifications}
+                loading={loading}
+                t={t}
+              />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value='notice' className='mt-2'>
             <NoticeContent notice={notice} loading={loading} t={t} />

@@ -335,6 +335,47 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "perf_metrics_setting.user_anomaly_min_requests":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value < 1 || value > 100000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user anomaly minimum requests must be between 1 and 100000",
+			})
+			return
+		}
+	case "perf_metrics_setting.user_error_rate_threshold":
+		value, parseErr := strconv.ParseFloat(option.Value.(string), 64)
+		if parseErr != nil || value <= 0 || value > 100 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user error rate threshold must be greater than 0 and at most 100",
+			})
+			return
+		}
+	case "perf_metrics_setting.user_anomaly_monitored_groups":
+		var groups []string
+		if err = common.UnmarshalJsonStr(option.Value.(string), &groups); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "monitored groups must be a JSON string array",
+			})
+			return
+		}
+		activeGroups := ratio_setting.GetGroupRatioCopy()
+		for _, group := range groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
+			if _, ok := activeGroups[group]; !ok {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "unknown monitored group: " + group,
+				})
+				return
+			}
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {

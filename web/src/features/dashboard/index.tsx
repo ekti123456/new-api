@@ -113,6 +113,12 @@ const LazyFullSessionWindowsPanel = lazy(() =>
   }))
 )
 
+const LazyUserPerformanceAnomaliesPanel = lazy(() =>
+  import('./components/models/user-performance-anomalies-panel').then((m) => ({
+    default: m.UserPerformanceAnomaliesPanel,
+  }))
+)
+
 const LazyUserCharts = lazy(() =>
   import('./components/users/user-charts').then((m) => ({
     default: m.UserCharts,
@@ -376,18 +382,27 @@ export function Dashboard() {
                 </FadeIn>
               )}
               {isRoot && (
-                <div className='grid gap-4 xl:grid-cols-2'>
+                <>
                   <FadeIn delay={0.1}>
                     <Suspense fallback={<ModelChartsFallback />}>
-                      <LazyFullSessionWindowsPanel />
+                      <LazyUserPerformanceAnomaliesPanel
+                        username={modelFilters.username}
+                      />
                     </Suspense>
                   </FadeIn>
-                  <FadeIn delay={0.12}>
-                    <Suspense fallback={<ModelChartsFallback />}>
-                      <LazyUserAgentStatsPanel filters={modelFilters} />
-                    </Suspense>
-                  </FadeIn>
-                </div>
+                  <div className='grid gap-4 xl:grid-cols-2'>
+                    <FadeIn delay={0.12}>
+                      <Suspense fallback={<ModelChartsFallback />}>
+                        <LazyFullSessionWindowsPanel />
+                      </Suspense>
+                    </FadeIn>
+                    <FadeIn delay={0.14}>
+                      <Suspense fallback={<ModelChartsFallback />}>
+                        <LazyUserAgentStatsPanel filters={modelFilters} />
+                      </Suspense>
+                    </FadeIn>
+                  </div>
+                </>
               )}
               <FadeIn delay={0.15}>
                 <Suspense fallback={<ModelChartsFallback />}>

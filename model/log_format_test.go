@@ -37,42 +37,45 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	require.Contains(t, parsed, "model_price")
 }
 
-func TestAppendRequestUserAgentStoresSanitizedAdminInfo(t *testing.T) {
+func TestAppendRequestAdminMetadataStoresSanitizedAdminInfo(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Request = httptest.NewRequest("POST", "http://chat.example.com/v1/responses", nil)
 	ctx.Request.Header.Set("User-Agent", "codex-cli/1.2\r\ninjected\x00")
+	ctx.Request.Header.Set("X-Forwarded-Proto", "https")
 	other := map[string]interface{}{
 		"admin_info": map[string]interface{}{"use_channel": []int{1}},
 	}
 
-	result := appendRequestUserAgent(ctx, other)
+	result := appendRequestAdminMetadata(ctx, other)
 
 	adminInfo, ok := result["admin_info"].(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, "codex-cli/1.2injected", adminInfo["user_agent"])
+	require.Equal(t, "https://chat.example.com", adminInfo["access_url"])
 	require.Equal(t, []int{1}, adminInfo["use_channel"])
 }
 
-func TestAppendRequestUserAgentLimitsUtf8Length(t *testing.T) {
+func TestAppendRequestAdminMetadataLimitsUtf8Length(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	ctx.Request.Header.Set("User-Agent", strings.Repeat("界", 200))
 
-	result := appendRequestUserAgent(ctx, nil)
+	result := appendRequestAdminMetadata(ctx, nil)
 
 	adminInfo := result["admin_info"].(map[string]interface{})
 	userAgent := adminInfo["user_agent"].(string)
-	require.LessOrEqual(t, len(userAgent), maxLogUserAgentBytes)
+	require.LessOrEqual(t, len(userAgent), maxLogAdminRequestMetadataBytes)
 	require.True(t, strings.HasSuffix(userAgent, "界"))
 }
 
-func TestFormatUserLogsStripsRequestUserAgent(t *testing.T) {
+func TestFormatUserLogsStripsRequestAdminMetadata(t *testing.T) {
 	other := common.MapToJsonStr(map[string]interface{}{
 		"request_path": "/v1/responses",
 		"admin_info": map[string]interface{}{
 			"user_agent": "codex-cli/1.2",
+			"access_url": "https://chat.example.com",
 		},
 	})
 	logs := []*Log{{Other: other}}

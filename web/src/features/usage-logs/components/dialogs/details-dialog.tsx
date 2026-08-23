@@ -79,6 +79,7 @@ import {
   isViolationFeeLog,
   getFirstResponseTimeColor,
   getResponseTimeColor,
+  getAdminAccessURL,
   renderAuditContent,
 } from '../../lib/format'
 import {
@@ -534,6 +535,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     }
   }
   const adminInfo = other?.admin_info
+  const accessURL = getAdminAccessURL(other, props.isAdmin)
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -769,6 +771,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
               value={adminInfo.user_agent}
               mono
             />
+          )}
+
+          {accessURL && (
+            <DetailRow label={t('Access URL')} value={accessURL} mono />
           )}
 
           {showTiming && props.log.use_time > 0 && (

@@ -81,30 +81,37 @@ type Log struct {
 	Other             string `json:"other"`
 }
 
-const maxLogUserAgentBytes = 512
+const maxLogAdminRequestMetadataBytes = 512
 
-func appendRequestUserAgent(c *gin.Context, other map[string]interface{}) map[string]interface{} {
-	if c == nil || c.Request == nil {
-		return other
-	}
-
-	userAgent := strings.Map(func(r rune) rune {
+func sanitizeLogAdminRequestMetadata(value string) string {
+	value = strings.Map(func(r rune) rune {
 		if r == '\r' || r == '\n' || r == 0 {
 			return -1
 		}
 		return r
-	}, c.Request.UserAgent())
-	userAgent = strings.TrimSpace(userAgent)
-	if userAgent == "" {
+	}, value)
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLogAdminRequestMetadataBytes {
+		return value
+	}
+	value = value[:maxLogAdminRequestMetadataBytes]
+	for !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
+}
+
+func appendRequestAdminMetadata(c *gin.Context, other map[string]interface{}) map[string]interface{} {
+	if c == nil || c.Request == nil {
 		return other
 	}
 
-	if len(userAgent) > maxLogUserAgentBytes {
-		userAgent = userAgent[:maxLogUserAgentBytes]
-		for !utf8.ValidString(userAgent) {
-			userAgent = userAgent[:len(userAgent)-1]
-		}
+	userAgent := sanitizeLogAdminRequestMetadata(c.Request.UserAgent())
+	accessURL := sanitizeLogAdminRequestMetadata(common.GetRequestOrigin(c.Request))
+	if userAgent == "" && accessURL == "" {
+		return other
 	}
+
 	if other == nil {
 		other = make(map[string]interface{})
 	}
@@ -113,7 +120,12 @@ func appendRequestUserAgent(c *gin.Context, other map[string]interface{}) map[st
 		adminInfo = make(map[string]interface{})
 		other["admin_info"] = adminInfo
 	}
-	adminInfo["user_agent"] = userAgent
+	if userAgent != "" {
+		adminInfo["user_agent"] = userAgent
+	}
+	if accessURL != "" {
+		adminInfo["access_url"] = accessURL
+	}
 	return other
 }
 
@@ -322,7 +334,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
-	other = appendRequestUserAgent(c, other)
+	other = appendRequestAdminMetadata(c, other)
 	otherStr := common.MapToJsonStr(other)
 	log := &Log{
 		UserId:           userId,
@@ -380,7 +392,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
-	params.Other = appendRequestUserAgent(c, params.Other)
+	params.Other = appendRequestAdminMetadata(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	log := &Log{
 		UserId:           userId,

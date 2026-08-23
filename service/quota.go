@@ -379,8 +379,9 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+	userMetricIdentity := perfmetrics.CaptureUserMetricIdentity(ctx, relayInfo)
 	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, int64(usage.CompletionTokens))
+		perfmetrics.RecordRelaySample(relayInfo, true, int64(usage.CompletionTokens), userMetricIdentity)
 	})
 }
 

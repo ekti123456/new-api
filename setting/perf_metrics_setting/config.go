@@ -1,19 +1,36 @@
 package perf_metrics_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/setting/config"
+)
+
+const (
+	DefaultUserAnomalyMinRequests = 10
+	DefaultUserErrorRateThreshold = 5.0
+	UserTtftAboveAverageRatio     = 50.0
+	UserAnomalyRetentionHours     = 2
+)
 
 type PerfMetricsSetting struct {
-	Enabled       bool   `json:"enabled"`
-	FlushInterval int    `json:"flush_interval"`
-	BucketTime    string `json:"bucket_time"`
-	RetentionDays int    `json:"retention_days"`
+	Enabled                    bool     `json:"enabled"`
+	FlushInterval              int      `json:"flush_interval"`
+	BucketTime                 string   `json:"bucket_time"`
+	RetentionDays              int      `json:"retention_days"`
+	UserAnomalyMonitoredGroups []string `json:"user_anomaly_monitored_groups"`
+	UserAnomalyMinRequests     int      `json:"user_anomaly_min_requests"`
+	UserErrorRateThreshold     float64  `json:"user_error_rate_threshold"`
 }
 
 var perfMetricsSetting = PerfMetricsSetting{
-	Enabled:       true,
-	FlushInterval: 5,
-	BucketTime:    "hour",
-	RetentionDays: 0,
+	Enabled:                    true,
+	FlushInterval:              5,
+	BucketTime:                 "hour",
+	RetentionDays:              0,
+	UserAnomalyMonitoredGroups: []string{},
+	UserAnomalyMinRequests:     DefaultUserAnomalyMinRequests,
+	UserErrorRateThreshold:     DefaultUserErrorRateThreshold,
 }
 
 func init() {
@@ -42,4 +59,49 @@ func GetFlushIntervalMinutes() int {
 		return 1
 	}
 	return perfMetricsSetting.FlushInterval
+}
+
+func GetUserAnomalyMonitoredGroups() []string {
+	groups := make([]string, 0, len(perfMetricsSetting.UserAnomalyMonitoredGroups))
+	seen := make(map[string]struct{}, len(perfMetricsSetting.UserAnomalyMonitoredGroups))
+	for _, group := range perfMetricsSetting.UserAnomalyMonitoredGroups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+func IsUserAnomalyGroupMonitored(group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false
+	}
+	for _, monitoredGroup := range GetUserAnomalyMonitoredGroups() {
+		if monitoredGroup == group {
+			return true
+		}
+	}
+	return false
+}
+
+func GetUserAnomalyMinRequests() int {
+	if perfMetricsSetting.UserAnomalyMinRequests < 1 {
+		return DefaultUserAnomalyMinRequests
+	}
+	return perfMetricsSetting.UserAnomalyMinRequests
+}
+
+func GetUserErrorRateThreshold() float64 {
+	threshold := perfMetricsSetting.UserErrorRateThreshold
+	if threshold <= 0 || threshold > 100 {
+		return DefaultUserErrorRateThreshold
+	}
+	return threshold
 }

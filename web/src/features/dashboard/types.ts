@@ -86,6 +86,38 @@ export interface FullSessionWindowsData {
   items: FullSessionWindowUser[]
 }
 
+export interface UserPerformanceAnomalyItem {
+  user_id: number
+  username: string
+  email?: string
+  group: string
+  request_count: number
+  error_count: number
+  error_rate: number
+  ttft_count: number
+  avg_ttft_ms: number
+  group_avg_ttft_ms: number
+  above_group_avg_count: number
+  above_group_avg_percentage: number
+  ttft_anomaly: boolean
+  error_anomaly: boolean
+  ip: string
+  access_url: string
+  last_seen_at: number
+}
+
+export interface UserPerformanceAnomaliesData {
+  window_seconds: number
+  min_requests: number
+  error_rate_threshold: number
+  ttft_above_average_threshold: number
+  monitored_groups: string[]
+  total: number
+  page: number
+  page_size: number
+  items: UserPerformanceAnomalyItem[]
+}
+
 export type FlowMetric = 'quota' | 'tokens' | 'requests'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'

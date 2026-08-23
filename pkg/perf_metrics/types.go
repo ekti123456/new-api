@@ -14,8 +14,49 @@ type Sample struct {
 	TtftMs       int64
 	HasTtft      bool
 	Success      bool
+	UserError    bool
 	OutputTokens int64
 	GenerationMs int64
+	User         *UserMetricIdentity
+}
+
+type UserMetricIdentity struct {
+	UserID    int
+	Username  string
+	IP        string
+	AccessURL string
+}
+
+type UserAnomalyItem struct {
+	UserID                  int     `json:"user_id"`
+	Username                string  `json:"username"`
+	Email                   string  `json:"email,omitempty"`
+	Group                   string  `json:"group"`
+	RequestCount            int64   `json:"request_count"`
+	ErrorCount              int64   `json:"error_count"`
+	ErrorRate               float64 `json:"error_rate"`
+	TtftCount               int64   `json:"ttft_count"`
+	AvgTtftMs               float64 `json:"avg_ttft_ms"`
+	GroupAvgTtftMs          float64 `json:"group_avg_ttft_ms"`
+	AboveGroupAvgCount      int64   `json:"above_group_avg_count"`
+	AboveGroupAvgPercentage float64 `json:"above_group_avg_percentage"`
+	TtftAnomaly             bool    `json:"ttft_anomaly"`
+	ErrorAnomaly            bool    `json:"error_anomaly"`
+	IP                      string  `json:"ip"`
+	AccessURL               string  `json:"access_url"`
+	LastSeenAt              int64   `json:"last_seen_at"`
+}
+
+type UserAnomalyResult struct {
+	WindowSeconds             int64             `json:"window_seconds"`
+	MinRequests               int               `json:"min_requests"`
+	ErrorRateThreshold        float64           `json:"error_rate_threshold"`
+	TtftAboveAverageThreshold float64           `json:"ttft_above_average_threshold"`
+	MonitoredGroups           []string          `json:"monitored_groups"`
+	Total                     int               `json:"total"`
+	Page                      int               `json:"page"`
+	PageSize                  int               `json:"page_size"`
+	Items                     []UserAnomalyItem `json:"items"`
 }
 
 type QueryParams struct {

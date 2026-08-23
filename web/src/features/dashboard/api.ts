@@ -24,6 +24,7 @@ import type {
   QuotaDataItem,
   UptimeGroupResult,
   UserAgentStatsData,
+  UserPerformanceAnomaliesData,
 } from './types'
 
 // ============================================================================
@@ -85,6 +86,39 @@ export async function getFullSessionWindows() {
     success: boolean
     data: FullSessionWindowsData
   }>('/api/data/session-windows/full')
+  return res.data
+}
+
+export async function getUserPerformanceAnomalies(
+  username: string | undefined,
+  page: number,
+  pageSize: number
+) {
+  const res = await api.get<{
+    success: boolean
+    data: UserPerformanceAnomaliesData
+  }>('/api/data/user-performance-anomalies', {
+    params: {
+      ...(username ? { username } : {}),
+      page,
+      page_size: pageSize,
+    },
+  })
+  return res.data
+}
+
+export type UserPerformanceAlertChannel = 'in_app' | 'email'
+
+export async function sendUserPerformanceAlert(payload: {
+  user_id: number
+  channel: UserPerformanceAlertChannel
+  title: string
+  content: string
+}) {
+  const res = await api.post<{
+    success: boolean
+    message?: string
+  }>('/api/data/user-performance-anomalies/contact', payload)
   return res.data
 }
 

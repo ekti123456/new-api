@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 
 	"github.com/gin-gonic/gin"
 )
@@ -76,6 +77,21 @@ func GetUserAgentStats(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    stats,
+	})
+}
+
+func GetUserPerformanceAnomalies(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	result, err := perfmetrics.QueryUserAnomalies(c.Query("username"), page, pageSize)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    result,
 	})
 }
 

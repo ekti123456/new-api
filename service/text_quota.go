@@ -537,7 +537,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+	userMetricIdentity := perfmetrics.CaptureUserMetricIdentity(ctx, relayInfo)
 	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
+		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens), userMetricIdentity)
 	})
 }

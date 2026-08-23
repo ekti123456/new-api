@@ -24,7 +24,7 @@ func Init() {
 	go flushLoop()
 }
 
-func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
+func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, user *UserMetricIdentity) {
 	if info == nil || info.ExcludeFromPerformanceMetrics {
 		return
 	}
@@ -49,8 +49,10 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		TtftMs:       ttftMs,
 		HasTtft:      hasTtft,
 		Success:      success,
+		UserError:    !IsRelaySampleSuccess(info),
 		OutputTokens: outputTokens,
 		GenerationMs: generationMs,
+		User:         user,
 	})
 }
 
@@ -74,6 +76,7 @@ func Record(sample Sample) {
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
 	recordRedis(key, sample)
+	bufferUserMetricSample(sample)
 }
 
 func Query(params QueryParams) (QueryResult, error) {

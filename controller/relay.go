@@ -250,7 +250,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	if newAPIError != nil {
 		gopool.Go(func() {
-			perfmetrics.RecordRelaySample(relayInfo, false, 0)
+			// Keep existing model/group success-rate metrics, but do not attach a
+			// user identity: user anomaly errors come only from explicit stream
+			// status failures recorded on consume logs.
+			perfmetrics.RecordRelaySample(relayInfo, false, 0, nil)
 		})
 	}
 }
