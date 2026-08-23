@@ -131,7 +131,32 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				imageCounter.Commit(info)
 				imageCommitted = true
 			}
-		case "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+		case "response.failed", "response.error":
+			if !imageCommitted {
+				imageCounter.Reset()
+				imageCounter.Commit(info)
+				imageCommitted = true
+			}
+			streamErr := fmt.Errorf("upstream stream returned %s", streamResponse.Type)
+			if streamResponse.Response != nil {
+				if openAIError := streamResponse.Response.GetOpenAIError(); openAIError != nil {
+					errorCode := ""
+					if openAIError.Code != nil {
+						errorCode = strings.TrimSpace(fmt.Sprint(openAIError.Code))
+					}
+					errorMessage := strings.TrimSpace(openAIError.Message)
+					switch {
+					case errorCode != "" && errorMessage != "":
+						streamErr = fmt.Errorf("upstream stream returned %s (%s): %s", streamResponse.Type, errorCode, errorMessage)
+					case errorCode != "":
+						streamErr = fmt.Errorf("upstream stream returned %s (%s)", streamResponse.Type, errorCode)
+					case errorMessage != "":
+						streamErr = fmt.Errorf("upstream stream returned %s: %s", streamResponse.Type, errorMessage)
+					}
+				}
+			}
+			sr.Stop(streamErr)
+		case "response.incomplete", "response.cancelled", "response.canceled":
 			if !imageCommitted {
 				imageCounter.Reset()
 				imageCounter.Commit(info)
