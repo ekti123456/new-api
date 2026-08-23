@@ -123,7 +123,7 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 }
 
 func TestRelayErrorHandlerSkipsRetryForFullCodex2APISessionWindow(t *testing.T) {
-	const message = "当前时间窗口内最多可创建 3 个会话，请复用已有会话或稍后再试"
+	const message = "当前时间内创建窗口已达到上限，请复用已有会话或稍后再试"
 	resp := &http.Response{
 		StatusCode: http.StatusTooManyRequests,
 		Header: http.Header{
