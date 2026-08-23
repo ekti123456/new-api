@@ -19,7 +19,19 @@ var defaultTrustedProxyCIDRs = []string{
 	"fc00::/7",
 }
 
+var trustedRemoteIPHeaders = []string{
+	"X-Real-IP",
+	"X-Forwarded-For",
+}
+
 func ConfigureTrustedProxies(engine *gin.Engine) error {
+	// Prefer the single client address normalized by the trusted reverse proxy.
+	// X-Forwarded-For remains a fallback for deployments that do not provide
+	// X-Real-IP. Gin only accepts either header when the direct peer is trusted,
+	// so public clients cannot make a spoofed value authoritative.
+	engine.ForwardedByClientIP = true
+	engine.RemoteIPHeaders = trustedRemoteIPHeaders
+
 	rawTrustedProxies := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
 	if rawTrustedProxies == "" {
 		log.Print("WARNING: TRUSTED_PROXIES is unset or blank; trusting loopback, RFC 1918, and IPv6 ULA proxy addresses for compatibility. Set TRUSTED_PROXIES=none to trust no proxies, or configure explicit proxy IPs/CIDRs to replace these defaults.")

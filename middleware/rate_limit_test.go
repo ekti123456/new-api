@@ -38,11 +38,45 @@ func useRateLimitMiniRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 }
 
 func performRateLimitRequest(router http.Handler, path string, remoteAddr string) *httptest.ResponseRecorder {
+	return performRateLimitRequestWithHeaders(router, path, remoteAddr, nil)
+}
+
+func performRateLimitRequestWithHeaders(router http.Handler, path string, remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	request.RemoteAddr = remoteAddr
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
 	router.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func TestIPRateLimiterSeparatesUsersBehindSameCDNProxy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("TRUSTED_PROXIES", "")
+	router := gin.New()
+	require.NoError(t, ConfigureTrustedProxies(router))
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	router.GET("/limited", func(c *gin.Context) {
+		memoryRateLimiter(c, 1, 60, "CDN-REAL-IP")
+	}, func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	cdnForwardedChain := "203.0.113.99, 198.51.100.20"
+	firstUserHeaders := map[string]string{
+		"X-Real-IP":       "203.0.113.10",
+		"X-Forwarded-For": cdnForwardedChain,
+	}
+	secondUserHeaders := map[string]string{
+		"X-Real-IP":       "203.0.113.11",
+		"X-Forwarded-For": cdnForwardedChain,
+	}
+
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequestWithHeaders(router, "/limited", "172.20.0.2:12345", firstUserHeaders).Code)
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequestWithHeaders(router, "/limited", "172.20.0.2:12345", secondUserHeaders).Code)
+	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequestWithHeaders(router, "/limited", "172.20.0.2:12345", firstUserHeaders).Code)
 }
 
 func TestRedisIPRateLimiterThresholdTTLAndNamespace(t *testing.T) {

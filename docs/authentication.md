@@ -127,6 +127,7 @@ SESSION_COOKIE_TRUSTED_URL=https://panel.example.com,https://admin.example.com
 Gin 默认会信任所有代理提供的客户端 IP 请求头。本项目改为兼顾常见反代拓扑和公网直连安全的三态配置：
 
 - 未配置、空字符串或纯空白的 `TRUSTED_PROXIES` 默认信任 `127.0.0.0/8`、`::1`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` 和 `fc00::/7`，并输出启动告警。该默认值覆盖同机 Nginx、Docker Compose 和常见内网反代；公网直连地址不在列表中，其伪造的 `X-Forwarded-For` 会被忽略。
+- 对可信代理传入的客户端地址，服务端优先读取由反向代理规范化的 `X-Real-IP`，缺失时再回退到 `X-Forwarded-For`。反向代理必须覆盖而不是透传客户端自带的 `X-Real-IP`；例如 Nginx 应设置 `proxy_set_header X-Real-IP $remote_addr;`。这样即使 `X-Forwarded-For` 中保留 CDN 节点，也不会让多个用户共用 CDN IP 的限流桶。
 - `TRUSTED_PROXIES=none`（大小写不敏感且必须单独使用）启用严格直连模式，不信任任何代理，`ClientIP()` 只使用 TCP 直连地址。
 - 其他非空值按英文逗号解析为代理 IP/CIDR，并完全替代默认列表。应填写反向代理自身的地址而不是客户端网段；非法 CIDR、空列表或将 `none` 与其他值混用都会阻止服务启动。
 

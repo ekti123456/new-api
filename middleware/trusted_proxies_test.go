@@ -11,11 +11,19 @@ import (
 )
 
 func requestClientIP(router http.Handler, remoteAddr string, forwardedFor string) string {
+	return requestClientIPWithHeaders(router, remoteAddr, map[string]string{
+		"X-Forwarded-For": forwardedFor,
+	})
+}
+
+func requestClientIPWithHeaders(router http.Handler, remoteAddr string, headers map[string]string) string {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/client-ip", nil)
 	request.RemoteAddr = remoteAddr
-	if forwardedFor != "" {
-		request.Header.Set("X-Forwarded-For", forwardedFor)
+	for name, value := range headers {
+		if value != "" {
+			request.Header.Set(name, value)
+		}
 	}
 	router.ServeHTTP(recorder, request)
 	return recorder.Body.String()
@@ -73,6 +81,32 @@ func TestConfigureTrustedProxiesDefaultStopsAtPublicClientInForwardedChain(t *te
 
 	clientIP := requestClientIP(router, "172.20.0.2:12345", "192.0.2.99, 203.0.113.10")
 	assert.Equal(t, "203.0.113.10", clientIP, "the first public hop from the trusted proxy must win over a client-supplied prefix")
+}
+
+func TestConfigureTrustedProxiesPrefersNormalizedRealIPOverCDNForwardedChain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("TRUSTED_PROXIES", "")
+	router := newClientIPRouter()
+	require.NoError(t, ConfigureTrustedProxies(router))
+
+	clientIP := requestClientIPWithHeaders(router, "172.20.0.2:12345", map[string]string{
+		"X-Real-IP":       "203.0.113.10",
+		"X-Forwarded-For": "203.0.113.10, 198.51.100.20",
+	})
+	assert.Equal(t, "203.0.113.10", clientIP, "the reverse proxy's normalized client IP must win over a CDN hop in X-Forwarded-For")
+}
+
+func TestConfigureTrustedProxiesPublicPeerCannotSpoofPreferredRealIPHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("TRUSTED_PROXIES", "")
+	router := newClientIPRouter()
+	require.NoError(t, ConfigureTrustedProxies(router))
+
+	clientIP := requestClientIPWithHeaders(router, "198.51.100.10:12345", map[string]string{
+		"X-Real-IP":       "203.0.113.10",
+		"X-Forwarded-For": "203.0.113.11",
+	})
+	assert.Equal(t, "198.51.100.10", clientIP, "an untrusted public peer must not make forwarding headers authoritative")
 }
 
 func TestConfigureTrustedProxiesNoneDisablesForwardedHeaders(t *testing.T) {
