@@ -57,6 +57,7 @@ type UserAnomalyResult struct {
 	Total                     int               `json:"total"`
 	Page                      int               `json:"page"`
 	PageSize                  int               `json:"page_size"`
+	APIInfoSummary            string            `json:"api_info_summary"`
 	Items                     []UserAnomalyItem `json:"items"`
 }
 

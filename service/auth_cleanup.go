@@ -48,4 +48,7 @@ func cleanupAuthArtifacts() {
 	if err := model.DeleteExpiredAuthFlows(now); err != nil {
 		common.SysError("failed to delete expired authentication flows: " + err.Error())
 	}
+	if err := model.DeleteExpiredUserNotifications(now.Unix()); err != nil {
+		common.SysError("failed to delete expired personal notifications: " + err.Error())
+	}
 }

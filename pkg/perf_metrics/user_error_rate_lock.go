@@ -23,12 +23,14 @@ const (
 
 type UserErrorRateLockStatus struct {
 	Locked       bool
+	Triggered    bool
 	Group        string
 	RequestCount int64
 	ErrorCount   int64
 	ErrorRate    float64
 	RetryAfter   int64
 	LockSeconds  int
+	AccessURL    string
 }
 
 type userErrorRateCounter struct {
@@ -43,6 +45,7 @@ type userErrorRateLock struct {
 	ErrorCount   int64
 	LockedUntil  int64
 	LockSeconds  int
+	AccessURL    string
 }
 
 var userErrorRateNow = time.Now
@@ -88,7 +91,8 @@ if request_count >= min_requests and error_count * 100000000 > request_count * t
     'request_count', request_count,
     'error_count', error_count,
     'locked_until', now + lock_seconds,
-    'lock_seconds', lock_seconds)
+    'lock_seconds', lock_seconds,
+    'access_url', ARGV[8])
   redis.call('EXPIRE', KEYS[1], lock_seconds)
 
   local state_keys = redis.call('SMEMBERS', KEYS[3])
@@ -113,14 +117,14 @@ func ObserveUserErrorRate(info *relaycommon.RelayInfo, user *UserMetricIdentity)
 
 	isError := !IsRelaySampleSuccess(info)
 	if common.RedisEnabled && common.RDB != nil {
-		status, err := observeUserErrorRateRedis(user.UserID, group, isError)
+		status, err := observeUserErrorRateRedis(user.UserID, group, user.AccessURL, isError)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("user error-rate lock observation failed for user %d: %v", user.UserID, err))
 			return UserErrorRateLockStatus{}
 		}
 		return status
 	}
-	return observeUserErrorRateMemory(user.UserID, group, isError)
+	return observeUserErrorRateMemory(user.UserID, group, user.AccessURL, isError)
 }
 
 func GetUserErrorRateLock(userID int) UserErrorRateLockStatus {
@@ -138,7 +142,7 @@ func GetUserErrorRateLock(userID int) UserErrorRateLockStatus {
 	return getUserErrorRateLockMemory(userID)
 }
 
-func observeUserErrorRateMemory(userID int, group string, isError bool) UserErrorRateLockStatus {
+func observeUserErrorRateMemory(userID int, group string, accessURL string, isError bool) UserErrorRateLockStatus {
 	now := userErrorRateNow().Unix()
 	userErrorRateMemory.Lock()
 	defer userErrorRateMemory.Unlock()
@@ -185,10 +189,13 @@ func observeUserErrorRateMemory(userID int, group string, isError bool) UserErro
 		ErrorCount:   counter.ErrorCount,
 		LockedUntil:  now + int64(lockSeconds),
 		LockSeconds:  lockSeconds,
+		AccessURL:    accessURL,
 	}
 	delete(userErrorRateMemory.states, userID)
 	userErrorRateMemory.locks[userID] = lock
-	return buildUserErrorRateLockStatus(lock, now)
+	status := buildUserErrorRateLockStatus(lock, now)
+	status.Triggered = true
+	return status
 }
 
 func getUserErrorRateLockMemory(userID int) UserErrorRateLockStatus {
@@ -246,10 +253,11 @@ func buildUserErrorRateLockStatus(lock userErrorRateLock, now int64) UserErrorRa
 		ErrorRate:    errorRate,
 		RetryAfter:   retryAfter,
 		LockSeconds:  lock.LockSeconds,
+		AccessURL:    lock.AccessURL,
 	}
 }
 
-func observeUserErrorRateRedis(userID int, group string, isError bool) (UserErrorRateLockStatus, error) {
+func observeUserErrorRateRedis(userID int, group string, accessURL string, isError bool) (UserErrorRateLockStatus, error) {
 	lockKey, statesKey, stateKey := userErrorRateRedisKeys(userID, group)
 	now := userErrorRateNow().Unix()
 	errorValue := 0
@@ -269,6 +277,7 @@ func observeUserErrorRateRedis(userID int, group string, isError bool) (UserErro
 		thresholdMillionths,
 		lockSeconds,
 		group,
+		accessURL,
 	).Slice()
 	if err != nil {
 		return UserErrorRateLockStatus{}, err
@@ -278,13 +287,16 @@ func observeUserErrorRateRedis(userID int, group string, isError bool) (UserErro
 	}
 	requestCount := redisResultInt64(result[1])
 	errorCount := redisResultInt64(result[2])
-	return buildUserErrorRateLockStatus(userErrorRateLock{
+	status := buildUserErrorRateLockStatus(userErrorRateLock{
 		Group:        group,
 		RequestCount: requestCount,
 		ErrorCount:   errorCount,
 		LockedUntil:  now + int64(lockSeconds),
 		LockSeconds:  lockSeconds,
-	}, now), nil
+		AccessURL:    accessURL,
+	}, now)
+	status.Triggered = true
+	return status, nil
 }
 
 func getUserErrorRateLockRedis(userID int) (UserErrorRateLockStatus, error) {
@@ -315,6 +327,7 @@ func getUserErrorRateLockRedis(userID int) (UserErrorRateLockStatus, error) {
 		ErrorCount:   parseRedisLockInt(values["error_count"]),
 		LockedUntil:  now + retryAfter,
 		LockSeconds:  int(parseRedisLockInt(values["lock_seconds"])),
+		AccessURL:    values["access_url"],
 	}
 	return buildUserErrorRateLockStatus(lock, now), nil
 }

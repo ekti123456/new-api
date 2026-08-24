@@ -2444,7 +2444,7 @@
     "Subject": "主旨",
     "No valid samples": "無有效樣本",
     "Request performance anomaly notice": "請求效能異常提醒",
-    "User performance alert template": "您好 {{username}}：\n\n我們在最近 2 小時的請求監控中發現以下效能異常，請檢查客戶端網路或請求設定。\n\n使用者：{{username}} (#{{userId}})\n分組：{{group}}\n存取 URL：{{accessUrl}}\nIP：{{ip}}\n請求數：{{requestCount}}\n錯誤率：{{errorRate}}%\n首 Token 高於分組平均值的請求占比：{{ttftSummary}}\n\n如需協助，請聯絡管理員。",
+    "User performance alert template": "您好 {{username}}：\n\n我們在最近 2 小時的請求監控中發現以下效能異常，請檢查客戶端網路或請求設定。\n\n使用者：{{username}} (#{{userId}})\n分組：{{group}}\n本次存取 URL：{{accessUrl}}\nIP：{{ip}}\n請求數：{{requestCount}}\n錯誤率：{{errorRate}}%\n首 Token 高於分組平均值的請求占比：{{ttftSummary}}\n\n可用存取位址：\n{{apiInfoSummary}}\n\n如需協助，請聯絡管理員。",
     "Subject and content are required": "主旨和內容不能為空",
     "Failed to send message": "訊息傳送失敗",
     "Message sent successfully": "訊息傳送成功",

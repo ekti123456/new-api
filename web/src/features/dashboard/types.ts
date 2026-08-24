@@ -116,6 +116,7 @@ export interface UserPerformanceAnomaliesData {
   total: number
   page: number
   page_size: number
+  api_info_summary: string
   items: UserPerformanceAnomalyItem[]
 }
 

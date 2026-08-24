@@ -2444,7 +2444,7 @@
     "Subject": "Chủ đề",
     "No valid samples": "Không có mẫu hợp lệ",
     "Request performance anomaly notice": "Thông báo bất thường hiệu năng yêu cầu",
-    "User performance alert template": "Xin chào {{username}},\n\nTrong hai giờ gần nhất, hệ thống giám sát yêu cầu đã phát hiện bất thường hiệu năng sau. Vui lòng kiểm tra mạng của máy khách và cấu hình yêu cầu.\n\nNgười dùng: {{username}} (#{{userId}})\nNhóm: {{group}}\nURL truy cập: {{accessUrl}}\nIP: {{ip}}\nSố yêu cầu: {{requestCount}}\nTỷ lệ lỗi: {{errorRate}}%\nYêu cầu có token đầu tiên cao hơn trung bình nhóm: {{ttftSummary}}\n\nVui lòng liên hệ quản trị viên nếu cần hỗ trợ.",
+    "User performance alert template": "Xin chào {{username}},\n\nTrong hai giờ gần nhất, hệ thống giám sát yêu cầu đã phát hiện bất thường hiệu năng sau. Vui lòng kiểm tra mạng của máy khách và cấu hình yêu cầu.\n\nNgười dùng: {{username}} (#{{userId}})\nNhóm: {{group}}\nURL truy cập hiện tại: {{accessUrl}}\nIP: {{ip}}\nSố yêu cầu: {{requestCount}}\nTỷ lệ lỗi: {{errorRate}}%\nYêu cầu có token đầu tiên cao hơn trung bình nhóm: {{ttftSummary}}\n\nCác URL truy cập khả dụng:\n{{apiInfoSummary}}\n\nVui lòng liên hệ quản trị viên nếu cần hỗ trợ.",
     "Subject and content are required": "Chủ đề và nội dung là bắt buộc",
     "Failed to send message": "Không thể gửi tin nhắn",
     "Message sent successfully": "Đã gửi tin nhắn thành công",

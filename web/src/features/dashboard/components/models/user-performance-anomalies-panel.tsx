@@ -419,6 +419,7 @@ export function UserPerformanceAnomaliesPanel(
       />
       <UserPerformanceContactDialog
         item={contactItem}
+        apiInfoSummary={data?.api_info_summary ?? ''}
         channel={contactChannel}
         open={contactDialogOpen}
         onOpenChange={setContactDialogOpen}

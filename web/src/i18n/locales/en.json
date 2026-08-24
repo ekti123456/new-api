@@ -2444,7 +2444,7 @@
     "Subject": "Subject",
     "No valid samples": "No valid samples",
     "Request performance anomaly notice": "Request performance anomaly notice",
-    "User performance alert template": "Hello {{username}},\n\nDuring the last two hours, request monitoring detected the following performance anomaly. Please check your client network and request configuration.\n\nUser: {{username}} (#{{userId}})\nGroup: {{group}}\nAccess URL: {{accessUrl}}\nIP: {{ip}}\nRequests: {{requestCount}}\nError rate: {{errorRate}}%\nRequests with first token above the group average: {{ttftSummary}}\n\nPlease contact the administrator if you need assistance.",
+    "User performance alert template": "Hello {{username}},\n\nDuring the last two hours, request monitoring detected the following performance anomaly. Please check your client network and request configuration.\n\nUser: {{username}} (#{{userId}})\nGroup: {{group}}\nCurrent access URL: {{accessUrl}}\nIP: {{ip}}\nRequests: {{requestCount}}\nError rate: {{errorRate}}%\nRequests with first token above the group average: {{ttftSummary}}\n\nAvailable access URLs:\n{{apiInfoSummary}}\n\nPlease contact the administrator if you need assistance.",
     "Subject and content are required": "Subject and content are required",
     "Failed to send message": "Failed to send message",
     "Message sent successfully": "Message sent successfully",

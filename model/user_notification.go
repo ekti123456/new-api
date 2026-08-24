@@ -7,9 +7,12 @@ import (
 )
 
 const (
-	userNotificationListLimit      = 50
+	userNotificationListLimit      = 100
 	userNotificationRetentionLimit = 100
+	userNotificationRetentionDays  = 7
 )
+
+var userNotificationNow = time.Now
 
 // UserNotification is a private, in-app message visible only to its target
 // user. It is intentionally separate from global notices and announcements.
@@ -29,9 +32,12 @@ func (UserNotification) TableName() string {
 
 func CreateUserNotification(notification *UserNotification) error {
 	if notification.CreatedAt <= 0 {
-		notification.CreatedAt = time.Now().Unix()
+		notification.CreatedAt = userNotificationNow().Unix()
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := deleteExpiredUserNotifications(tx, notification.UserId, userNotificationNow().Unix()); err != nil {
+			return err
+		}
 		if err := tx.Create(notification).Error; err != nil {
 			return err
 		}
@@ -55,24 +61,55 @@ func CreateUserNotification(notification *UserNotification) error {
 
 func ListUserNotifications(userId int) ([]UserNotification, int64, error) {
 	items := make([]UserNotification, 0)
-	if err := DB.Where("user_id = ?", userId).
-		Order("created_at DESC, id DESC").
-		Limit(userNotificationListLimit).
-		Find(&items).Error; err != nil {
-		return nil, 0, err
-	}
 	var unreadCount int64
-	if err := DB.Model(&UserNotification{}).
-		Where("user_id = ? AND read_at = 0", userId).
-		Count(&unreadCount).Error; err != nil {
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := deleteExpiredUserNotifications(tx, userId, userNotificationNow().Unix()); err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userId).
+			Order("created_at DESC, id DESC").
+			Limit(userNotificationListLimit).
+			Find(&items).Error; err != nil {
+			return err
+		}
+		return tx.Model(&UserNotification{}).
+			Where("user_id = ? AND read_at = 0", userId).
+			Count(&unreadCount).Error
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 	return items, unreadCount, nil
 }
 
 func MarkUserNotificationsRead(userId int) error {
-	now := time.Now().Unix()
-	return DB.Model(&UserNotification{}).
-		Where("user_id = ? AND read_at = 0", userId).
-		Update("read_at", now).Error
+	now := userNotificationNow().Unix()
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := deleteExpiredUserNotifications(tx, userId, now); err != nil {
+			return err
+		}
+		return tx.Model(&UserNotification{}).
+			Where("user_id = ? AND read_at = 0", userId).
+			Update("read_at", now).Error
+	})
+}
+
+func userNotificationCutoff(now int64) int64 {
+	return now - int64(userNotificationRetentionDays*24*time.Hour/time.Second)
+}
+
+func deleteExpiredUserNotifications(tx *gorm.DB, userId int, now int64) error {
+	return tx.Where("user_id = ? AND created_at < ?", userId, userNotificationCutoff(now)).
+		Delete(&UserNotification{}).Error
+}
+
+// DeleteExpiredUserNotifications removes expired rows for inactive users as
+// well. Active users are also cleaned on create/list, so the seven-day
+// retention policy remains effective even if the periodic job is delayed.
+func DeleteExpiredUserNotifications(now int64) error {
+	if DB == nil || !DB.Migrator().HasTable(&UserNotification{}) {
+		return nil
+	}
+	return DB.Where("created_at < ?", userNotificationCutoff(now)).
+		Delete(&UserNotification{}).Error
 }

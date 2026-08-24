@@ -36,6 +36,7 @@ import type { UserPerformanceAnomalyItem } from '../../types'
 
 type UserPerformanceContactDialogProps = {
   item: UserPerformanceAnomalyItem | null
+  apiInfoSummary: string
   channel: UserPerformanceAlertChannel | null
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -47,6 +48,7 @@ function formatTemplateValue(value: string | undefined) {
 
 export function UserPerformanceContactDialog({
   item,
+  apiInfoSummary,
   channel,
   open,
   onOpenChange,
@@ -71,6 +73,7 @@ export function UserPerformanceContactDialog({
         userId: item.user_id,
         group: item.group,
         accessUrl: formatTemplateValue(item.access_url),
+        apiInfoSummary: formatTemplateValue(apiInfoSummary),
         ip: formatTemplateValue(item.ip),
         requestCount: item.request_count,
         errorRate: item.error_rate.toFixed(1),
@@ -78,7 +81,7 @@ export function UserPerformanceContactDialog({
       })
     )
     setConfirmOpen(false)
-  }, [channel, item, open, t])
+  }, [apiInfoSummary, channel, item, open, t])
 
   const deliveryLabel =
     channel === 'email' ? t('Email') : t('Personal notification')

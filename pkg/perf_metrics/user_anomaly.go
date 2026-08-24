@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 
 	"github.com/gin-gonic/gin"
@@ -376,6 +377,7 @@ func QueryUserAnomalies(username string, page int, pageSize int) (UserAnomalyRes
 		MonitoredGroups:           groups,
 		Page:                      page,
 		PageSize:                  pageSize,
+		APIInfoSummary:            console_setting.FormatAPIInfoSummary(),
 		Items:                     []UserAnomalyItem{},
 	}
 	if len(groups) == 0 {

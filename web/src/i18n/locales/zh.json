@@ -2444,7 +2444,7 @@
     "Subject": "主题",
     "No valid samples": "无有效样本",
     "Request performance anomaly notice": "请求性能异常提醒",
-    "User performance alert template": "您好 {{username}}：\n\n我们在最近 2 小时的请求监控中发现以下性能异常，请检查客户端网络或请求配置。\n\n用户：{{username}} (#{{userId}})\n分组：{{group}}\n访问 URL：{{accessUrl}}\nIP：{{ip}}\n请求数：{{requestCount}}\n错误率：{{errorRate}}%\n首 Token 高于分组平均值的请求占比：{{ttftSummary}}\n\n如需协助，请联系管理员。",
+    "User performance alert template": "您好 {{username}}：\n\n我们在最近 2 小时的请求监控中发现以下性能异常，请检查客户端网络或请求配置。\n\n用户：{{username}} (#{{userId}})\n分组：{{group}}\n本次访问 URL：{{accessUrl}}\nIP：{{ip}}\n请求数：{{requestCount}}\n错误率：{{errorRate}}%\n首 Token 高于分组平均值的请求占比：{{ttftSummary}}\n\n可用访问地址：\n{{apiInfoSummary}}\n\n如需协助，请联系管理员。",
     "Subject and content are required": "主题和内容不能为空",
     "Failed to send message": "消息发送失败",
     "Message sent successfully": "消息发送成功",

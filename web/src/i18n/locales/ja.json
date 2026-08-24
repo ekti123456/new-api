@@ -2444,7 +2444,7 @@
     "Subject": "件名",
     "No valid samples": "有効なサンプルなし",
     "Request performance anomaly notice": "リクエスト性能異常のお知らせ",
-    "User performance alert template": "{{username}} 様\n\n直近2時間のリクエスト監視で、次の性能異常が検出されました。クライアントのネットワークとリクエスト設定をご確認ください。\n\nユーザー：{{username}} (#{{userId}})\nグループ：{{group}}\nアクセス URL：{{accessUrl}}\nIP：{{ip}}\nリクエスト数：{{requestCount}}\nエラー率：{{errorRate}}%\n最初のトークンがグループ平均を上回るリクエスト：{{ttftSummary}}\n\n支援が必要な場合は管理者にお問い合わせください。",
+    "User performance alert template": "{{username}} 様\n\n直近2時間のリクエスト監視で、次の性能異常が検出されました。クライアントのネットワークとリクエスト設定をご確認ください。\n\nユーザー：{{username}} (#{{userId}})\nグループ：{{group}}\n現在のアクセス URL：{{accessUrl}}\nIP：{{ip}}\nリクエスト数：{{requestCount}}\nエラー率：{{errorRate}}%\n最初のトークンがグループ平均を上回るリクエスト：{{ttftSummary}}\n\n利用可能なアクセス URL：\n{{apiInfoSummary}}\n\n支援が必要な場合は管理者にお問い合わせください。",
     "Subject and content are required": "件名と内容は必須です",
     "Failed to send message": "メッセージの送信に失敗しました",
     "Message sent successfully": "メッセージを送信しました",

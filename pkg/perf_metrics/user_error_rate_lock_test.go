@@ -19,7 +19,7 @@ func TestUserErrorRateLockThresholdAndExpiryReset(t *testing.T) {
 	configureUserErrorRateLockTest(t, false)
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 42}
+	user := &UserMetricIdentity{UserID: 42, AccessURL: "https://chat.example.com"}
 
 	for i := 0; i < 50; i++ {
 		assert.False(t, ObserveUserErrorRate(successfulUserErrorRateRelay(), user).Locked)
@@ -29,13 +29,17 @@ func TestUserErrorRateLockThresholdAndExpiryReset(t *testing.T) {
 
 	status := ObserveUserErrorRate(failedUserErrorRateRelay(), user)
 	require.True(t, status.Locked)
+	assert.True(t, status.Triggered)
 	assert.Equal(t, int64(101), status.RequestCount)
 	assert.Equal(t, int64(51), status.ErrorCount)
 	assert.InDelta(t, 50.495, status.ErrorRate, 0.001)
 	assert.Equal(t, int64(60), status.RetryAfter)
+	assert.Equal(t, "https://chat.example.com", status.AccessURL)
 
 	for i := 0; i < 100; i++ {
-		assert.True(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+		status = ObserveUserErrorRate(failedUserErrorRateRelay(), user)
+		assert.True(t, status.Locked)
+		assert.False(t, status.Triggered)
 	}
 	now = now.Add(61 * time.Second)
 	assert.False(t, GetUserErrorRateLock(user.UserID).Locked)
@@ -86,13 +90,18 @@ func TestUserErrorRateLockRedisIsSharedAndResetsAfterTTL(t *testing.T) {
 
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 44}
+	user := &UserMetricIdentity{UserID: 44, AccessURL: "https://cf-chat.example.com"}
 
 	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
 	status := ObserveUserErrorRate(failedUserErrorRateRelay(), user)
 	require.True(t, status.Locked)
+	assert.True(t, status.Triggered)
 	assert.Equal(t, int64(2), status.RequestCount)
-	assert.True(t, GetUserErrorRateLock(user.UserID).Locked)
+	assert.Equal(t, "https://cf-chat.example.com", status.AccessURL)
+	lookupStatus := GetUserErrorRateLock(user.UserID)
+	assert.True(t, lookupStatus.Locked)
+	assert.False(t, lookupStatus.Triggered)
+	assert.Equal(t, "https://cf-chat.example.com", GetUserErrorRateLock(user.UserID).AccessURL)
 
 	mini.FastForward(61 * time.Second)
 	now = now.Add(61 * time.Second)

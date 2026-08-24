@@ -2444,7 +2444,7 @@
     "Subject": "Objet",
     "No valid samples": "Aucun échantillon valide",
     "Request performance anomaly notice": "Alerte d'anomalie de performance des requêtes",
-    "User performance alert template": "Bonjour {{username}},\n\nAu cours des deux dernières heures, la surveillance des requêtes a détecté l'anomalie de performance suivante. Vérifiez le réseau du client et la configuration des requêtes.\n\nUtilisateur : {{username}} (#{{userId}})\nGroupe : {{group}}\nURL d'accès : {{accessUrl}}\nIP : {{ip}}\nRequêtes : {{requestCount}}\nTaux d'erreur : {{errorRate}} %\nRequêtes dont le premier token dépasse la moyenne du groupe : {{ttftSummary}}\n\nContactez l'administrateur si vous avez besoin d'aide.",
+    "User performance alert template": "Bonjour {{username}},\n\nAu cours des deux dernières heures, la surveillance des requêtes a détecté l'anomalie de performance suivante. Vérifiez le réseau du client et la configuration des requêtes.\n\nUtilisateur : {{username}} (#{{userId}})\nGroupe : {{group}}\nURL d'accès actuelle : {{accessUrl}}\nIP : {{ip}}\nRequêtes : {{requestCount}}\nTaux d'erreur : {{errorRate}} %\nRequêtes dont le premier token dépasse la moyenne du groupe : {{ttftSummary}}\n\nURL d'accès disponibles :\n{{apiInfoSummary}}\n\nContactez l'administrateur si vous avez besoin d'aide.",
     "Subject and content are required": "L'objet et le contenu sont obligatoires",
     "Failed to send message": "Échec de l'envoi du message",
     "Message sent successfully": "Message envoyé avec succès",
