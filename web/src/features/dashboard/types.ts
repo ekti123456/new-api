@@ -111,6 +111,7 @@ export interface UserPerformanceAnomaliesData {
   min_requests: number
   error_rate_threshold: number
   ttft_above_average_threshold: number
+  ttft_over_average_percent: number
   monitored_groups: string[]
   total: number
   page: number

@@ -52,6 +52,7 @@ type UserAnomalyResult struct {
 	MinRequests               int               `json:"min_requests"`
 	ErrorRateThreshold        float64           `json:"error_rate_threshold"`
 	TtftAboveAverageThreshold float64           `json:"ttft_above_average_threshold"`
+	TtftOverAveragePercent    float64           `json:"ttft_over_average_percent"`
 	MonitoredGroups           []string          `json:"monitored_groups"`
 	Total                     int               `json:"total"`
 	Page                      int               `json:"page"`

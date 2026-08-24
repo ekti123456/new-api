@@ -353,6 +353,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "perf_metrics_setting.user_ttft_over_average_percent":
+		value, parseErr := strconv.ParseFloat(option.Value.(string), 64)
+		if parseErr != nil || value < 0 || value > 1000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user first-token excess threshold must be between 0 and 1000 percent",
+			})
+			return
+		}
 	case "perf_metrics_setting.user_anomaly_monitored_groups":
 		var groups []string
 		if err = common.UnmarshalJsonStr(option.Value.(string), &groups); err != nil {

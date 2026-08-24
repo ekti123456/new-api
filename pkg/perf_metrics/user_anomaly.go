@@ -336,11 +336,12 @@ func aggregateUserMetricRows(rows []model.PerfUserSample) (map[string]model.Perf
 	return groupSummaries, userAggregates, nil
 }
 
-func histogramCountAboveAverage(histogram map[int64]int64, averageMs float64) int64 {
+func histogramCountAboveAverage(histogram map[int64]int64, averageMs float64, overAveragePercent float64) int64 {
+	thresholdMs := averageMs * (1 + overAveragePercent/100)
 	var count int64
 	for bucket, bucketCount := range histogram {
 		bucketMidpoint := float64(bucket*userMetricTtftBucketMs) + float64(userMetricTtftBucketMs)/2
-		if bucketMidpoint > averageMs {
+		if bucketMidpoint >= thresholdMs {
 			count += bucketCount
 		}
 	}
@@ -365,11 +366,13 @@ func QueryUserAnomalies(username string, page int, pageSize int) (UserAnomalyRes
 	groups := perf_metrics_setting.GetUserAnomalyMonitoredGroups()
 	minRequests := perf_metrics_setting.GetUserAnomalyMinRequests()
 	errorRateThreshold := perf_metrics_setting.GetUserErrorRateThreshold()
+	ttftOverAveragePercent := perf_metrics_setting.GetUserTtftOverAveragePercent()
 	result := UserAnomalyResult{
 		WindowSeconds:             int64(perf_metrics_setting.UserAnomalyRetentionHours * 3600),
 		MinRequests:               minRequests,
 		ErrorRateThreshold:        errorRateThreshold,
 		TtftAboveAverageThreshold: perf_metrics_setting.UserTtftAboveAverageRatio,
+		TtftOverAveragePercent:    ttftOverAveragePercent,
 		MonitoredGroups:           groups,
 		Page:                      page,
 		PageSize:                  pageSize,
@@ -401,7 +404,7 @@ func QueryUserAnomalies(username string, page int, pageSize int) (UserAnomalyRes
 		if summary.TtftCount > 0 {
 			groupAverage = float64(summary.TtftSumMs) / float64(summary.TtftCount)
 		}
-		state.aggregate.AboveGroupAvgCount = histogramCountAboveAverage(state.histogram, groupAverage)
+		state.aggregate.AboveGroupAvgCount = histogramCountAboveAverage(state.histogram, groupAverage, ttftOverAveragePercent)
 		if username != "" && state.aggregate.Username != username {
 			continue
 		}

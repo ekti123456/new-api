@@ -98,7 +98,9 @@ func TestUserAnomalyPaginationBounds(t *testing.T) {
 	require.Equal(t, maxUserAnomalyPageSize, pageSize)
 }
 
-func TestHistogramCountAboveAverageUsesCompactBuckets(t *testing.T) {
-	histogram := map[int64]int64{10: 4, 30: 6}
-	require.Equal(t, int64(6), histogramCountAboveAverage(histogram, 2000))
+func TestHistogramCountAboveAverageAppliesConfiguredMargin(t *testing.T) {
+	// A 1600ms group average with a 50% margin starts counting at 2400ms.
+	// The compact histogram uses 100ms buckets represented by their midpoint.
+	histogram := map[int64]int64{15: 4, 23: 3, 24: 5, 30: 6}
+	require.Equal(t, int64(11), histogramCountAboveAverage(histogram, 1600, 50))
 }

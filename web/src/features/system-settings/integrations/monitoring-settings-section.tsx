@@ -72,6 +72,7 @@ const monitoringSchema = z.object({
     user_anomaly_monitored_groups: z.array(z.string()),
     user_anomaly_min_requests: z.coerce.number().int().min(1).max(100000),
     user_error_rate_threshold: z.coerce.number().gt(0).max(100),
+    user_ttft_over_average_percent: z.coerce.number().min(0).max(1000),
   }),
 })
 
@@ -87,6 +88,7 @@ type FlatMonitoringDefaults = {
   'perf_metrics_setting.user_anomaly_monitored_groups': string[]
   'perf_metrics_setting.user_anomaly_min_requests': number
   'perf_metrics_setting.user_error_rate_threshold': number
+  'perf_metrics_setting.user_ttft_over_average_percent': number
 }
 
 type MonitoringSettingsSectionProps = {
@@ -108,6 +110,8 @@ const buildFormDefaults = (
       defaults['perf_metrics_setting.user_anomaly_min_requests'],
     user_error_rate_threshold:
       defaults['perf_metrics_setting.user_error_rate_threshold'],
+    user_ttft_over_average_percent:
+      defaults['perf_metrics_setting.user_ttft_over_average_percent'],
   },
 })
 
@@ -129,6 +133,8 @@ const normalizeDefaults = (
     defaults['perf_metrics_setting.user_anomaly_min_requests'],
   'perf_metrics_setting.user_error_rate_threshold':
     defaults['perf_metrics_setting.user_error_rate_threshold'],
+  'perf_metrics_setting.user_ttft_over_average_percent':
+    defaults['perf_metrics_setting.user_ttft_over_average_percent'],
 })
 
 const normalizeFormValues = (
@@ -148,6 +154,8 @@ const normalizeFormValues = (
     values.perf_metrics_setting.user_anomaly_min_requests,
   'perf_metrics_setting.user_error_rate_threshold':
     values.perf_metrics_setting.user_error_rate_threshold,
+  'perf_metrics_setting.user_ttft_over_average_percent':
+    values.perf_metrics_setting.user_ttft_over_average_percent,
 })
 
 export function MonitoringSettingsSection({
@@ -399,7 +407,7 @@ export function MonitoringSettingsSection({
                 </FormItem>
               )}
             />
-            <div className='grid gap-4 md:grid-cols-2'>
+            <div className='grid gap-4 md:grid-cols-3'>
               <FormField
                 control={form.control}
                 name='perf_metrics_setting.user_anomaly_min_requests'
@@ -419,6 +427,33 @@ export function MonitoringSettingsSection({
                     <FormDescription>
                       {t(
                         'The same minimum protects both first-token and error-rate detection from one-off requests.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='perf_metrics_setting.user_ttft_over_average_percent'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('First-token excess over group average (%)')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        max={1000}
+                        step={1}
+                        {...safeNumberFieldProps(field)}
+                        disabled={!perfMetricsEnabled}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'A request is counted as slow only after its first-token time exceeds the group average by this percentage. For example, 50% turns 1.6s into 2.4s.'
                       )}
                     </FormDescription>
                     <FormMessage />

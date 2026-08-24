@@ -9,6 +9,7 @@ import (
 const (
 	DefaultUserAnomalyMinRequests = 10
 	DefaultUserErrorRateThreshold = 5.0
+	DefaultUserTtftOverAveragePct = 50.0
 	UserTtftAboveAverageRatio     = 50.0
 	UserAnomalyRetentionHours     = 2
 )
@@ -21,6 +22,7 @@ type PerfMetricsSetting struct {
 	UserAnomalyMonitoredGroups []string `json:"user_anomaly_monitored_groups"`
 	UserAnomalyMinRequests     int      `json:"user_anomaly_min_requests"`
 	UserErrorRateThreshold     float64  `json:"user_error_rate_threshold"`
+	UserTtftOverAveragePercent float64  `json:"user_ttft_over_average_percent"`
 }
 
 var perfMetricsSetting = PerfMetricsSetting{
@@ -31,6 +33,7 @@ var perfMetricsSetting = PerfMetricsSetting{
 	UserAnomalyMonitoredGroups: []string{},
 	UserAnomalyMinRequests:     DefaultUserAnomalyMinRequests,
 	UserErrorRateThreshold:     DefaultUserErrorRateThreshold,
+	UserTtftOverAveragePercent: DefaultUserTtftOverAveragePct,
 }
 
 func init() {
@@ -104,4 +107,12 @@ func GetUserErrorRateThreshold() float64 {
 		return DefaultUserErrorRateThreshold
 	}
 	return threshold
+}
+
+func GetUserTtftOverAveragePercent() float64 {
+	percent := perfMetricsSetting.UserTtftOverAveragePercent
+	if percent < 0 || percent > 1000 {
+		return DefaultUserTtftOverAveragePct
+	}
+	return percent
 }

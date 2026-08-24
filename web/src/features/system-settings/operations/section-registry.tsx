@@ -62,6 +62,9 @@ const OPERATIONS_SECTIONS = [
             settings['perf_metrics_setting.user_anomaly_min_requests'] ?? 10,
           'perf_metrics_setting.user_error_rate_threshold':
             settings['perf_metrics_setting.user_error_rate_threshold'] ?? 5,
+          'perf_metrics_setting.user_ttft_over_average_percent':
+            settings['perf_metrics_setting.user_ttft_over_average_percent'] ??
+            50,
         }}
       />
     ),

@@ -153,9 +153,14 @@ export function UserPerformanceAnomaliesPanel(
               </div>
               {data && (
                 <div className='text-muted-foreground mt-0.5 text-[11px] tabular-nums'>
-                  {t('Requests with first token above group average')}: ≥
-                  {data.ttft_above_average_threshold}% · {t('Error rate')}: &gt;
-                  {data.error_rate_threshold}% · n≥{data.min_requests}
+                  {t(
+                    'Requests with first token at least {{percent}}% above group average',
+                    {
+                      percent: data.ttft_over_average_percent,
+                    }
+                  )}
+                  : ≥{data.ttft_above_average_threshold}% · {t('Error rate')}:
+                  &gt;{data.error_rate_threshold}% · n≥{data.min_requests}
                 </div>
               )}
             </div>
@@ -179,7 +184,7 @@ export function UserPerformanceAnomaliesPanel(
           </div>
         </div>
 
-        <div className='max-h-[32rem] overflow-auto'>
+        <div className='max-h-[32rem] [scrollbar-gutter:stable] overflow-auto'>
           {query.isLoading && (
             <div className='space-y-3 px-4 py-4 sm:px-5'>
               {['anomaly-1', 'anomaly-2', 'anomaly-3'].map((key) => (
@@ -215,8 +220,8 @@ export function UserPerformanceAnomaliesPanel(
             )}
 
           {!query.isLoading && !query.isError && data?.items.length ? (
-            <div className='min-w-[70rem] divide-y'>
-              <div className='text-muted-foreground bg-muted/30 grid grid-cols-[minmax(10rem,1.1fr)_8rem_13rem_9rem_minmax(12rem,1.4fr)_minmax(12rem,1.2fr)_6rem] gap-3 px-5 py-2 text-xs font-medium'>
+            <div className='min-w-[72rem] divide-y'>
+              <div className='text-muted-foreground bg-muted/30 grid grid-cols-[minmax(10rem,1.1fr)_8rem_13rem_9rem_minmax(12rem,1.4fr)_minmax(12rem,1.2fr)_7rem] gap-3 py-2 ps-5 pe-8 text-xs font-medium'>
                 <span>{t('User')}</span>
                 <span>{t('Group')}</span>
                 <span>{t('First token')}</span>
@@ -233,7 +238,7 @@ export function UserPerformanceAnomaliesPanel(
                 return (
                   <div
                     key={key}
-                    className='grid grid-cols-[minmax(10rem,1.1fr)_8rem_13rem_9rem_minmax(12rem,1.4fr)_minmax(12rem,1.2fr)_6rem] gap-3 px-5 py-3 text-xs'
+                    className='grid grid-cols-[minmax(10rem,1.1fr)_8rem_13rem_9rem_minmax(12rem,1.4fr)_minmax(12rem,1.2fr)_7rem] gap-3 py-3 ps-5 pe-8 text-xs'
                   >
                     <div className='min-w-0'>
                       <button
@@ -264,10 +269,11 @@ export function UserPerformanceAnomaliesPanel(
                       >
                         {item.ttft_count > 0
                           ? t(
-                              '{{percentage}}% of requests above group average',
+                              '{{percentage}}% of requests at least {{margin}}% above group average',
                               {
                                 percentage:
                                   item.above_group_avg_percentage.toFixed(1),
+                                margin: data.ttft_over_average_percent,
                               }
                             )
                           : '—'}

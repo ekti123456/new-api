@@ -63,6 +63,7 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.user_anomaly_monitored_groups': [],
   'perf_metrics_setting.user_anomaly_min_requests': 10,
   'perf_metrics_setting.user_error_rate_threshold': 5,
+  'perf_metrics_setting.user_ttft_over_average_percent': 50,
 }
 
 export function OperationsSettings() {
