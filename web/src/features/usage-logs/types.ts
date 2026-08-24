@@ -254,6 +254,8 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  session_window_used?: number
+  session_window_limit?: number
   current_concurrency?: number
   occupied_concurrency?: number
 }

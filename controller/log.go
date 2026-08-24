@@ -148,6 +148,7 @@ func GetLogsStat(c *gin.Context) {
 }
 
 func GetLogsSelfStat(c *gin.Context) {
+	userID := c.GetInt("id")
 	username := c.GetString("username")
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -162,15 +163,20 @@ func GetLogsSelfStat(c *gin.Context) {
 		return
 	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
+	data := gin.H{
+		"quota": quotaNum.Quota,
+		"rpm":   quotaNum.Rpm,
+		"tpm":   quotaNum.Tpm,
+		//"token": tokenNum,
+	}
+	if sessionWindow, ok := model.GetUserSessionWindowStatus(userID); ok {
+		data["session_window_used"] = sessionWindow.Used
+		data["session_window_limit"] = sessionWindow.Limit
+	}
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
-		"data": gin.H{
-			"quota": quotaNum.Quota,
-			"rpm":   quotaNum.Rpm,
-			"tpm":   quotaNum.Tpm,
-			//"token": tokenNum,
-		},
+		"data":    data,
 	})
 	return
 }

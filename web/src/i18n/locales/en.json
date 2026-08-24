@@ -5359,9 +5359,11 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
+    "Window": "Window",
     "Temporarily lock users with high error rates": "Temporarily lock users with high error rates",
     "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.",
-    "Minimum lock samples": "Minimum lock samples",
+    "Rolling lock sample count": "Rolling lock sample count",
+    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.",
     "Lock error-rate threshold (%)": "Lock error-rate threshold (%)",
     "Temporary lock duration (seconds)": "Temporary lock duration (seconds)",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again."

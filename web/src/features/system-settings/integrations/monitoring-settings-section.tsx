@@ -552,7 +552,7 @@ export function MonitoringSettingsSection({
                   name='perf_metrics_setting.user_error_rate_lock_min_requests'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Minimum lock samples')}</FormLabel>
+                      <FormLabel>{t('Rolling lock sample count')}</FormLabel>
                       <FormControl>
                         <Input
                           type='number'
@@ -565,6 +565,11 @@ export function MonitoringSettingsSection({
                           }
                         />
                       </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

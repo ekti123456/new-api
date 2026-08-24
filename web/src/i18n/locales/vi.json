@@ -5359,9 +5359,11 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
+    "Window": "Cửa sổ",
     "Temporarily lock users with high error rates": "Tạm khóa người dùng có tỷ lệ lỗi cao",
     "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "Sau khi đạt số mẫu tối thiểu, người dùng vượt quá tỷ lệ lỗi đã cấu hình sẽ tạm thời không thể gọi API.",
-    "Minimum lock samples": "Số mẫu tối thiểu để khóa",
+    "Rolling lock sample count": "Số yêu cầu trong cửa sổ cuộn",
+    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "Tính theo N yêu cầu đã hoàn tất gần nhất của từng người dùng và nhóm. Mẫu không hết hạn sau hai giờ; việc tích lũy bắt đầu lại từ 0 sau khi hết khóa.",
     "Lock error-rate threshold (%)": "Ngưỡng tỷ lệ lỗi để khóa (%)",
     "Temporary lock duration (seconds)": "Thời gian khóa tạm thời (giây)",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "Khi khóa tạm thời hết hạn, bộ đếm bắt đầu lại từ 0 để yêu cầu đầu tiên không thể lập tức kích hoạt lại kết quả của vòng trước."

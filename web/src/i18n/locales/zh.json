@@ -5359,9 +5359,11 @@
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
+    "Window": "窗口",
     "Temporarily lock users with high error rates": "高错误率用户自动临时锁定",
     "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "达到最小样本数后，错误率超过设定阈值的用户将被临时暂停 API 调用。",
-    "Minimum lock samples": "最小锁定样本数",
+    "Rolling lock sample count": "滚动统计请求数",
+    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "按每个用户、每个分组最近 N 条已完成请求计算；样本不会因超过 2 小时自动失效，锁定结束后从零重新累计。",
     "Lock error-rate threshold (%)": "锁定错误率阈值（%）",
     "Temporary lock duration (seconds)": "临时锁定时间（秒）",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "临时锁定结束后将从零重新累计，解锁后的第一个请求不会因上一轮记录而立即再次触发。"

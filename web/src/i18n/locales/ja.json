@@ -5359,9 +5359,11 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム",
+    "Window": "ウィンドウ",
     "Temporarily lock users with high error rates": "エラー率の高いユーザーを一時的にロックする",
     "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "最小サンプル数に達した後、設定したエラー率を超えたユーザーの API 呼び出しを一時停止します。",
-    "Minimum lock samples": "ロック判定の最小サンプル数",
+    "Rolling lock sample count": "ロック判定のローリングリクエスト数",
+    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "ユーザーおよびグループごとの直近 N 件の完了リクエストで計算します。サンプルは 2 時間後も失効せず、ロック終了後はゼロから再集計します。",
     "Lock error-rate threshold (%)": "ロックするエラー率のしきい値（%）",
     "Temporary lock duration (seconds)": "一時ロック時間（秒）",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "一時ロックの終了後はゼロから再集計されるため、最初のリクエストだけで前回の状態が直ちに再発動することはありません。"

@@ -79,6 +79,7 @@ export function CommonLogsStats() {
     return (
       <div className='flex items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />
+        {!isAdmin && <Skeleton className='h-7 w-[90px] rounded-md' />}
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
         {isAdmin && (
@@ -98,6 +99,13 @@ export function CommonLogsStats() {
         value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
         accent='bg-sky-500/70'
       />
+      {!isAdmin && (stats?.session_window_limit ?? 0) > 0 && (
+        <StatBadge
+          label={t('Window')}
+          value={`${stats?.session_window_used ?? 0}/${stats?.session_window_limit}`}
+          accent='bg-emerald-500/70'
+        />
+      )}
       <StatBadge
         label={t('RPM')}
         value={stats?.rpm || 0}
