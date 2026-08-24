@@ -5358,6 +5358,12 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Temporarily lock users with high error rates": "エラー率の高いユーザーを一時的にロックする",
+    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "最小サンプル数に達した後、設定したエラー率を超えたユーザーの API 呼び出しを一時停止します。",
+    "Minimum lock samples": "ロック判定の最小サンプル数",
+    "Lock error-rate threshold (%)": "ロックするエラー率のしきい値（%）",
+    "Temporary lock duration (seconds)": "一時ロック時間（秒）",
+    "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "一時ロックの終了後はゼロから再集計されるため、最初のリクエストだけで前回の状態が直ちに再発動することはありません。"
   }
 }

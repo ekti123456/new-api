@@ -353,6 +353,33 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "perf_metrics_setting.user_error_rate_lock_min_requests":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value < 1 || value > 100000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user error-rate lock minimum requests must be between 1 and 100000",
+			})
+			return
+		}
+	case "perf_metrics_setting.user_error_rate_lock_threshold":
+		value, parseErr := strconv.ParseFloat(option.Value.(string), 64)
+		if parseErr != nil || value <= 0 || value > 100 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user error-rate lock threshold must be greater than 0 and at most 100",
+			})
+			return
+		}
+	case "perf_metrics_setting.user_error_rate_lock_seconds":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value < 1 || value > 86400 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "user error-rate lock duration must be between 1 and 86400 seconds",
+			})
+			return
+		}
 	case "perf_metrics_setting.user_ttft_over_average_percent":
 		value, parseErr := strconv.ParseFloat(option.Value.(string), 64)
 		if parseErr != nil || value < 0 || value > 1000 {

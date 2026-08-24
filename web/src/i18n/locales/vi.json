@@ -5358,6 +5358,12 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Temporarily lock users with high error rates": "Tạm khóa người dùng có tỷ lệ lỗi cao",
+    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "Sau khi đạt số mẫu tối thiểu, người dùng vượt quá tỷ lệ lỗi đã cấu hình sẽ tạm thời không thể gọi API.",
+    "Minimum lock samples": "Số mẫu tối thiểu để khóa",
+    "Lock error-rate threshold (%)": "Ngưỡng tỷ lệ lỗi để khóa (%)",
+    "Temporary lock duration (seconds)": "Thời gian khóa tạm thời (giây)",
+    "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "Khi khóa tạm thời hết hạn, bộ đếm bắt đầu lại từ 0 để yêu cầu đầu tiên không thể lập tức kích hoạt lại kết quả của vòng trước."
   }
 }

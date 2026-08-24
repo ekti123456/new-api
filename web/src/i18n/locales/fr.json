@@ -5358,6 +5358,12 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Temporarily lock users with high error rates": "Verrouiller temporairement les utilisateurs avec un taux d’erreur élevé",
+    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "Une fois le nombre minimal d’échantillons atteint, les utilisateurs dépassant le taux d’erreur configuré ne peuvent temporairement plus appeler l’API.",
+    "Minimum lock samples": "Nombre minimal d’échantillons avant verrouillage",
+    "Lock error-rate threshold (%)": "Seuil du taux d’erreur de verrouillage (%)",
+    "Temporary lock duration (seconds)": "Durée du verrouillage temporaire (secondes)",
+    "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "À l’expiration du verrouillage temporaire, le comptage repart de zéro afin que la première requête ne puisse pas réactiver immédiatement le cycle précédent."
   }
 }

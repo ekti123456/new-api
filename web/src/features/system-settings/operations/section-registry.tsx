@@ -65,6 +65,18 @@ const OPERATIONS_SECTIONS = [
           'perf_metrics_setting.user_ttft_over_average_percent':
             settings['perf_metrics_setting.user_ttft_over_average_percent'] ??
             50,
+          'perf_metrics_setting.user_error_rate_lock_enabled':
+            settings['perf_metrics_setting.user_error_rate_lock_enabled'] ??
+            false,
+          'perf_metrics_setting.user_error_rate_lock_min_requests':
+            settings[
+              'perf_metrics_setting.user_error_rate_lock_min_requests'
+            ] ?? 100,
+          'perf_metrics_setting.user_error_rate_lock_threshold':
+            settings['perf_metrics_setting.user_error_rate_lock_threshold'] ??
+            50,
+          'perf_metrics_setting.user_error_rate_lock_seconds':
+            settings['perf_metrics_setting.user_error_rate_lock_seconds'] ?? 60,
         }}
       />
     ),

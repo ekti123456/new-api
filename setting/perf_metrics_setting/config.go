@@ -7,33 +7,44 @@ import (
 )
 
 const (
-	DefaultUserAnomalyMinRequests = 10
-	DefaultUserErrorRateThreshold = 5.0
-	DefaultUserTtftOverAveragePct = 50.0
-	UserTtftAboveAverageRatio     = 50.0
-	UserAnomalyRetentionHours     = 2
+	DefaultUserAnomalyMinRequests       = 10
+	DefaultUserErrorRateThreshold       = 5.0
+	DefaultUserTtftOverAveragePct       = 50.0
+	DefaultUserErrorRateLockMinRequests = 100
+	DefaultUserErrorRateLockThreshold   = 50.0
+	DefaultUserErrorRateLockSeconds     = 60
+	UserTtftAboveAverageRatio           = 50.0
+	UserAnomalyRetentionHours           = 2
 )
 
 type PerfMetricsSetting struct {
-	Enabled                    bool     `json:"enabled"`
-	FlushInterval              int      `json:"flush_interval"`
-	BucketTime                 string   `json:"bucket_time"`
-	RetentionDays              int      `json:"retention_days"`
-	UserAnomalyMonitoredGroups []string `json:"user_anomaly_monitored_groups"`
-	UserAnomalyMinRequests     int      `json:"user_anomaly_min_requests"`
-	UserErrorRateThreshold     float64  `json:"user_error_rate_threshold"`
-	UserTtftOverAveragePercent float64  `json:"user_ttft_over_average_percent"`
+	Enabled                      bool     `json:"enabled"`
+	FlushInterval                int      `json:"flush_interval"`
+	BucketTime                   string   `json:"bucket_time"`
+	RetentionDays                int      `json:"retention_days"`
+	UserAnomalyMonitoredGroups   []string `json:"user_anomaly_monitored_groups"`
+	UserAnomalyMinRequests       int      `json:"user_anomaly_min_requests"`
+	UserErrorRateThreshold       float64  `json:"user_error_rate_threshold"`
+	UserTtftOverAveragePercent   float64  `json:"user_ttft_over_average_percent"`
+	UserErrorRateLockEnabled     bool     `json:"user_error_rate_lock_enabled"`
+	UserErrorRateLockMinRequests int      `json:"user_error_rate_lock_min_requests"`
+	UserErrorRateLockThreshold   float64  `json:"user_error_rate_lock_threshold"`
+	UserErrorRateLockSeconds     int      `json:"user_error_rate_lock_seconds"`
 }
 
 var perfMetricsSetting = PerfMetricsSetting{
-	Enabled:                    true,
-	FlushInterval:              5,
-	BucketTime:                 "hour",
-	RetentionDays:              0,
-	UserAnomalyMonitoredGroups: []string{},
-	UserAnomalyMinRequests:     DefaultUserAnomalyMinRequests,
-	UserErrorRateThreshold:     DefaultUserErrorRateThreshold,
-	UserTtftOverAveragePercent: DefaultUserTtftOverAveragePct,
+	Enabled:                      true,
+	FlushInterval:                5,
+	BucketTime:                   "hour",
+	RetentionDays:                0,
+	UserAnomalyMonitoredGroups:   []string{},
+	UserAnomalyMinRequests:       DefaultUserAnomalyMinRequests,
+	UserErrorRateThreshold:       DefaultUserErrorRateThreshold,
+	UserTtftOverAveragePercent:   DefaultUserTtftOverAveragePct,
+	UserErrorRateLockEnabled:     false,
+	UserErrorRateLockMinRequests: DefaultUserErrorRateLockMinRequests,
+	UserErrorRateLockThreshold:   DefaultUserErrorRateLockThreshold,
+	UserErrorRateLockSeconds:     DefaultUserErrorRateLockSeconds,
 }
 
 func init() {
@@ -115,4 +126,32 @@ func GetUserTtftOverAveragePercent() float64 {
 		return DefaultUserTtftOverAveragePct
 	}
 	return percent
+}
+
+func IsUserErrorRateLockEnabled() bool {
+	return perfMetricsSetting.Enabled && perfMetricsSetting.UserErrorRateLockEnabled
+}
+
+func GetUserErrorRateLockMinRequests() int {
+	value := perfMetricsSetting.UserErrorRateLockMinRequests
+	if value < 1 || value > 100000 {
+		return DefaultUserErrorRateLockMinRequests
+	}
+	return value
+}
+
+func GetUserErrorRateLockThreshold() float64 {
+	value := perfMetricsSetting.UserErrorRateLockThreshold
+	if value <= 0 || value > 100 {
+		return DefaultUserErrorRateLockThreshold
+	}
+	return value
+}
+
+func GetUserErrorRateLockSeconds() int {
+	value := perfMetricsSetting.UserErrorRateLockSeconds
+	if value < 1 || value > 86400 {
+		return DefaultUserErrorRateLockSeconds
+	}
+	return value
 }

@@ -5358,6 +5358,12 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Temporarily lock users with high error rates": "高錯誤率使用者自動暫時鎖定",
+    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "達到最小樣本數後，錯誤率超過設定閾值的使用者將被暫時停止 API 呼叫。",
+    "Minimum lock samples": "最小鎖定樣本數",
+    "Lock error-rate threshold (%)": "鎖定錯誤率閾值（%）",
+    "Temporary lock duration (seconds)": "暫時鎖定時間（秒）",
+    "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "暫時鎖定結束後將從零重新累計，解鎖後的第一個請求不會因上一輪記錄而立即再次觸發。"
   }
 }

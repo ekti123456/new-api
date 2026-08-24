@@ -64,6 +64,10 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.user_anomaly_min_requests': 10,
   'perf_metrics_setting.user_error_rate_threshold': 5,
   'perf_metrics_setting.user_ttft_over_average_percent': 50,
+  'perf_metrics_setting.user_error_rate_lock_enabled': false,
+  'perf_metrics_setting.user_error_rate_lock_min_requests': 100,
+  'perf_metrics_setting.user_error_rate_lock_threshold': 50,
+  'perf_metrics_setting.user_error_rate_lock_seconds': 60,
 }
 
 export function OperationsSettings() {

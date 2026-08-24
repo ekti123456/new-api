@@ -55,6 +55,7 @@ import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
+import { errorRateLockSchema } from './monitoring-error-rate-lock-schema'
 
 const numericString = z.string().refine((value) => {
   const trimmed = value.trim()
@@ -73,6 +74,7 @@ const monitoringSchema = z.object({
     user_anomaly_min_requests: z.coerce.number().int().min(1).max(100000),
     user_error_rate_threshold: z.coerce.number().gt(0).max(100),
     user_ttft_over_average_percent: z.coerce.number().min(0).max(1000),
+    ...errorRateLockSchema.shape,
   }),
 })
 
@@ -89,6 +91,10 @@ type FlatMonitoringDefaults = {
   'perf_metrics_setting.user_anomaly_min_requests': number
   'perf_metrics_setting.user_error_rate_threshold': number
   'perf_metrics_setting.user_ttft_over_average_percent': number
+  'perf_metrics_setting.user_error_rate_lock_enabled': boolean
+  'perf_metrics_setting.user_error_rate_lock_min_requests': number
+  'perf_metrics_setting.user_error_rate_lock_threshold': number
+  'perf_metrics_setting.user_error_rate_lock_seconds': number
 }
 
 type MonitoringSettingsSectionProps = {
@@ -112,6 +118,14 @@ const buildFormDefaults = (
       defaults['perf_metrics_setting.user_error_rate_threshold'],
     user_ttft_over_average_percent:
       defaults['perf_metrics_setting.user_ttft_over_average_percent'],
+    user_error_rate_lock_enabled:
+      defaults['perf_metrics_setting.user_error_rate_lock_enabled'],
+    user_error_rate_lock_min_requests:
+      defaults['perf_metrics_setting.user_error_rate_lock_min_requests'],
+    user_error_rate_lock_threshold:
+      defaults['perf_metrics_setting.user_error_rate_lock_threshold'],
+    user_error_rate_lock_seconds:
+      defaults['perf_metrics_setting.user_error_rate_lock_seconds'],
   },
 })
 
@@ -135,6 +149,14 @@ const normalizeDefaults = (
     defaults['perf_metrics_setting.user_error_rate_threshold'],
   'perf_metrics_setting.user_ttft_over_average_percent':
     defaults['perf_metrics_setting.user_ttft_over_average_percent'],
+  'perf_metrics_setting.user_error_rate_lock_enabled':
+    defaults['perf_metrics_setting.user_error_rate_lock_enabled'],
+  'perf_metrics_setting.user_error_rate_lock_min_requests':
+    defaults['perf_metrics_setting.user_error_rate_lock_min_requests'],
+  'perf_metrics_setting.user_error_rate_lock_threshold':
+    defaults['perf_metrics_setting.user_error_rate_lock_threshold'],
+  'perf_metrics_setting.user_error_rate_lock_seconds':
+    defaults['perf_metrics_setting.user_error_rate_lock_seconds'],
 })
 
 const normalizeFormValues = (
@@ -156,6 +178,14 @@ const normalizeFormValues = (
     values.perf_metrics_setting.user_error_rate_threshold,
   'perf_metrics_setting.user_ttft_over_average_percent':
     values.perf_metrics_setting.user_ttft_over_average_percent,
+  'perf_metrics_setting.user_error_rate_lock_enabled':
+    values.perf_metrics_setting.user_error_rate_lock_enabled,
+  'perf_metrics_setting.user_error_rate_lock_min_requests':
+    values.perf_metrics_setting.user_error_rate_lock_min_requests,
+  'perf_metrics_setting.user_error_rate_lock_threshold':
+    values.perf_metrics_setting.user_error_rate_lock_threshold,
+  'perf_metrics_setting.user_error_rate_lock_seconds':
+    values.perf_metrics_setting.user_error_rate_lock_seconds,
 })
 
 export function MonitoringSettingsSection({
@@ -192,6 +222,9 @@ export function MonitoringSettingsSection({
   }, [defaultValues])
 
   const perfMetricsEnabled = form.watch('perf_metrics_setting.enabled')
+  const errorRateLockEnabled = form.watch(
+    'perf_metrics_setting.user_error_rate_lock_enabled'
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -485,6 +518,111 @@ export function MonitoringSettingsSection({
                   </FormItem>
                 )}
               />
+            </div>
+
+            <div className='space-y-4 rounded-lg border p-4'>
+              <FormField
+                control={form.control}
+                name='perf_metrics_setting.user_error_rate_lock_enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Temporarily lock users with high error rates')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={!perfMetricsEnabled}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+              <div className='grid gap-4 md:grid-cols-3'>
+                <FormField
+                  control={form.control}
+                  name='perf_metrics_setting.user_error_rate_lock_min_requests'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Minimum lock samples')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          max={100000}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                          disabled={
+                            !perfMetricsEnabled || !errorRateLockEnabled
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='perf_metrics_setting.user_error_rate_lock_threshold'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Lock error-rate threshold (%)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0.01}
+                          max={100}
+                          step={0.1}
+                          {...safeNumberFieldProps(field)}
+                          disabled={
+                            !perfMetricsEnabled || !errorRateLockEnabled
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='perf_metrics_setting.user_error_rate_lock_seconds'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Temporary lock duration (seconds)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          max={86400}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                          disabled={
+                            !perfMetricsEnabled || !errorRateLockEnabled
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.'
+                )}
+              </p>
             </div>
           </div>
         </SettingsForm>

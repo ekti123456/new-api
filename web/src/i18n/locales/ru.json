@@ -5358,6 +5358,12 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Temporarily lock users with high error rates": "Временно блокировать пользователей с высокой долей ошибок",
+    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "После достижения минимального числа запросов пользователи с долей ошибок выше заданного порога временно теряют доступ к API.",
+    "Minimum lock samples": "Минимальное число запросов для блокировки",
+    "Lock error-rate threshold (%)": "Порог доли ошибок для блокировки (%)",
+    "Temporary lock duration (seconds)": "Длительность временной блокировки (секунды)",
+    "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "После окончания временной блокировки подсчёт начинается с нуля, поэтому первый запрос не активирует повторно результаты предыдущего периода."
   }
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -485,8 +486,34 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
+		if c.GetString(RouteTagKey) == "relay" && enforceUserErrorRateLock(c, token.UserId) {
+			return
+		}
 		c.Next()
 	}
+}
+
+func enforceUserErrorRateLock(c *gin.Context, userID int) bool {
+	status := perfmetrics.GetUserErrorRateLock(userID)
+	if !status.Locked {
+		return false
+	}
+	writeUserErrorRateLockResponse(c, status)
+	return true
+}
+
+func writeUserErrorRateLockResponse(c *gin.Context, status perfmetrics.UserErrorRateLockStatus) {
+	retryAfter := status.RetryAfter
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
+	abortWithOpenAiMessage(
+		c,
+		http.StatusTooManyRequests,
+		fmt.Sprintf("检测到你最近 %d 次请求中的错误率为 %.1f%%，请检查客户端网络环境。API 调用已临时暂停，请在 %d 秒后重试", status.RequestCount, status.ErrorRate, retryAfter),
+		types.ErrorCode("user_error_rate_temporarily_locked"),
+	)
 }
 
 func codexPolicyIPBlockEnabled() bool {

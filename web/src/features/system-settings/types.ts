@@ -374,6 +374,10 @@ export type OperationsSettings = {
   'perf_metrics_setting.user_anomaly_min_requests': number
   'perf_metrics_setting.user_error_rate_threshold': number
   'perf_metrics_setting.user_ttft_over_average_percent': number
+  'perf_metrics_setting.user_error_rate_lock_enabled': boolean
+  'perf_metrics_setting.user_error_rate_lock_min_requests': number
+  'perf_metrics_setting.user_error_rate_lock_threshold': number
+  'perf_metrics_setting.user_error_rate_lock_seconds': number
 }
 
 export type SecuritySettings = {
