@@ -96,12 +96,157 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	assert.Equal(t, "gpt-5-codex", meta.UpstreamModel)
 	assert.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", "conversation-42"), meta.SessionFingerprint)
 	assert.Len(t, meta.SessionFingerprint, 32)
+	assert.Equal(t, 1, meta.RootSessionVersion)
+	assert.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	assert.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", "conversation-42"), meta.RootSessionFingerprint)
+	assert.Len(t, meta.RootSessionFingerprint, 32)
 	metaCanonical := newAPIPolicyMetaVersion + "\n" + info.RequestId + "\n" + bodyDigestHex + "\n" + encodedMeta
 	assert.Equal(t, newAPIHMAC(secret, metaCanonical), upstreamRequest.Header.Get("X-NewAPI-Policy-Meta-Signature"))
 
 	forwardedBody, err := io.ReadAll(upstreamRequest.Body)
 	require.NoError(t, err)
 	assert.Equal(t, body, forwardedBody)
+}
+
+func TestApplyNewAPIPolicyHeadersSeparatesGuardianLeafFromRoot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		secret  = "0123456789abcdef0123456789abcdef"
+		rootID  = "019c8f5d-5729-7ec2-879d-da6c4f7b2301"
+		childID = "019c8f5e-6b19-7bc3-bfd1-a11616b4d514"
+	)
+	apiKey := "sk-codex2api-guardian"
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	binding := newAPIPolicyBinding{
+		PlatformID:          "primary-newapi",
+		Target:              "http://127.0.0.1:18095",
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]),
+		Secret:              secret,
+		Enabled:             true,
+	}
+	configurePolicyTest(t, []newAPIPolicyBinding{binding})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.9:4567"
+	c.Request.Header.Set("Conversation-Id", childID)
+	c.Request.Header.Set("Session-Id", rootID)
+	c.Request.Header.Set("Thread-Id", childID)
+	c.Request.Header.Set("X-Client-Request-Id", childID)
+	c.Request.Header.Set("X-Codex-Window-Id", childID+":8")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	c.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+
+	body := []byte(`{"model":"gpt-5.6-luna","input":"review"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		UserId: 42, UserGroup: "default", RequestId: "req-guardian-root",
+		OriginModelName: "gpt-5.6-luna", RelayFormat: types.RelayFormatOpenAIResponses,
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 7, ApiKey: apiKey, UpstreamModelName: "gpt-5.6-luna"},
+		Request:                 &dto.OpenAIResponsesRequest{ClientMetadata: []byte(`{"session_id":"` + rootID + `","thread_id":"` + childID + `","x-codex-window-id":"` + childID + `:8","x-codex-parent-thread-id":"` + rootID + `","x-openai-subagent":"guardian"}`)},
+	}
+
+	require.NoError(t, applyNewAPIPolicyHeaders(c, req, info, bytes.NewReader(body)))
+	encoded := req.Header.Get("X-NewAPI-Policy-Meta")
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	var meta newAPIPolicyMeta
+	require.NoError(t, common2.Unmarshal(payload, &meta))
+	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	require.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", childID), meta.SessionFingerprint)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID), meta.RootSessionFingerprint)
+	require.NotEqual(t, meta.SessionFingerprint, meta.RootSessionFingerprint)
+}
+
+func TestResolveNewAPIPolicyRootSessionIDReportsConflictAndUnavailable(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"root-a","thread_id":"leaf-a"}`)
+	if root, state := resolveNewAPIPolicyRootSessionID(context, nil, ""); root != "" || state != newAPIPolicyRootSessionConflict {
+		t.Fatalf("uncorroborated child state = root %q state %q", root, state)
+	}
+
+	empty, _ := gin.CreateTestContext(httptest.NewRecorder())
+	empty.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	if root, state := resolveNewAPIPolicyRootSessionID(empty, nil, ""); root != "" || state != newAPIPolicyRootSessionUnavailable {
+		t.Fatalf("empty identity state = root %q state %q", root, state)
+	}
+}
+
+func TestResolveNewAPIPolicyRootSessionIDDefersWeakWebSocketIdentityToFrame(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		header string
+	}{
+		{name: "lone Session-Id", header: "Session-Id"},
+		{name: "legacy conversation", header: "Conversation-Id"},
+		{name: "generic explicit session", header: "X-Session-ID"},
+		{name: "OpenAI explicit session", header: "OpenAI-Session-ID"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			context.Request.Header.Set("Connection", "Upgrade")
+			context.Request.Header.Set("Upgrade", "websocket")
+			context.Request.Header.Set(test.header, "weak-handshake-session")
+
+			legacy := newAPIPolicyStableSessionID(context, nil)
+			root, state := resolveNewAPIPolicyRootSessionID(context, nil, legacy)
+			require.Empty(t, root)
+			require.Equal(t, newAPIPolicyRootSessionUnavailable, state)
+		})
+	}
+}
+
+func TestResolveNewAPIPolicyRootSessionIDKeepsCompleteWebSocketGraph(t *testing.T) {
+	const (
+		rootID = "01a031a2-043b-7f42-afa6-ce5491d9be64"
+		leafID = "01a031a2-ca1e-7063-8ba7-f140c182c629"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	context.Request.Header.Set("Connection", "Upgrade")
+	context.Request.Header.Set("Upgrade", "websocket")
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", leafID)
+	context.Request.Header.Set("X-Client-Request-Id", leafID)
+	context.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+
+	root, state := resolveNewAPIPolicyRootSessionID(context, nil, newAPIPolicyStableSessionID(context, nil))
+	require.Equal(t, rootID, root)
+	require.Equal(t, newAPIPolicyRootSessionResolved, state)
+}
+
+func TestResolveNewAPIPolicyRootSessionIDTreatsOptionalJSONNullAsAbsent(t *testing.T) {
+	const (
+		rootID = "01a031a2-043b-7f42-afa6-ce5491d9be64"
+		leafID = "01a031a2-ca1e-7063-8ba7-f140c182c629"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"session_id":"` + rootID + `","thread_id":"` + leafID + `","x-codex-window-id":"` + leafID + `:1","x-codex-parent-thread-id":"` + rootID + `","client_request_id":null,"subagent_kind":null,"x-codex-turn-metadata":null}`),
+	}}
+
+	root, state := resolveNewAPIPolicyRootSessionID(context, info, "")
+	require.Equal(t, rootID, root)
+	require.Equal(t, newAPIPolicyRootSessionResolved, state)
+}
+
+func TestResolveNewAPIPolicyRootSessionIDNullMetadataDoesNotUpgradeOpaqueSession(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", "opaque-sdk-session")
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"x-codex-turn-metadata":null,"client_metadata":null,"thread_id":null,"subagent_kind":null}`),
+	}}
+
+	root, state := resolveNewAPIPolicyRootSessionID(context, info, newAPIPolicyStableSessionID(context, info))
+	require.Equal(t, "opaque-sdk-session", root)
+	require.Equal(t, newAPIPolicyRootSessionResolved, state)
 }
 
 func TestNewAPIPolicyStableSessionFingerprintUsesExplicitConversationIdentity(t *testing.T) {
@@ -126,6 +271,412 @@ func TestNewAPIPolicyStableSessionFingerprintUsesExplicitConversationIdentity(t 
 	if len(first) != 32 || first != repeat || first == otherUser {
 		t.Fatalf("unexpected scoped fingerprint first=%q repeat=%q other_user=%q", first, repeat, otherUser)
 	}
+}
+
+func TestNewAPIPolicyRootSessionIDCollapsesVerifiedGuardianLineage(t *testing.T) {
+	const (
+		rootID  = "019c8f5d-5729-7ec2-879d-da6c4f7b2301"
+		childID = "019c8f5e-6b19-7bc3-bfd1-a11616b4d514"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", childID)
+	context.Request.Header.Set("Thread-Id", childID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+childID+`","parent_thread_id":"`+rootID+`","subagent_kind":"guardian"}`)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"session_id":"` + rootID + `","thread_id":"` + childID + `","x-openai-subagent":"guardian","x-codex-turn-metadata":"{\"session_id\":\"` + rootID + `\",\"thread_id\":\"` + childID + `\",\"parent_thread_id\":\"` + rootID + `\",\"subagent_kind\":\"guardian\"}"}`),
+	}}
+
+	leafID := newAPIPolicyStableSessionID(context, info)
+	require.Equal(t, childID, leafID)
+	root, ok := newAPIPolicyRootSessionID(context, info, leafID)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDCollapsesNestedGuardianToMainTask(t *testing.T) {
+	const (
+		rootID         = "01a01a4b-8459-73f3-830a-c8b90a57981a"
+		intermediateID = "01a031b0-8317-7b21-9297-85bbd886eb9e"
+		guardianID     = "01a031b1-8205-7ce2-9284-bca567c7a9a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", guardianID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", intermediateID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+guardianID+`","parent_thread_id":"`+intermediateID+`","subagent_kind":"approval"}`)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"session_id":"` + rootID + `","thread_id":"` + guardianID + `","parent_thread_id":"` + intermediateID + `","x-openai-subagent":"guardian"}`),
+	}}
+
+	leafID := newAPIPolicyStableSessionID(context, info)
+	require.Equal(t, rootID, leafID)
+	root, ok := newAPIPolicyRootSessionID(context, info, leafID)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+	assert.NotEqual(t, intermediateID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDNeverPromotesImmediateParent(t *testing.T) {
+	const (
+		rootID         = "01a01a4b-8459-73f3-830a-c8b90a57981a"
+		intermediateID = "01a031b0-8317-7b21-9297-85bbd886eb9e"
+		guardianID     = "01a031b1-8205-7ce2-9284-bca567c7a9a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", guardianID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", intermediateID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, rootID)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+	assert.NotEqual(t, intermediateID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDAcceptsMatchingExplicitAndMetadataRoot(t *testing.T) {
+	const (
+		rootID         = "01a01a4b-8459-73f3-830a-c8b90a57981a"
+		intermediateID = "01a031b0-8317-7b21-9297-85bbd886eb9e"
+		guardianID     = "01a031b1-8205-7ce2-9284-bca567c7a9a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", guardianID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", intermediateID)
+	// The explicit Session-Id and metadata session_id independently agree on
+	// the root even when older clients omit a subagent marker.
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+guardianID+`"}`)
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, rootID)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDNativeSessionBeatsLegacyConversationPriority(t *testing.T) {
+	const (
+		rootID     = "01a01a4b-8459-73f3-830a-c8b90a57981a"
+		guardianID = "01a031b1-8205-7ce2-9284-bca567c7a9a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Conversation-Id", "legacy-conversation-wins-leaf-priority")
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", guardianID)
+	context.Request.Header.Set("X-Client-Request-Id", guardianID)
+	context.Request.Header.Set("X-Codex-Window-Id", guardianID+":7")
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+
+	legacy := newAPIPolicyStableSessionID(context, nil)
+	require.Equal(t, "legacy-conversation-wins-leaf-priority", legacy)
+	root, ok := newAPIPolicyRootSessionID(context, nil, legacy)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDMetadataRootBeatsLegacyConversationPriority(t *testing.T) {
+	const (
+		rootID     = "01a01a4b-8459-73f3-830a-c8b90a57981a"
+		guardianID = "01a031b1-8205-7ce2-9284-bca567c7a9a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Conversation-Id", "legacy-conversation")
+	context.Request.Header.Set("Session-Id", guardianID)
+	context.Request.Header.Set("Thread-Id", guardianID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+guardianID+`","parent_thread_id":"`+rootID+`"}`)
+
+	legacy := newAPIPolicyStableSessionID(context, nil)
+	require.Equal(t, "legacy-conversation", legacy)
+	root, ok := newAPIPolicyRootSessionID(context, nil, legacy)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDReadsNestedBodyMetadata(t *testing.T) {
+	const (
+		rootID  = "019c8f60-b9e1-78c2-8fe2-91661a4f649c"
+		childID = "019c8f61-071a-7932-934c-2baeaec1126c"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", childID)
+	// The whole client_metadata value and its x-codex-turn-metadata member may
+	// both arrive as JSON strings after protocol conversion.
+	nested := `{"client_metadata":{"x-openai-subagent":"review","x-codex-turn-metadata":{"session_id":"` + rootID + `","thread_id":"` + childID + `","parent_thread_id":"` + rootID + `","subagent_kind":"review"}}}`
+	encodedNested, err := common2.Marshal(nested)
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{ClientMetadata: encodedNested}}
+
+	root, ok := newAPIPolicyRootSessionID(context, info, childID)
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDAliasesMatchCodex2APIContract(t *testing.T) {
+	const (
+		rootID  = "019c8f60-b9e1-78c2-8fe2-91661a4f649c"
+		childID = "019c8f61-071a-7932-934c-2baeaec1126c"
+	)
+	for _, test := range []struct {
+		name     string
+		metadata string
+	}{
+		{
+			name:     "hyphen aliases",
+			metadata: `{"session_id":"` + rootID + `","thread_id":"` + childID + `","x-client-request-id":"` + childID + `","x-codex-window-id":"` + childID + `:4","x-codex-parent-thread-id":"` + rootID + `","x-openai-subagent":"guardian"}`,
+		},
+		{
+			name:     "underscore aliases",
+			metadata: `{"session_id":"` + rootID + `","thread_id":"` + childID + `","x_client_request_id":"` + childID + `","x_codex_window_id":"` + childID + `:5","x_codex_parent_thread_id":"` + rootID + `","x_openai_subagent":"guardian"}`,
+		},
+		{
+			name:     "underscore embedded turn metadata",
+			metadata: `{"x_codex_turn_metadata":{"session_id":"` + rootID + `","thread_id":"` + childID + `","window_id":"` + childID + `:6","parent_thread_id":"` + rootID + `","subagent_kind":"guardian"}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{ClientMetadata: []byte(test.metadata)}}
+			root, state := resolveNewAPIPolicyRootSessionID(context, info, "")
+			if state != newAPIPolicyRootSessionResolved || root != rootID {
+				t.Fatalf("root=%q state=%q", root, state)
+			}
+		})
+	}
+}
+
+func TestNewAPIPolicyRootSessionIDMetadataDepthAndEncodingBounds(t *testing.T) {
+	const rootID = "019c8f64-e414-7885-9e70-f0c2911f1708"
+	leaf := `{"session_id":"` + rootID + `","thread_id":"` + rootID + `"}`
+	resolve := func(metadata []byte) (string, string) {
+		context, _ := gin.CreateTestContext(httptest.NewRecorder())
+		context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{ClientMetadata: metadata}}
+		return resolveNewAPIPolicyRootSessionID(context, info, "")
+	}
+
+	depthThree := []byte(`{"client_metadata":{"client_metadata":{"client_metadata":` + leaf + `}}}`)
+	if root, state := resolve(depthThree); state != newAPIPolicyRootSessionResolved || root != rootID {
+		t.Fatalf("depth three root=%q state=%q", root, state)
+	}
+	depthFour := []byte(`{"client_metadata":{"client_metadata":{"client_metadata":{"client_metadata":` + leaf + `}}}}`)
+	if root, state := resolve(depthFour); root != "" || state != newAPIPolicyRootSessionConflict {
+		t.Fatalf("over-depth root=%q state=%q", root, state)
+	}
+
+	encoded := []byte(leaf)
+	for range 4 {
+		var err error
+		encoded, err = common2.Marshal(string(encoded))
+		require.NoError(t, err)
+	}
+	if root, state := resolve(encoded); state != newAPIPolicyRootSessionResolved || root != rootID {
+		t.Fatalf("four encoded layers root=%q state=%q", root, state)
+	}
+	encoded, err := common2.Marshal(string(encoded))
+	require.NoError(t, err)
+	if root, state := resolve(encoded); root != "" || state != newAPIPolicyRootSessionConflict {
+		t.Fatalf("over-encoded root=%q state=%q", root, state)
+	}
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsAliasAndDuplicateHeaderConflicts(t *testing.T) {
+	const (
+		rootID  = "019c8f60-b9e1-78c2-8fe2-91661a4f649c"
+		childID = "019c8f61-071a-7932-934c-2baeaec1126c"
+		otherID = "019c8f63-8612-7dd3-bb22-f2dd86e98f15"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Add("Session-Id", rootID)
+	context.Request.Header.Add("Session-Id", otherID)
+	if root, state := resolveNewAPIPolicyRootSessionID(context, nil, ""); root != "" || state != newAPIPolicyRootSessionConflict {
+		t.Fatalf("duplicate header root=%q state=%q", root, state)
+	}
+
+	aliasConflict := `{"session_id":"` + rootID + `","thread_id":"` + childID + `","client_request_id":"` + childID + `","x_client_request_id":"` + otherID + `","parent_thread_id":"` + rootID + `"}`
+	clean, _ := gin.CreateTestContext(httptest.NewRecorder())
+	clean.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{ClientMetadata: []byte(aliasConflict)}}
+	if root, state := resolveNewAPIPolicyRootSessionID(clean, info, ""); root != "" || state != newAPIPolicyRootSessionConflict {
+		t.Fatalf("alias conflict root=%q state=%q", root, state)
+	}
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsInvalidStructuredEvidence(t *testing.T) {
+	const (
+		rootID  = "019c8f60-b9e1-78c2-8fe2-91661a4f649c"
+		childID = "019c8f61-071a-7932-934c-2baeaec1126c"
+	)
+	for _, test := range []struct {
+		name     string
+		metadata string
+	}{
+		{
+			name:     "oversized session id",
+			metadata: `{"session_id":"` + strings.Repeat("x", 1025) + `","thread_id":"` + childID + `","parent_thread_id":"` + rootID + `"}`,
+		},
+		{
+			name:     "oversized subagent marker",
+			metadata: `{"session_id":"` + rootID + `","thread_id":"` + childID + `","parent_thread_id":"` + rootID + `","subagent_kind":"` + strings.Repeat("x", 65) + `"}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{ClientMetadata: []byte(test.metadata)}}
+			root, state := resolveNewAPIPolicyRootSessionID(c, info, "")
+			assert.Empty(t, root)
+			assert.Equal(t, newAPIPolicyRootSessionConflict, state)
+		})
+	}
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsMetadataRootWithoutLeafCorroboration(t *testing.T) {
+	const (
+		rootID  = "019c8f60-b9e1-78c2-8fe2-91661a4f649c"
+		childID = "019c8f61-071a-7932-934c-2baeaec1126c"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", childID)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"x-openai-subagent":"review","x-codex-turn-metadata":{"session_id":"` + rootID + `","parent_thread_id":"` + rootID + `","subagent_kind":"review"}}`),
+	}}
+
+	root, ok := newAPIPolicyRootSessionID(context, info, childID)
+	assert.False(t, ok)
+	assert.Empty(t, root)
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsConflictingLineage(t *testing.T) {
+	const childID = "019c8f63-8612-7dd3-bb22-f2dd86e98f15"
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", childID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"parent_thread_id":"root-a","subagent_kind":"guardian"}`)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"x-codex-turn-metadata":{"parent_thread_id":"root-b","subagent_kind":"guardian"}}`),
+	}}
+
+	root, ok := newAPIPolicyRootSessionID(context, info, childID)
+	assert.False(t, ok)
+	assert.Empty(t, root)
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsConflictingLeafGraph(t *testing.T) {
+	const (
+		rootID  = "019c8f5d-5729-7ec2-879d-da6c4f7b2301"
+		childID = "019c8f5e-6b19-7bc3-bfd1-a11616b4d514"
+		otherID = "019c8f5f-8ef4-7d8b-a0e2-c41f93c3b6a2"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("Thread-Id", childID)
+	context.Request.Header.Set("X-Client-Request-Id", otherID)
+	context.Request.Header.Set("X-Codex-Window-Id", childID+":4")
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	context.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, rootID)
+	assert.False(t, ok)
+	assert.Empty(t, root)
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsMalformedWindow(t *testing.T) {
+	const rootID = "019c8f5d-5729-7ec2-879d-da6c4f7b2301"
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", rootID)
+	context.Request.Header.Set("X-Codex-Window-Id", rootID+":not-a-sequence")
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, rootID)
+	assert.False(t, ok)
+	assert.Empty(t, root)
+}
+
+func TestNewAPIPolicyRootSessionIDDoesNotTrustUncorroboratedParent(t *testing.T) {
+	const childID = "019c8f64-2e4a-7ee0-a1a1-50fde3971309"
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("Session-Id", childID)
+	context.Request.Header.Set("X-Codex-Parent-Thread-Id", "unconfirmed-parent")
+
+	root, state := resolveNewAPIPolicyRootSessionID(context, nil, childID)
+	assert.Empty(t, root)
+	assert.Equal(t, newAPIPolicyRootSessionUnavailable, state)
+}
+
+func TestNewAPIPolicyRootSessionIDReadsMainSessionFromHeaderMetadata(t *testing.T) {
+	const (
+		upperRootID = "019C8F64-77D3-7A18-95B1-6711D4173F52"
+		rootID      = "019c8f64-77d3-7a18-95b1-6711d4173f52"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+upperRootID+`","thread_id":"`+upperRootID+`"}`)
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, "")
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDReadsMainSessionFromBodyMetadata(t *testing.T) {
+	const rootID = "019c8f64-e414-7885-9e70-f0c2911f1708"
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{Request: &dto.OpenAIResponsesRequest{
+		ClientMetadata: []byte(`{"session_id":"` + rootID + `","thread_id":"` + rootID + `"}`),
+	}}
+
+	root, ok := newAPIPolicyRootSessionID(context, info, "")
+	require.True(t, ok)
+	assert.Equal(t, rootID, root)
+}
+
+func TestNewAPIPolicyRootSessionIDRejectsMismatchedMainSessionMetadata(t *testing.T) {
+	const (
+		rootID   = "019c8f65-04ce-791d-a102-0cf4320cc933"
+		threadID = "019c8f65-0f2d-7bbb-90ce-a390a941cc1d"
+	)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	context.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+threadID+`"}`)
+
+	root, ok := newAPIPolicyRootSessionID(context, nil, "")
+	assert.False(t, ok)
+	assert.Empty(t, root)
+}
+
+func TestNewAPIPolicyRootSessionFingerprintIsBindingIndependentAndSubjectScoped(t *testing.T) {
+	const rootID = "019c8f65-6fa4-7bd1-89a9-2284899360ca"
+	first := newAPIPolicyRootSessionFingerprint("newapi", "42", rootID)
+	repeat := newAPIPolicyRootSessionFingerprint("NEWAPI", "42", rootID)
+	otherUser := newAPIPolicyRootSessionFingerprint("newapi", "43", rootID)
+	otherPlatform := newAPIPolicyRootSessionFingerprint("secondary", "42", rootID)
+
+	require.Len(t, first, 32)
+	assert.Equal(t, first, repeat)
+	assert.NotEqual(t, first, otherUser)
+	assert.NotEqual(t, first, otherPlatform)
+}
+
+func TestNewAPIPolicyRootSessionFingerprintProtocolVector(t *testing.T) {
+	const rootID = "01a031a2-043b-7f42-afa6-ce5491d9be64"
+	assert.Equal(t, "a68d950522466e5efa03ef5a2e9b9314", newAPIPolicyRootSessionFingerprint("newapi", "42", rootID))
 }
 
 func TestNewAPIPolicyStableSessionIDDoesNotUsePreviousResponseID(t *testing.T) {

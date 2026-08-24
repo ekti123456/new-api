@@ -95,6 +95,14 @@ type newAPIPolicyMeta struct {
 	UpstreamModel      string `json:"upstream_model,omitempty"`
 	ChannelID          int    `json:"channel_id,omitempty"`
 	SessionFingerprint string `json:"session_fingerprint,omitempty"`
+	RootSessionVersion int    `json:"root_session_version,omitempty"`
+	RootSessionState   string `json:"root_session_state,omitempty"`
+	// RootSessionFingerprint identifies the user-visible root conversation.
+	// Unlike the legacy SessionFingerprint it is not derived from a binding
+	// secret, so the same platform/user/session keeps one identity when traffic
+	// moves between bindings. The enclosing policy metadata signature protects
+	// this value from tampering.
+	RootSessionFingerprint string `json:"root_session_fingerprint,omitempty"`
 }
 
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
@@ -151,22 +159,29 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	}, "\n")
 
 	meta := newAPIPolicyMeta{
-		PlatformID:       binding.PlatformID,
-		UserName:         common2.GetContextKeyString(c, constant.ContextKeyUserName),
-		UserEmail:        info.UserEmail,
-		UserGroup:        info.UserGroup,
-		Profile:          binding.Profile,
-		Mode:             binding.Mode,
-		Provider:         "codex2api",
-		Protocol:         string(info.GetFinalRequestRelayFormat()),
-		OriginalEndpoint: originalNewAPIRequestPath(c),
-		OriginalProtocol: string(info.RelayFormat),
-		RequestedModel:   info.OriginModelName,
-		UpstreamModel:    info.UpstreamModelName,
-		ChannelID:        info.ChannelId,
+		PlatformID:         binding.PlatformID,
+		UserName:           common2.GetContextKeyString(c, constant.ContextKeyUserName),
+		UserEmail:          info.UserEmail,
+		UserGroup:          info.UserGroup,
+		Profile:            binding.Profile,
+		Mode:               binding.Mode,
+		Provider:           "codex2api",
+		Protocol:           string(info.GetFinalRequestRelayFormat()),
+		OriginalEndpoint:   originalNewAPIRequestPath(c),
+		OriginalProtocol:   string(info.RelayFormat),
+		RequestedModel:     info.OriginModelName,
+		UpstreamModel:      info.UpstreamModelName,
+		ChannelID:          info.ChannelId,
+		RootSessionVersion: 1,
 	}
-	if sessionID := newAPIPolicyStableSessionID(c, info); sessionID != "" {
+	sessionID := newAPIPolicyStableSessionID(c, info)
+	if sessionID != "" {
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
+	}
+	rootSessionID, rootSessionState := resolveNewAPIPolicyRootSessionID(c, info, sessionID)
+	meta.RootSessionState = rootSessionState
+	if rootSessionState == newAPIPolicyRootSessionResolved {
+		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSessionID)
 	}
 	metaJSON, err := common2.Marshal(meta)
 	if err != nil {
@@ -301,6 +316,19 @@ func newAPIPolicySessionFingerprint(secret, platformID, userID, sessionID string
 		return ""
 	}
 	return fingerprint[:32]
+}
+
+func newAPIPolicyRootSessionFingerprint(platformID, userID, sessionID string) string {
+	sessionID = normalizeNewAPIPolicyRootSessionValue(sessionID)
+	platformID = strings.ToLower(strings.TrimSpace(platformID))
+	userID = strings.TrimSpace(userID)
+	if sessionID == "" || platformID == "" || userID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		"policy-root-session-v1", platformID, userID, sessionID,
+	}, "\x00")))
+	return hex.EncodeToString(sum[:16])
 }
 
 func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {

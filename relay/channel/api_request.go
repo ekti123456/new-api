@@ -59,11 +59,14 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 
 var stableConversationHeaderNames = []string{
 	"Session-Id",
+	"X-Session-ID",
+	"OpenAI-Session-ID",
 	"Thread-Id",
 	"X-Client-Request-Id",
 	"X-Codex-Turn-Metadata",
 	"X-Codex-Window-Id",
 	"X-Codex-Parent-Thread-Id",
+	"X-OpenAI-Subagent",
 }
 
 // applyStableConversationHeaders is independent from body parameter override.
@@ -426,6 +429,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("new WebSocket policy request failed: %w", err)
 	}
 	policyRequest.Header = targetHeader
+	applyStableConversationHeaders(c, policyRequest)
 	if err := applyNewAPIPolicyHeaders(c, policyRequest, info, nil); err != nil {
 		return nil, fmt.Errorf("apply Codex2API policy headers failed: %w", err)
 	}
