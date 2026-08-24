@@ -5361,9 +5361,9 @@
     "Zoom": "縮放",
     "Window": "視窗",
     "Temporarily lock users with high error rates": "高錯誤率使用者自動暫時鎖定",
-    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "達到最小樣本數後，錯誤率超過設定閾值的使用者將被暫時停止 API 呼叫。",
+    "Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.": "僅統計出現在「使用者效能異常」中的使用者；離開異常名單後仍繼續監控 24 小時。",
     "Rolling lock sample count": "滾動統計請求數",
-    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "按每個使用者、每個分組最近 N 條已完成請求計算；樣本不會因超過 2 小時自動失效，鎖定結束後從零重新累計。",
+    "Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.": "按每個已准入使用者、每個分組最近 N 條已完成請求計算；樣本不會因超過 2 小時失效，會在 24 小時寬限期結束或觸發鎖定時清零。",
     "Lock error-rate threshold (%)": "鎖定錯誤率閾值（%）",
     "Temporary lock duration (seconds)": "暫時鎖定時間（秒）",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "暫時鎖定結束後將從零重新累計，解鎖後的第一個請求不會因上一輪記錄而立即再次觸發。"

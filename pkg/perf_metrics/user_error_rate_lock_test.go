@@ -19,7 +19,8 @@ func TestUserErrorRateLockUsesRollingSamplesAndResetsAfterExpiry(t *testing.T) {
 	configureUserErrorRateLockTest(t, false)
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 42, AccessURL: "https://chat.example.com"}
+	user := eligibleUserErrorRateTest(42)
+	user.AccessURL = "https://chat.example.com"
 
 	for i := 0; i < 50; i++ {
 		assert.False(t, ObserveUserErrorRate(successfulUserErrorRateRelay(), user).Locked)
@@ -50,11 +51,14 @@ func TestUserErrorRateLockMemoryKeepsSparseSamplesBeyondDashboardWindow(t *testi
 	configureUserErrorRateLockTest(t, false)
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 47}
+	user := eligibleUserErrorRateTest(47)
 
-	for i := 0; i < 99; i++ {
+	for i := 0; i < 50; i++ {
 		assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
-		now = now.Add(3 * time.Hour)
+	}
+	now = now.Add(3 * time.Hour)
+	for i := 0; i < 49; i++ {
+		assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
 	}
 	status := ObserveUserErrorRate(failedUserErrorRateRelay(), user)
 	require.True(t, status.Locked)
@@ -62,11 +66,99 @@ func TestUserErrorRateLockMemoryKeepsSparseSamplesBeyondDashboardWindow(t *testi
 	assert.Equal(t, int64(100), status.ErrorCount)
 }
 
+func TestUserErrorRateLockOnlyStartsForAnomalyEligibleUsers(t *testing.T) {
+	setting := configureUserErrorRateLockTest(t, false)
+	setting.UserErrorRateLockMinRequests = 2
+	user := &UserMetricIdentity{UserID: 52}
+
+	for i := 0; i < 10; i++ {
+		assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	}
+	userErrorRateMemory.Lock()
+	_, tracked := userErrorRateMemory.states[user.UserID]
+	userErrorRateMemory.Unlock()
+	assert.False(t, tracked, "ordinary users must not allocate rolling lock samples")
+
+	refreshUserErrorRateEligibility([]UserAnomalyItem{{UserID: user.UserID}})
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	require.True(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+}
+
+func TestUserErrorRateLockIneligibleUserCreatesNoRedisState(t *testing.T) {
+	mini := miniredis.RunT(t)
+	configureUserErrorRateLockTest(t, true)
+	common.RDB = redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	t.Cleanup(func() { require.NoError(t, common.RDB.Close()) })
+
+	user := &UserMetricIdentity{UserID: 54}
+	for i := 0; i < 10; i++ {
+		assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	}
+	assert.Empty(t, mini.Keys(), "ordinary users must not create Redis rolling-sample keys")
+}
+
+func TestUserErrorRateEligibilityRefreshExtendsGrace(t *testing.T) {
+	configureUserErrorRateLockTest(t, false)
+	now := time.Unix(1_800_000_000, 0)
+	userErrorRateNow = func() time.Time { return now }
+	const userID = 55
+
+	refreshUserErrorRateEligibility([]UserAnomalyItem{{UserID: userID}})
+	firstDeadline, eligible := getUserErrorRateEligibilityDeadline(userID)
+	require.True(t, eligible)
+	now = now.Add(23 * time.Hour)
+	refreshUserErrorRateEligibility([]UserAnomalyItem{{UserID: userID}})
+	secondDeadline, eligible := getUserErrorRateEligibilityDeadline(userID)
+	require.True(t, eligible)
+	assert.Greater(t, secondDeadline, firstDeadline)
+	now = now.Add(2 * time.Hour)
+	_, eligible = getUserErrorRateEligibilityDeadline(userID)
+	assert.True(t, eligible, "reappearing in the anomaly table must renew the 24-hour grace")
+}
+
+func TestUserErrorRateEligibilityExpiresAfter24HoursAndClearsSamples(t *testing.T) {
+	setting := configureUserErrorRateLockTest(t, false)
+	setting.UserErrorRateLockMinRequests = 3
+	now := time.Unix(1_800_000_000, 0)
+	userErrorRateNow = func() time.Time { return now }
+	user := eligibleUserErrorRateTest(53)
+
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	now = now.Add(23*time.Hour + 59*time.Minute)
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked, "the 24-hour grace must remain active")
+	now = now.Add(2 * time.Minute)
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked, "the first request after grace expiry must be ignored and clear old samples")
+
+	refreshUserErrorRateEligibility([]UserAnomalyItem{{UserID: user.UserID}})
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	require.True(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked, "re-entry must start a fresh sample window")
+}
+
+func TestUserErrorRateEligibilityExpiryClearsRedisSamples(t *testing.T) {
+	mini := miniredis.RunT(t)
+	setting := configureUserErrorRateLockTest(t, true)
+	setting.UserErrorRateLockMinRequests = 3
+	common.RDB = redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	t.Cleanup(func() { require.NoError(t, common.RDB.Close()) })
+	now := time.Unix(1_800_000_000, 0)
+	userErrorRateNow = func() time.Time { return now }
+	user := eligibleUserErrorRateTest(56)
+
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	assert.NotEmpty(t, mini.Keys())
+	mini.FastForward(24*time.Hour + time.Second)
+	now = now.Add(24*time.Hour + time.Second)
+	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
+	assert.Empty(t, mini.Keys(), "eligibility expiry must remove rolling samples before their fallback TTL")
+}
+
 func TestUserErrorRateLockMemoryRetainsNewestSamplesWhenCapacityChanges(t *testing.T) {
 	setting := configureUserErrorRateLockTest(t, false)
 	setting.UserErrorRateLockMinRequests = 4
 	setting.UserErrorRateLockThreshold = 50
-	user := &UserMetricIdentity{UserID: 48}
+	user := eligibleUserErrorRateTest(48)
 
 	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
 	assert.False(t, ObserveUserErrorRate(successfulUserErrorRateRelay(), user).Locked)
@@ -82,7 +174,7 @@ func TestUserErrorRateLockMemoryRetainsNewestSamplesWhenCapacityChanges(t *testi
 
 func TestUserErrorRateLockRequiresMinimumSamples(t *testing.T) {
 	configureUserErrorRateLockTest(t, false)
-	user := &UserMetricIdentity{UserID: 45}
+	user := eligibleUserErrorRateTest(45)
 
 	for i := 0; i < 99; i++ {
 		assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
@@ -93,7 +185,7 @@ func TestUserErrorRateLockRequiresMinimumSamples(t *testing.T) {
 
 func TestUserErrorRateLockIgnoresDisabledUnmonitoredAndExcludedSamples(t *testing.T) {
 	setting := configureUserErrorRateLockTest(t, false)
-	user := &UserMetricIdentity{UserID: 43}
+	user := eligibleUserErrorRateTest(43)
 
 	setting.UserErrorRateLockEnabled = false
 	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
@@ -124,7 +216,8 @@ func TestUserErrorRateLockRedisIsSharedAndResetsAfterTTL(t *testing.T) {
 
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 44, AccessURL: "https://cf-chat.example.com"}
+	user := eligibleUserErrorRateTest(44)
+	user.AccessURL = "https://cf-chat.example.com"
 
 	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
 	status := ObserveUserErrorRate(failedUserErrorRateRelay(), user)
@@ -153,7 +246,7 @@ func TestUserErrorRateLockRedisKeepsSparseSamplesBeyondDashboardWindow(t *testin
 
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 49}
+	user := eligibleUserErrorRateTest(49)
 
 	assert.False(t, ObserveUserErrorRate(failedUserErrorRateRelay(), user).Locked)
 	mini.FastForward(3 * time.Hour)
@@ -174,7 +267,7 @@ func TestUserErrorRateLockRedisRollsOutOldestSamples(t *testing.T) {
 	setting.UserErrorRateLockThreshold = 50
 	common.RDB = redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	t.Cleanup(func() { require.NoError(t, common.RDB.Close()) })
-	user := &UserMetricIdentity{UserID: 50}
+	user := eligibleUserErrorRateTest(50)
 
 	for _, failed := range []bool{true, true, false, false, false, true, true} {
 		info := successfulUserErrorRateRelay()
@@ -200,7 +293,7 @@ func TestUserErrorRateLockTriggerClearsAllGroupSamples(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, common.RDB.Close()) })
 	now := time.Unix(1_800_000_000, 0)
 	userErrorRateNow = func() time.Time { return now }
-	user := &UserMetricIdentity{UserID: 51}
+	user := eligibleUserErrorRateTest(51)
 
 	otherFailure := failedUserErrorRateRelay()
 	otherFailure.UsingGroup = "other"
@@ -222,7 +315,7 @@ func TestUserErrorRateLockRedisCountsConcurrentCompletionsAtomically(t *testing.
 	configureUserErrorRateLockTest(t, true)
 	common.RDB = redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	t.Cleanup(func() { require.NoError(t, common.RDB.Close()) })
-	user := &UserMetricIdentity{UserID: 46}
+	user := eligibleUserErrorRateTest(46)
 
 	var waitGroup sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -258,6 +351,10 @@ func configureUserErrorRateLockTest(t *testing.T, redisEnabled bool) *perf_metri
 	userErrorRateMemory.states = make(map[int]map[string]*userErrorRateCounter)
 	userErrorRateMemory.locks = make(map[int]userErrorRateLock)
 	userErrorRateMemory.Unlock()
+	userErrorRateEligibility.Lock()
+	originalEligibilityDeadlines := userErrorRateEligibility.deadlines
+	userErrorRateEligibility.deadlines = make(map[int]int64)
+	userErrorRateEligibility.Unlock()
 
 	*setting = perf_metrics_setting.PerfMetricsSetting{
 		Enabled:                      true,
@@ -278,8 +375,16 @@ func configureUserErrorRateLockTest(t *testing.T, redisEnabled bool) *perf_metri
 		userErrorRateMemory.states = originalStates
 		userErrorRateMemory.locks = originalLocks
 		userErrorRateMemory.Unlock()
+		userErrorRateEligibility.Lock()
+		userErrorRateEligibility.deadlines = originalEligibilityDeadlines
+		userErrorRateEligibility.Unlock()
 	})
 	return setting
+}
+
+func eligibleUserErrorRateTest(userID int) *UserMetricIdentity {
+	refreshUserErrorRateEligibility([]UserAnomalyItem{{UserID: userID}})
+	return &UserMetricIdentity{UserID: userID}
 }
 
 func successfulUserErrorRateRelay() *relaycommon.RelayInfo {

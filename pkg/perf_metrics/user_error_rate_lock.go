@@ -93,6 +93,13 @@ if error_count < 0 then
 end
 redis.call('SET', KEYS[4], error_count)
 redis.call('SADD', KEYS[3], KEYS[2], KEYS[4])
+local state_ttl = tonumber(ARGV[8])
+if state_ttl < 1 then
+  state_ttl = 1
+end
+redis.call('EXPIRE', KEYS[2], state_ttl)
+redis.call('EXPIRE', KEYS[3], state_ttl)
+redis.call('EXPIRE', KEYS[4], state_ttl)
 
 local threshold_millionths = tonumber(ARGV[4])
 if request_count >= max_samples and error_count * 100000000 > request_count * threshold_millionths then
@@ -117,8 +124,21 @@ end
 return {0, request_count, error_count}
 `)
 
+var clearUserErrorRateSamplesScript = redis.NewScript(`
+local state_keys = redis.call('SMEMBERS', KEYS[1])
+for _, state_key in ipairs(state_keys) do
+  redis.call('DEL', state_key)
+end
+redis.call('DEL', KEYS[1])
+return #state_keys
+`)
+
 func ObserveUserErrorRate(info *relaycommon.RelayInfo, user *UserMetricIdentity) UserErrorRateLockStatus {
 	if !perf_metrics_setting.IsUserErrorRateLockEnabled() || info == nil || info.ExcludeFromPerformanceMetrics || user == nil || user.UserID <= 0 {
+		return UserErrorRateLockStatus{}
+	}
+	eligibilityDeadline, eligible := getUserErrorRateEligibilityDeadline(user.UserID)
+	if !eligible {
 		return UserErrorRateLockStatus{}
 	}
 	group := info.UsingGroup
@@ -128,7 +148,7 @@ func ObserveUserErrorRate(info *relaycommon.RelayInfo, user *UserMetricIdentity)
 
 	isError := !IsRelaySampleSuccess(info)
 	if common.RedisEnabled && common.RDB != nil {
-		status, err := observeUserErrorRateRedis(user.UserID, group, user.AccessURL, isError)
+		status, err := observeUserErrorRateRedis(user.UserID, group, user.AccessURL, isError, eligibilityDeadline)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("user error-rate lock observation failed for user %d: %v", user.UserID, err))
 			return UserErrorRateLockStatus{}
@@ -311,6 +331,25 @@ func evictOldestUserErrorRateStateLocked() bool {
 	return false
 }
 
+func clearUserErrorRateSamples(userID int) {
+	if userID <= 0 {
+		return
+	}
+	userErrorRateMemory.Lock()
+	delete(userErrorRateMemory.states, userID)
+	userErrorRateMemory.Unlock()
+
+	if !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	_, statesKey, _, _ := userErrorRateRedisKeys(userID, "")
+	ctx, cancel := context.WithTimeout(context.Background(), userErrorRateRedisTimeout)
+	defer cancel()
+	if err := clearUserErrorRateSamplesScript.Run(ctx, common.RDB, []string{statesKey}).Err(); err != nil && err != redis.Nil {
+		common.SysLog(fmt.Sprintf("user error-rate sample cleanup failed for user %d: %v", userID, err))
+	}
+}
+
 func buildUserErrorRateLockStatus(lock userErrorRateLock, now int64) UserErrorRateLockStatus {
 	retryAfter := lock.LockedUntil - now
 	if retryAfter < 1 {
@@ -332,7 +371,7 @@ func buildUserErrorRateLockStatus(lock userErrorRateLock, now int64) UserErrorRa
 	}
 }
 
-func observeUserErrorRateRedis(userID int, group string, accessURL string, isError bool) (UserErrorRateLockStatus, error) {
+func observeUserErrorRateRedis(userID int, group string, accessURL string, isError bool, eligibilityDeadline int64) (UserErrorRateLockStatus, error) {
 	lockKey, statesKey, stateKey, errorCountKey := userErrorRateRedisKeys(userID, group)
 	now := userErrorRateNow().Unix()
 	errorValue := 0
@@ -342,6 +381,10 @@ func observeUserErrorRateRedis(userID int, group string, accessURL string, isErr
 	thresholdMillionths := int64(math.Round(perf_metrics_setting.GetUserErrorRateLockThreshold() * 1000000))
 	lockSeconds := perf_metrics_setting.GetUserErrorRateLockSeconds()
 	maxSamples := perf_metrics_setting.GetUserErrorRateLockMinRequests()
+	stateTTL := eligibilityDeadline - now + int64(perf_metrics_setting.UserAnomalyRetentionHours*3600)
+	if stateTTL < 1 {
+		stateTTL = 1
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), userErrorRateRedisTimeout)
 	defer cancel()
@@ -353,6 +396,7 @@ func observeUserErrorRateRedis(userID int, group string, accessURL string, isErr
 		lockSeconds,
 		group,
 		accessURL,
+		stateTTL,
 	).Slice()
 	if err != nil {
 		return UserErrorRateLockStatus{}, err

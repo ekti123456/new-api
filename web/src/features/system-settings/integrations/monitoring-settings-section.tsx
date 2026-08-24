@@ -532,7 +532,7 @@ export function MonitoringSettingsSection({
                       </FormLabel>
                       <FormDescription>
                         {t(
-                          'After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.'
+                          'Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.'
                         )}
                       </FormDescription>
                     </SettingsSwitchContent>
@@ -567,7 +567,7 @@ export function MonitoringSettingsSection({
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.'
+                          'Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.'
                         )}
                       </FormDescription>
                       <FormMessage />

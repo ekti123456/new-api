@@ -362,6 +362,70 @@ func normalizeUserAnomalyPage(page int, pageSize int) (int, int) {
 	return page, pageSize
 }
 
+func calculateUserAnomalyItems(groups []string, minRequests int, errorRateThreshold float64, ttftOverAveragePercent float64) ([]UserAnomalyItem, error) {
+	startTs := time.Now().Add(-time.Duration(perf_metrics_setting.UserAnomalyRetentionHours) * time.Hour).Unix()
+	rows, err := model.ListPerfUserSamples(startTs, groups)
+	if err != nil {
+		return nil, err
+	}
+	groupSummaries, aggregateStates, err := aggregateUserMetricRows(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	allItems := make([]UserAnomalyItem, 0)
+	for key, state := range aggregateStates {
+		summary := groupSummaries[key.group]
+		groupAverage := 0.0
+		if summary.TtftCount > 0 {
+			groupAverage = float64(summary.TtftSumMs) / float64(summary.TtftCount)
+		}
+		state.aggregate.AboveGroupAvgCount = histogramCountAboveAverage(state.histogram, groupAverage, ttftOverAveragePercent)
+		item, ok := buildUserAnomalyItem(state.aggregate, groupAverage, minRequests, errorRateThreshold)
+		if !ok {
+			continue
+		}
+		allItems = append(allItems, item)
+	}
+
+	sort.Slice(allItems, func(i, j int) bool {
+		left := allItems[i]
+		right := allItems[j]
+		if left.ErrorAnomaly != right.ErrorAnomaly {
+			return left.ErrorAnomaly
+		}
+		if left.ErrorRate != right.ErrorRate {
+			return left.ErrorRate > right.ErrorRate
+		}
+		if left.AboveGroupAvgPercentage != right.AboveGroupAvgPercentage {
+			return left.AboveGroupAvgPercentage > right.AboveGroupAvgPercentage
+		}
+		return left.LastSeenAt > right.LastSeenAt
+	})
+	return allItems, nil
+}
+
+func refreshUserErrorRateEligibilityFromMetrics() error {
+	if !perf_metrics_setting.IsUserErrorRateLockEnabled() {
+		return nil
+	}
+	groups := perf_metrics_setting.GetUserAnomalyMonitoredGroups()
+	if len(groups) == 0 {
+		return nil
+	}
+	items, err := calculateUserAnomalyItems(
+		groups,
+		perf_metrics_setting.GetUserAnomalyMinRequests(),
+		perf_metrics_setting.GetUserErrorRateThreshold(),
+		perf_metrics_setting.GetUserTtftOverAveragePercent(),
+	)
+	if err != nil {
+		return err
+	}
+	refreshUserErrorRateEligibility(items)
+	return nil
+}
+
 func QueryUserAnomalies(username string, page int, pageSize int) (UserAnomalyResult, error) {
 	page, pageSize = normalizeUserAnomalyPage(page, pageSize)
 	groups := perf_metrics_setting.GetUserAnomalyMonitoredGroups()
@@ -388,49 +452,23 @@ func QueryUserAnomalies(username string, page int, pageSize int) (UserAnomalyRes
 	}
 	cleanupExpiredUserMetricSamples()
 
-	startTs := time.Now().Add(-time.Duration(perf_metrics_setting.UserAnomalyRetentionHours) * time.Hour).Unix()
-	rows, err := model.ListPerfUserSamples(startTs, groups)
+	allItems, err := calculateUserAnomalyItems(groups, minRequests, errorRateThreshold, ttftOverAveragePercent)
 	if err != nil {
 		return result, err
 	}
-	groupSummaries, aggregateStates, err := aggregateUserMetricRows(rows)
-	if err != nil {
-		return result, err
+	if perf_metrics_setting.IsUserErrorRateLockEnabled() {
+		refreshUserErrorRateEligibility(allItems)
 	}
-
-	allItems := make([]UserAnomalyItem, 0)
 	username = strings.TrimSpace(username)
-	for key, state := range aggregateStates {
-		summary := groupSummaries[key.group]
-		groupAverage := 0.0
-		if summary.TtftCount > 0 {
-			groupAverage = float64(summary.TtftSumMs) / float64(summary.TtftCount)
+	if username != "" {
+		filteredItems := make([]UserAnomalyItem, 0, len(allItems))
+		for _, item := range allItems {
+			if item.Username == username {
+				filteredItems = append(filteredItems, item)
+			}
 		}
-		state.aggregate.AboveGroupAvgCount = histogramCountAboveAverage(state.histogram, groupAverage, ttftOverAveragePercent)
-		if username != "" && state.aggregate.Username != username {
-			continue
-		}
-		item, ok := buildUserAnomalyItem(state.aggregate, groupAverage, minRequests, errorRateThreshold)
-		if !ok {
-			continue
-		}
-		allItems = append(allItems, item)
+		allItems = filteredItems
 	}
-
-	sort.Slice(allItems, func(i, j int) bool {
-		left := allItems[i]
-		right := allItems[j]
-		if left.ErrorAnomaly != right.ErrorAnomaly {
-			return left.ErrorAnomaly
-		}
-		if left.ErrorRate != right.ErrorRate {
-			return left.ErrorRate > right.ErrorRate
-		}
-		if left.AboveGroupAvgPercentage != right.AboveGroupAvgPercentage {
-			return left.AboveGroupAvgPercentage > right.AboveGroupAvgPercentage
-		}
-		return left.LastSeenAt > right.LastSeenAt
-	})
 
 	result.Total = len(allItems)
 	if result.Total == 0 {

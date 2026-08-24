@@ -5361,9 +5361,9 @@
     "Zoom": "Zoom",
     "Window": "Window",
     "Temporarily lock users with high error rates": "Temporarily lock users with high error rates",
-    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.",
+    "Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.": "Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.",
     "Rolling lock sample count": "Rolling lock sample count",
-    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.",
+    "Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.": "Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.",
     "Lock error-rate threshold (%)": "Lock error-rate threshold (%)",
     "Temporary lock duration (seconds)": "Temporary lock duration (seconds)",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again."

@@ -5361,9 +5361,9 @@
     "Zoom": "Zoom",
     "Window": "Окно",
     "Temporarily lock users with high error rates": "Временно блокировать пользователей с высокой долей ошибок",
-    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "После достижения минимального числа запросов пользователи с долей ошибок выше заданного порога временно теряют доступ к API.",
+    "Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.": "Отслеживаются только пользователи из списка аномалий производительности. После выхода из списка отслеживание продолжается 24 часа.",
     "Rolling lock sample count": "Число запросов в скользящем окне",
-    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "Расчёт выполняется по последним N завершённым запросам для каждого пользователя и группы. Образцы не истекают через два часа; после снятия блокировки накопление начинается с нуля.",
+    "Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.": "Расчёт выполняется по последним N завершённым запросам допущенного пользователя и группы. Образцы не истекают через два часа и очищаются по окончании 24-часового периода или при блокировке.",
     "Lock error-rate threshold (%)": "Порог доли ошибок для блокировки (%)",
     "Temporary lock duration (seconds)": "Длительность временной блокировки (секунды)",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "После окончания временной блокировки подсчёт начинается с нуля, поэтому первый запрос не активирует повторно результаты предыдущего периода."

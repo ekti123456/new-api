@@ -5361,9 +5361,9 @@
     "Zoom": "Zoom",
     "Window": "Fenêtre",
     "Temporarily lock users with high error rates": "Verrouiller temporairement les utilisateurs avec un taux d’erreur élevé",
-    "After the minimum sample count is reached, users above the configured error rate are temporarily prevented from calling the API.": "Une fois le nombre minimal d’échantillons atteint, les utilisateurs dépassant le taux d’erreur configuré ne peuvent temporairement plus appeler l’API.",
+    "Only users shown in User performance anomalies are tracked. Tracking continues for 24 hours after they leave the anomaly list.": "Seuls les utilisateurs affichés dans les anomalies de performance sont suivis. Le suivi continue pendant 24 heures après leur retrait de la liste.",
     "Rolling lock sample count": "Nombre de requêtes de la fenêtre glissante",
-    "Calculated from the most recent N completed requests for each user and group. Samples do not expire after two hours; accumulation restarts after the lock expires.": "Calculé à partir des N dernières requêtes terminées pour chaque utilisateur et groupe. Les échantillons n’expirent pas après deux heures ; le cumul repart de zéro après la fin du verrouillage.",
+    "Calculated from the most recent N completed requests for each admitted user and group. Samples do not expire after two hours; they are cleared when the 24-hour grace expires or a lock is triggered.": "Calculé à partir des N dernières requêtes terminées pour chaque utilisateur admis et groupe. Les échantillons n’expirent pas après deux heures ; ils sont effacés à la fin du délai de 24 heures ou lors d’un verrouillage.",
     "Lock error-rate threshold (%)": "Seuil du taux d’erreur de verrouillage (%)",
     "Temporary lock duration (seconds)": "Durée du verrouillage temporaire (secondes)",
     "When the temporary lock expires, counting restarts from zero so the first request cannot immediately trigger the previous round again.": "À l’expiration du verrouillage temporaire, le comptage repart de zéro afin que la première requête ne puisse pas réactiver immédiatement le cycle précédent."

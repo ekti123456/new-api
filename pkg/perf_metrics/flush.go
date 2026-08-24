@@ -11,12 +11,18 @@ import (
 )
 
 func flushLoop() {
+	if err := refreshUserErrorRateEligibilityFromMetrics(); err != nil {
+		common.SysError("failed to initialize user error-rate eligibility: " + err.Error())
+	}
 	for {
 		interval := perf_metrics_setting.GetFlushIntervalMinutes()
 		time.Sleep(time.Duration(interval) * time.Minute)
 		setting := perf_metrics_setting.GetSetting()
 		flushUserMetricSamples()
 		cleanupExpiredUserMetricSamples()
+		if err := refreshUserErrorRateEligibilityFromMetrics(); err != nil {
+			common.SysError("failed to refresh user error-rate eligibility: " + err.Error())
+		}
 		if !setting.Enabled {
 			continue
 		}
