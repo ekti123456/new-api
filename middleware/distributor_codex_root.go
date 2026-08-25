@@ -104,11 +104,10 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	return channel, binding.SelectedGroup, true, nil
 }
 
-// resolveUnlinkedCodexPassiveRoot associates Codex's narrowly classified
-// metadata generations (most importantly the first thread title) with the
-// root request that immediately preceded them on the same user and API token.
-// These generations are intentionally fail-closed: once classified, missing
-// or stale root state must not fall through to ordinary channel scheduling.
+// resolveUnlinkedCodexPassiveRoot associates Codex internal system/subagent
+// turns with their reviewed root or, when the desktop omits the parent graph,
+// the most recent root on the same user and API token. Once classified, a
+// missing root binding fails closed instead of entering ordinary scheduling.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName string) (relaychannel.CodexRootSessionResolution, string, bool, error) {
 	if reviewedRootID, guardian := relaychannel.ClassifyCodexGuardianApproval(c, modelName); guardian {
 		const feature = "guardian_approval"

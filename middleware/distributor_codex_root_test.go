@@ -542,7 +542,7 @@ func TestUnlinkedCodexTitleFailsClosedWithoutSameTokenBinding(t *testing.T) {
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
 
-func TestSpoofedSystemLunaRequestDoesNotReceiveRecentRootAccess(t *testing.T) {
+func TestSystemLunaMetadataUsesRecentRootWithoutPromptMatching(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	rootID := "01a03786-1743-7151-a307-c1c0f1615bb5"
 	binding := service.CodexRootChannelBinding{
@@ -556,8 +556,38 @@ func TestSpoofedSystemLunaRequestDoesNotReceiveRecentRootAccess(t *testing.T) {
 	c.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
 	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	_, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, "gpt-5.6-luna")
-	require.False(t, classified)
+	feature, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, "gpt-5.6-luna")
+	require.True(t, classified)
+	require.Equal(t, "system_passive", feature)
+
+	Distribute()(c)
+	require.False(t, c.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestSubagentLunaMetadataUsesRecentRootWithoutPromptMatching(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+	rootID := "01a03786-1743-7151-a307-c1c0f1615bb5"
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	storeRecentCodexTitleBinding(t, 42, 706, rootID, binding)
+
+	c, _ := codexUnlinkedTitleContext(42, 706, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"codex-auto-review","input":"release-independent subagent task"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"subagent","request_kind":"turn"}`)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+	feature, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, "codex-auto-review")
+	require.True(t, classified)
+	require.Equal(t, "subagent_passive", feature)
+
+	Distribute()(c)
+	require.False(t, c.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
 }
 
 func TestAmbientSuggestionDoesNotPublishRootChannelBinding(t *testing.T) {

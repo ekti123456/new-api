@@ -258,12 +258,12 @@ func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolic
 	return resolution
 }
 
-// ClassifyCodexGuardianApproval recognizes the hidden approval-review request
-// emitted by Codex. Unlike ordinary child turns, current desktop builds put
-// the authoritative parent task in a fixed input line and may omit the native
-// parent graph from transport headers. The full fixed prompt envelope is
-// required so a direct Luna request containing an arbitrary UUID cannot use
-// this route.
+// ClassifyCodexGuardianApproval resolves the parent task recorded directly in
+// Codex's approval-review input. Current desktop builds do not consistently
+// forward the Guardian parent graph or a stable reasoning envelope, but they
+// do include this reviewed-session marker. The later binding lookup is scoped
+// to the authenticated NewAPI user, so a marker cannot borrow another user's
+// root channel or key.
 func ClassifyCodexGuardianApproval(c *gin.Context, modelName string) (string, bool) {
 	if c == nil {
 		return "", false
@@ -274,65 +274,40 @@ func ClassifyCodexGuardianApproval(c *gin.Context, modelName string) (string, bo
 	}
 	requestedModel := normalizeCodexInternalModelName(request.Model)
 	if requestedModel == "" || requestedModel != normalizeCodexInternalModelName(modelName) ||
-		(requestedModel != "gpt-5.6-luna" && requestedModel != "codex-auto-review") ||
-		request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "low") {
-		return "", false
-	}
-
-	var instructions string
-	if common2.Unmarshal(request.Instructions, &instructions) != nil {
-		return "", false
-	}
-	instructions = strings.ReplaceAll(strings.TrimSpace(instructions), "\r\n", "\n")
-	if !strings.HasPrefix(instructions, "You are judging one planned coding-agent action.\nAssess the exact action's intrinsic risk and whether the transcript authorizes its target and side effects.") {
-		return "", false
-	}
-
-	parts := request.ParseInput()
-	texts := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part.Type == "input_text" && strings.TrimSpace(part.Text) != "" {
-			texts = append(texts, part.Text)
-		}
-	}
-	inputText := strings.ReplaceAll(strings.Join(texts, "\n"), "\r\n", "\n")
-	transcriptStart := strings.Index(inputText, ">>> TRANSCRIPT START")
-	transcriptEnd := strings.LastIndex(inputText, ">>> TRANSCRIPT END")
-	approvalStart := strings.LastIndex(inputText, ">>> APPROVAL REQUEST START")
-	approvalEnd := strings.LastIndex(inputText, ">>> APPROVAL REQUEST END")
-	if !strings.HasPrefix(strings.TrimSpace(inputText), "The following is the Codex agent history whose request action you are assessing.") ||
-		transcriptStart < 0 || transcriptEnd <= transcriptStart || approvalStart <= transcriptEnd || approvalEnd <= approvalStart ||
-		!strings.Contains(inputText[transcriptEnd:approvalStart], "The Codex agent has requested the following action:") ||
-		!strings.Contains(inputText[approvalStart:approvalEnd], "Planned action JSON:") {
+		(requestedModel != "gpt-5.6-luna" && requestedModel != "codex-auto-review") {
 		return "", false
 	}
 
 	const reviewedMarker = "Reviewed Codex session id:"
-	bridge := inputText[transcriptEnd+len(">>> TRANSCRIPT END") : approvalStart]
-	if strings.Count(bridge, reviewedMarker) != 1 {
-		return "", false
+	rootID := ""
+	for _, part := range request.ParseInput() {
+		if part.Type != "input_text" {
+			continue
+		}
+		text := strings.ReplaceAll(part.Text, "\r\n", "\n")
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, reviewedMarker) {
+				continue
+			}
+			fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, reviewedMarker)))
+			if len(fields) != 1 {
+				return "", false
+			}
+			candidate := normalizeNewAPIPolicyRootSessionValue(fields[0])
+			if !validNewAPIPolicyRootSessionUUID(candidate) || (rootID != "" && rootID != candidate) {
+				return "", false
+			}
+			rootID = candidate
+		}
 	}
-	reviewed := bridge[strings.Index(bridge, reviewedMarker)+len(reviewedMarker):]
-	if newline := strings.IndexByte(reviewed, '\n'); newline >= 0 {
-		reviewed = reviewed[:newline]
-	}
-	fields := strings.Fields(reviewed)
-	if len(fields) != 1 {
-		return "", false
-	}
-	rootID := normalizeNewAPIPolicyRootSessionValue(fields[0])
-	if !validNewAPIPolicyRootSessionUUID(rootID) {
-		return "", false
-	}
-	return rootID, true
+	return rootID, rootID != ""
 }
 
-// ClassifyUnlinkedCodexPassiveInternalRequest recognizes only Codex's fixed,
-// structured system generations that currently lack a parent thread ID. A
-// model name or thread_source label alone is never sufficient: the request
-// must also use low reasoning, a known prompt, and the matching constrained
-// output schema. This keeps arbitrary direct Luna prompts on the normal model
-// authorization path.
+// ClassifyUnlinkedCodexPassiveInternalRequest recognizes Codex system and
+// subagent turns that use an internal model but do not carry a parent graph.
+// Stable transport metadata is authoritative here; prompt wording, reasoning
+// settings and response schemas vary between desktop releases.
 func ClassifyUnlinkedCodexPassiveInternalRequest(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
 	feature, _, ok := ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
 	return feature, ok
@@ -343,9 +318,12 @@ func ClassifyUnlinkedCodexPassiveInternalRequest(c *gin.Context, resolution Code
 // the distributor distinguish two new Codex tasks created concurrently by
 // the same user and API token instead of relying on a last-request-wins slot.
 func ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, string, bool) {
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	modelName = strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix)
-	if c == nil || modelName != "gpt-5.6-luna" || !resolution.Resolved || resolution.Related || resolution.RootID == "" {
+	modelName = normalizeCodexInternalModelName(modelName)
+	if c == nil || resolution.Related || (modelName != "gpt-5.6-luna" && modelName != "codex-auto-review") {
+		return "", "", false
+	}
+	threadSource := strings.ToLower(strings.TrimSpace(resolution.ThreadSource))
+	if threadSource != "system" && threadSource != "subagent" {
 		return "", "", false
 	}
 
@@ -353,51 +331,28 @@ func ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c *gin.Context, 
 	if err := common2.UnmarshalBodyReusable(c, &request); err != nil {
 		return "", "", false
 	}
-	requestModel := strings.ToLower(strings.TrimSpace(request.Model))
-	requestModel = strings.TrimSuffix(requestModel, ratio_setting.CompactModelSuffix)
-	if requestModel != "gpt-5.6-luna" || request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "low") {
+	requestModel := normalizeCodexInternalModelName(request.Model)
+	if requestModel == "" || requestModel != modelName {
 		return "", "", false
 	}
 
-	inputs := request.ParseInput()
-	firstText := ""
-	for _, input := range inputs {
-		if input.Type == "input_text" && strings.TrimSpace(input.Text) != "" {
-			firstText = strings.TrimSpace(input.Text)
-			break
-		}
-	}
-	if firstText == "" {
-		return "", "", false
+	if threadSource == "subagent" {
+		return "subagent_passive", "", true
 	}
 
-	switch strings.ToLower(strings.TrimSpace(resolution.ThreadSource)) {
-	case "system":
-		if len(request.GetToolsMap()) != 0 {
-			return "", "", false
-		}
-		if strings.HasPrefix(firstText, "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.") &&
-			hasExactStructuredProperties(request.Text, "title", "description") {
-			correlationKey := codexTitlePromptCorrelationKey(firstText)
-			if correlationKey == "" {
-				return "", "", false
+	for _, input := range request.ParseInput() {
+		if input.Type == "input_text" {
+			if correlationKey := codexTitlePromptCorrelationKey(input.Text); correlationKey != "" {
+				return "thread_title", correlationKey, true
 			}
-			return "thread_title", correlationKey, true
-		}
-		if strings.HasPrefix(firstText, "You write the one-line activity update displayed beneath an existing Codex task title.") &&
-			(hasExactStructuredProperties(request.Text, "summary") || hasExactStructuredProperties(request.Text, "summary", "compactSummary")) {
-			return "thread_summary", "", true
 		}
 	}
-	return "", "", false
+	return "system_passive", "", true
 }
 
-// ClassifyCodexSessionAccountingBypass recognizes Codex Desktop's independent
-// ambient-suggestion jobs. These project-level background threads have no
-// trustworthy parent conversation, so they must use ordinary scheduling and
-// their own affinity identity rather than borrowing the most recent root.
-// The result is carried only in signed policy metadata and affects window
-// accounting, not concurrency, logging, billing, or model authorization.
+// ClassifyCodexSessionAccountingBypass recognizes independent Codex system
+// jobs. They must not consume user-visible windows. Prompt text and schemas
+// are intentionally ignored because desktop releases change them frequently.
 func ClassifyCodexSessionAccountingBypass(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
 	if c == nil || !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
 		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
@@ -409,34 +364,17 @@ func ClassifyCodexSessionAccountingBypass(c *gin.Context, resolution CodexRootSe
 		return "", false
 	}
 	requestedModel := normalizeCodexInternalModelName(request.Model)
-	if requestedModel == "" || requestedModel != normalizeCodexInternalModelName(modelName) || len(request.GetToolsMap()) != 0 {
+	if requestedModel == "" || requestedModel != normalizeCodexInternalModelName(modelName) {
 		return "", false
 	}
 
-	if requestedModel == "gpt-5.4-mini" &&
-		strings.Contains(strings.TrimSpace(string(request.Instructions)), "Classify Codex ambient suggestion candidates for policy safety.") &&
-		hasExactStructuredProperties(request.Text, "exclude") {
+	if requestedModel == "gpt-5.4-mini" {
 		return "ambient_suggestion_safety", true
 	}
-
-	if requestedModel != "gpt-5.6-terra" && requestedModel != "gpt-5.4" {
-		return "", false
+	if requestedModel == "gpt-5.6-terra" || requestedModel == "gpt-5.4" {
+		return "ambient_suggestions", true
 	}
-	if request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "medium") {
-		return "", false
-	}
-	firstText := ""
-	for _, input := range request.ParseInput() {
-		if input.Type == "input_text" && strings.TrimSpace(input.Text) != "" {
-			firstText = strings.TrimSpace(strings.ReplaceAll(input.Text, "\r\n", "\n"))
-			break
-		}
-	}
-	if !strings.HasPrefix(firstText, "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex") ||
-		!hasExactStructuredProperties(request.Text, "suggestions") {
-		return "", false
-	}
-	return "ambient_suggestions", true
+	return "", false
 }
 
 func normalizeCodexInternalModelName(modelName string) string {
@@ -523,51 +461,6 @@ func codexInputContentText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(texts, "\n")
-}
-
-func hasExactStructuredProperties(raw json.RawMessage, propertyNames ...string) bool {
-	if len(raw) == 0 || len(propertyNames) == 0 {
-		return false
-	}
-	wanted := make(map[string]struct{}, len(propertyNames))
-	for _, name := range propertyNames {
-		wanted[name] = struct{}{}
-	}
-	var value any
-	if err := common2.Unmarshal(raw, &value); err != nil {
-		return false
-	}
-	var visit func(any) bool
-	visit = func(current any) bool {
-		switch typed := current.(type) {
-		case map[string]any:
-			if properties, ok := typed["properties"].(map[string]any); ok && len(properties) == len(wanted) {
-				matches := true
-				for name := range properties {
-					if _, found := wanted[name]; !found {
-						matches = false
-						break
-					}
-				}
-				if matches {
-					return true
-				}
-			}
-			for _, child := range typed {
-				if visit(child) {
-					return true
-				}
-			}
-		case []any:
-			for _, child := range typed {
-				if visit(child) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return visit(value)
 }
 
 // newAPIPolicyRootSessionID resolves the user-visible root conversation while

@@ -265,7 +265,7 @@ func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *test
 	require.Equal(t, "turn", meta.RequestKind)
 }
 
-func TestClassifyUnlinkedCodexPassiveInternalRequestIsNarrow(t *testing.T) {
+func TestClassifyUnlinkedCodexPassiveInternalRequestUsesStableMetadata(t *testing.T) {
 	const titleID = "01a03787-1743-7151-a307-c1c0f1615bb6"
 	baseBody := `{
 		"model":"gpt-5.6-luna",
@@ -287,22 +287,23 @@ func TestClassifyUnlinkedCodexPassiveInternalRequestIsNarrow(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "thread_title", feature)
 
-	for name, body := range map[string]string{
-		"ordinary prompt": strings.Replace(baseBody, "You are a helpful assistant. You will be presented with a user prompt", "Please answer my direct Luna request", 1),
-		"wrong effort":    strings.Replace(baseBody, `"effort":"low"`, `"effort":"high"`, 1),
-		"wrong schema":    strings.Replace(baseBody, `"description":{"type":"string"}`, `"answer":{"type":"string"}`, 1),
-		"tool enabled":    strings.Replace(baseBody, `"text":`, `"tools":[{"type":"function","name":"shell"}],"text":`, 1),
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, classified := ClassifyUnlinkedCodexPassiveInternalRequest(newContext(body), resolution, "gpt-5.6-luna")
-			require.False(t, classified)
-		})
-	}
+	genericBody := `{"model":"gpt-5.6-luna","input":"release-independent system task"}`
+	feature, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(genericBody), resolution, "gpt-5.6-luna")
+	require.True(t, ok)
+	require.Equal(t, "system_passive", feature)
+
+	feature, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(genericBody), CodexRootSessionResolution{
+		ThreadSource: "subagent", RequestKind: "turn",
+	}, "gpt-5.6-luna")
+	require.True(t, ok)
+	require.Equal(t, "subagent_passive", feature)
 
 	_, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(baseBody), CodexRootSessionResolution{
 		RootID: titleID, Resolved: true, Related: true, ThreadSource: "system",
 	}, "gpt-5.6-luna")
 	require.False(t, ok, "already-related requests must use their explicit lineage instead of the temporal bridge")
+	_, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(genericBody), CodexRootSessionResolution{ThreadSource: "user"}, "gpt-5.6-luna")
+	require.False(t, ok, "ordinary user turns must stay on normal model authorization")
 	_, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(baseBody), resolution, "gpt-5.6-sol")
 	require.False(t, ok, "ordinary main models must never enter the passive Luna path")
 }
@@ -336,17 +337,20 @@ func TestClassifyCodexGuardianApprovalUsesReviewedRootFromRealRequestShape(t *te
 	require.Equal(t, rootID, resolvedRoot)
 
 	for name, mutated := range map[string]string{
-		"direct Luna prompt": strings.Replace(body, "You are judging one planned coding-agent action.", "Answer the user's direct request.", 1),
-		"wrong effort":       strings.Replace(body, `"effort":"low"`, `"effort":"high"`, 1),
-		"missing boundary":   strings.Replace(body, ">>> APPROVAL REQUEST END", ">>> END", 1),
-		"invalid root":       strings.Replace(body, rootID, "not-a-session", 1),
-		"wrong model":        strings.Replace(body, "gpt-5.6-luna", "gpt-5.6-sol", 1),
+		"missing marker": strings.Replace(body, "Reviewed Codex session id:", "Codex session id:", 1),
+		"invalid root":   strings.Replace(body, rootID, "not-a-session", 1),
+		"wrong model":    strings.Replace(body, "gpt-5.6-luna", "gpt-5.6-sol", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, classified := ClassifyCodexGuardianApproval(newContext(mutated), "gpt-5.6-luna")
 			require.False(t, classified)
 		})
 	}
+
+	minimalBody := `{"model":"gpt-5.6-luna","input":"Reviewed Codex session id: ` + rootID + `"}`
+	resolvedRoot, ok = ClassifyCodexGuardianApproval(newContext(minimalBody), "gpt-5.6-luna")
+	require.True(t, ok, "the stable reviewed-session marker must not depend on optional Guardian prompt fields")
+	require.Equal(t, rootID, resolvedRoot)
 }
 
 func TestGuardianApprovalOverrideIsSignedAsRelatedRootSession(t *testing.T) {
@@ -406,7 +410,7 @@ func TestGuardianApprovalOverrideIsSignedAsRelatedRootSession(t *testing.T) {
 	require.Equal(t, "guardian", meta.SubagentKind)
 }
 
-func TestClassifyCodexSessionAccountingBypassIsNarrow(t *testing.T) {
+func TestClassifyCodexSessionAccountingBypassUsesStableSystemMetadata(t *testing.T) {
 	const sessionID = "01a03787-1743-7151-a307-c1c0f1615bb6"
 	ambientBody := func(model string) string {
 		return `{
@@ -444,20 +448,10 @@ func TestClassifyCodexSessionAccountingBypassIsNarrow(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "ambient_suggestion_safety", feature)
 
-	for name, mutate := range map[string]func(string) string{
-		"ordinary prompt": func(body string) string { return strings.Replace(body, "# Overview", "Please answer", 1) },
-		"wrong schema":    func(body string) string { return strings.Replace(body, "suggestions", "answer", 1) },
-		"wrong effort":    func(body string) string { return strings.Replace(body, `"effort":"medium"`, `"effort":"high"`, 1) },
-		"tool enabled": func(body string) string {
-			return strings.Replace(body, `"text":`, `"tools":[{"type":"function","name":"shell"}],"text":`, 1)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			body := mutate(ambientBody("gpt-5.6-terra"))
-			_, classified := ClassifyCodexSessionAccountingBypass(newContext(body), resolution, "gpt-5.6-terra")
-			require.False(t, classified)
-		})
-	}
+	releaseIndependentBody := `{"model":"gpt-5.6-terra","input":"release-independent system task","reasoning":{"effort":"high"},"tools":[{"type":"function","name":"shell"}]}`
+	feature, ok = ClassifyCodexSessionAccountingBypass(newContext(releaseIndependentBody), resolution, "gpt-5.6-terra")
+	require.True(t, ok)
+	require.Equal(t, "ambient_suggestions", feature)
 	_, ok = ClassifyCodexSessionAccountingBypass(newContext(ambientBody("gpt-5.6-terra")), CodexRootSessionResolution{
 		RootID: sessionID, Resolved: true, ThreadSource: "user",
 	}, "gpt-5.6-terra")
@@ -505,7 +499,6 @@ func TestApplyNewAPIPolicyHeadersSignsAmbientSessionAccountingBypass(t *testing.
 	require.NoError(t, common2.UnmarshalBodyReusable(c, &parsed))
 	require.Equal(t, "gpt-5.6-terra", parsed.Model)
 	require.Equal(t, "medium", parsed.Reasoning.Effort)
-	require.True(t, hasExactStructuredProperties(parsed.Text, "suggestions"))
 	feature, classified := ClassifyCodexSessionAccountingBypass(c, resolution, "gpt-5.6-terra")
 	require.True(t, classified)
 	require.Equal(t, "ambient_suggestions", feature)
