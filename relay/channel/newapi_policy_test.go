@@ -1395,6 +1395,27 @@ func signedPolicyDecisionHeader(secret string, requestID string) http.Header {
 	return header
 }
 
+func TestCodex2APIPolicyDestinationStatusDistinguishesTargetAndKeyMismatch(t *testing.T) {
+	const (
+		target = "https://codex.example/base"
+		apiKey = "sk-bound-key"
+	)
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	configurePolicyTest(t, []newAPIPolicyBinding{{
+		PlatformID:          "newapi",
+		Target:              target,
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]),
+		Secret:              "0123456789abcdef0123456789abcdef",
+		Enabled:             true,
+	}})
+
+	require.Equal(t, "matched", Codex2APIPolicyDestinationStatus(target+"/v1", apiKey))
+	require.Equal(t, "channel_key_not_bound", Codex2APIPolicyDestinationStatus(target+"/v1", "sk-other-key"))
+	require.Equal(t, "channel_target_not_bound", Codex2APIPolicyDestinationStatus("https://other.example/v1", apiKey))
+	require.True(t, IsCodex2APIPolicyDestination(target+"/v1", apiKey))
+	require.False(t, IsCodex2APIPolicyDestination(target+"/v1", "sk-other-key"))
+}
+
 func configurePolicyTest(t *testing.T, bindings []newAPIPolicyBinding) {
 	t.Helper()
 	raw, err := common2.Marshal(bindings)

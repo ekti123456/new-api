@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -279,26 +280,46 @@ func pinnedCodexRootChannelKey(c *gin.Context, channel *model.Channel) (string, 
 }
 
 func selectedCodexChannelBinding(c *gin.Context) (int, int, service.CodexRootChannelBinding, bool) {
+	userID, tokenID, binding, ok, _ := inspectSelectedCodexChannelBinding(c)
+	return userID, tokenID, binding, ok
+}
+
+func inspectSelectedCodexChannelBinding(c *gin.Context) (int, int, service.CodexRootChannelBinding, bool, string) {
 	if c == nil {
-		return 0, 0, service.CodexRootChannelBinding{}, false
+		return 0, 0, service.CodexRootChannelBinding{}, false, "context_unavailable"
 	}
 	userID := c.GetInt(string(constant.ContextKeyUserId))
 	tokenID := common.GetContextKeyInt(c, constant.ContextKeyTokenId)
 	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
 	key := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
-	if userID <= 0 || channelID <= 0 || strings.TrimSpace(key) == "" {
-		return 0, 0, service.CodexRootChannelBinding{}, false
+	if userID <= 0 {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "user_unavailable"
+	}
+	if channelID <= 0 {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "channel_unavailable"
+	}
+	if strings.TrimSpace(key) == "" {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "channel_key_unavailable"
 	}
 	channel, err := model.CacheGetChannel(channelID)
-	if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled || !relaychannel.IsCodex2APIPolicyDestination(channel.GetBaseURL(), key) {
-		return 0, 0, service.CodexRootChannelBinding{}, false
+	if err != nil || channel == nil {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "channel_cache_unavailable"
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "channel_disabled"
+	}
+	if policyStatus := relaychannel.Codex2APIPolicyDestinationStatus(channel.GetBaseURL(), key); policyStatus != "matched" {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, policyStatus
 	}
 	selectedGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if selectedGroup == "auto" {
 		selectedGroup = common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
 	}
-	if selectedGroup == "" || !slices.Contains(channel.GetGroups(), selectedGroup) {
-		return 0, 0, service.CodexRootChannelBinding{}, false
+	if selectedGroup == "" {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "selected_group_unavailable"
+	}
+	if !slices.Contains(channel.GetGroups(), selectedGroup) {
+		return userID, tokenID, service.CodexRootChannelBinding{}, false, "selected_group_not_on_channel"
 	}
 	binding := service.CodexRootChannelBinding{
 		ChannelID:      channelID,
@@ -307,7 +328,45 @@ func selectedCodexChannelBinding(c *gin.Context) (int, int, service.CodexRootCha
 		KeyFingerprint: codexRootChannelKeyFingerprint(key),
 		UARoutingOnly:  channel.UARoutingOnly,
 	}
-	return userID, tokenID, binding, true
+	return userID, tokenID, binding, true, "matched"
+}
+
+func codexChannelBaseURLHost(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	channel, err := model.CacheGetChannel(channelID)
+	if err != nil || channel == nil {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(channel.GetBaseURL()))
+	if err != nil || parsed == nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func logSkippedCodexRootBridge(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel, reason string) {
+	if c == nil {
+		return
+	}
+	common.SysError(fmt.Sprintf(
+		"Codex root bridge skipped: user=%d token=%d channel=%d group=%s model=%s resolved=%t related=%t source=%s kind=%s subagent=%s ua_routed=%t base_host=%s reason=%s",
+		common.GetContextKeyInt(c, constant.ContextKeyUserId),
+		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		requestModel,
+		resolution.Resolved,
+		resolution.Related,
+		resolution.ThreadSource,
+		resolution.RequestKind,
+		resolution.SubagentKind,
+		common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted),
+		codexChannelBaseURLHost(c),
+		reason,
+	))
 }
 
 func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) bool {
@@ -339,8 +398,12 @@ func selectedCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Cod
 }
 
 func recordProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
-	userID, _, recentBinding, recentOK := selectedCodexChannelBinding(c)
-	if recentOK && isCodexRecentMainRoute(c, resolution, requestModel) {
+	mainRoute := isCodexRecentMainRoute(c, resolution, requestModel)
+	userID, _, recentBinding, recentOK, bindingReason := inspectSelectedCodexChannelBinding(c)
+	if mainRoute && !recentOK {
+		logSkippedCodexRootBridge(c, resolution, requestModel, bindingReason)
+	}
+	if recentOK && mainRoute {
 		rootID := ""
 		if resolution.Resolved {
 			rootID = resolution.RootID

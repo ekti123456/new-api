@@ -577,16 +577,41 @@ func matchNewAPIPolicyBinding(bindings []newAPIPolicyBinding, actual *url.URL, a
 // routing uses this guard so its model-ability exception can never apply to an
 // unrelated provider channel.
 func IsCodex2APIPolicyDestination(baseURL, apiKey string) bool {
+	return Codex2APIPolicyDestinationStatus(baseURL, apiKey) == "matched"
+}
+
+// Codex2APIPolicyDestinationStatus explains why a selected NewAPI channel is
+// or is not covered by an enabled Codex2API policy binding. It intentionally
+// returns only bounded category names and never exposes targets, secrets or
+// API-key fingerprints, so callers can safely include it in diagnostics.
+func Codex2APIPolicyDestinationStatus(baseURL, apiKey string) string {
 	cfg, err := loadNewAPIPolicyConfig()
-	if err != nil || !cfg.Enabled {
-		return false
+	if err != nil {
+		return "policy_config_invalid"
+	}
+	if !cfg.Enabled {
+		return "policy_disabled"
 	}
 	actual, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || actual == nil || actual.Host == "" {
-		return false
+		return "channel_base_url_invalid"
 	}
-	_, found := matchNewAPIPolicyBinding(cfg.Bindings, actual, apiKey)
-	return found
+	keyDigest := sha256.Sum256([]byte(strings.TrimSpace(apiKey)))
+	keyFingerprint := hex.EncodeToString(keyDigest[:])
+	targetMatched := false
+	for _, binding := range cfg.Bindings {
+		if !binding.Enabled || !policyTargetMatches(binding.Target, actual) {
+			continue
+		}
+		targetMatched = true
+		if binding.CodexKeyFingerprint == "" || hmac.Equal([]byte(binding.CodexKeyFingerprint), []byte(keyFingerprint)) {
+			return "matched"
+		}
+	}
+	if targetMatched {
+		return "channel_key_not_bound"
+	}
+	return "channel_target_not_bound"
 }
 
 func policyTargetMatches(rawTarget string, actual *url.URL) bool {

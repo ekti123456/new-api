@@ -570,6 +570,20 @@ func TestDistributorGuardianRecoversFromRootlessMainAndDifferentToken(t *testing
 	require.Zero(t, common.GetContextKeyInt(directContext, constant.ContextKeyChannelId))
 }
 
+func TestInspectSelectedCodexChannelBindingReportsPolicyKeyMismatch(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
+	const rootID = "01a03893-9de1-7783-bbd1-a6ad51420060"
+	c, _ := codexMainRootContext(64, 722, channel.Id, rootID)
+	require.Nil(t, SetupContextForSelectedChannel(c, channel, "gpt-5.6-sol"))
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "sk-not-in-policy-binding")
+
+	userID, tokenID, _, ok, reason := inspectSelectedCodexChannelBinding(c)
+	require.False(t, ok)
+	require.Equal(t, 64, userID)
+	require.Equal(t, 722, tokenID)
+	require.Equal(t, "channel_key_not_bound", reason)
+}
+
 func TestDistributorGuardianShapeFailsClosedWithoutReviewedRootBinding(t *testing.T) {
 	setupCodexRootDistributorTest(t)
 	guardianContext, recorder := codexGuardianApprovalContext(43, 711, "01a03816-3b42-78d1-a818-65fdcb9e8a74")
