@@ -38,8 +38,9 @@ type CodexRootChannelBinding struct {
 // The short TTL intentionally limits temporal correlation to the root request
 // that immediately preceded the metadata generation.
 type CodexRecentRootChannelBinding struct {
-	RootID  string                  `json:"root_id"`
-	Binding CodexRootChannelBinding `json:"binding"`
+	RootID    string                  `json:"root_id"`
+	Binding   CodexRootChannelBinding `json:"binding"`
+	Ambiguous bool                    `json:"ambiguous,omitempty"`
 }
 
 var (
@@ -47,8 +48,13 @@ var (
 	codexRootChannelCache     *cachex.HybridCache[CodexRootChannelBinding]
 	codexRecentRootCacheOnce  sync.Once
 	codexRecentRootCache      *cachex.HybridCache[CodexRecentRootChannelBinding]
-	codexRecentUserGroupOnce  sync.Once
-	codexRecentUserGroupCache *cachex.HybridCache[CodexRecentRootChannelBinding]
+	// Correlated title writes are a read-modify-write operation: when two roots
+	// publish the same prompt key, the cache must become ambiguous instead of
+	// silently changing from A to B. Multi-replica atomicity remains delegated
+	// to the shared cache architecture; this lock closes the in-process race.
+	codexRecentRootCorrelationMu sync.Mutex
+	codexRecentUserGroupOnce     sync.Once
+	codexRecentUserGroupCache    *cachex.HybridCache[CodexRecentRootChannelBinding]
 )
 
 func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
@@ -174,7 +180,25 @@ func StoreRecentCodexRootChannelBindingForCorrelation(userID, tokenID int, corre
 		return nil
 	}
 	value := CodexRecentRootChannelBinding{RootID: rootID, Binding: binding}
-	return getCodexRecentRootChannelCache().SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
+	cache := getCodexRecentRootChannelCache()
+	if strings.TrimSpace(correlationKey) == "" {
+		return cache.SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
+	}
+
+	codexRecentRootCorrelationMu.Lock()
+	defer codexRecentRootCorrelationMu.Unlock()
+	current, found, err := cache.Get(key)
+	if err != nil {
+		return err
+	}
+	if found && (current.Ambiguous || (strings.TrimSpace(current.RootID) != "" && !strings.EqualFold(current.RootID, rootID))) {
+		// The title request carries only the prompt, not a trustworthy parent ID.
+		// Once two roots share that prompt key, choosing either channel could mix
+		// API keys/account configuration. Retain only an ambiguity marker so the
+		// distributor fails closed until the short cache entry expires.
+		value = CodexRecentRootChannelBinding{Ambiguous: true}
+	}
+	return cache.SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
 }
 
 func LoadRecentCodexRootChannelBinding(userID, tokenID int) (CodexRecentRootChannelBinding, bool, error) {

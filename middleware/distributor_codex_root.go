@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -21,8 +20,6 @@ import (
 )
 
 const codexRootChannelRouteContextKey = "codex_root_channel_route_v1"
-
-const codexPassiveRootBindingWait = 1500 * time.Millisecond
 
 type codexRootChannelRoute struct {
 	binding service.CodexRootChannelBinding
@@ -165,6 +162,12 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 			}
 			return resolution, feature, true, nil
 		}
+		// The reviewed root is exact evidence. Never fill it with a recent
+		// user/token or user/group binding: that cache may already belong to a
+		// concurrent task B and would silently run task A's Guardian on B's
+		// channel/key. The client can retry after A's provisional binding is
+		// published by the main request.
+		return resolution, feature, true, errors.New("reviewed Codex Guardian root channel binding is unavailable")
 	}
 	if !classified {
 		feature, correlationKey, classified = relaychannel.ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
@@ -177,60 +180,23 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	var found bool
 	var err error
 	loadRecent := func() {
-		if correlationKey != "" {
-			recent, found, err = service.LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID, correlationKey)
-		} else {
-			recent, found, err = service.LoadRecentCodexRootChannelBinding(userID, tokenID)
-		}
-		if err != nil || found || feature != "guardian_approval" {
+		if correlationKey == "" {
+			err = errors.New("Codex project-title correlation is unavailable")
 			return
 		}
-		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		groups := []string{usingGroup}
-		if usingGroup == "auto" {
-			userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-			groups = service.GetRequestAutoGroups(c, userGroup)
-		}
-		for _, group := range groups {
-			recent, found, err = service.LoadRecentCodexUserGroupChannelBinding(userID, group)
-			if err != nil || found {
-				return
-			}
-		}
+		recent, found, err = service.LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID, correlationKey)
 	}
 	loadRecent()
 	if err != nil {
 		return resolution, feature, true, fmt.Errorf("load recent Codex root channel binding: %w", err)
 	}
-	// The desktop can dispatch the first title at almost the same instant as
-	// the main turn. Wait briefly for the main distributor to finish selecting
-	// its channel instead of letting scheduler ordering make naming flaky.
-	if !found && correlationKey != "" && c.Request != nil {
-		timer := time.NewTimer(codexPassiveRootBindingWait)
-		ticker := time.NewTicker(25 * time.Millisecond)
-		defer timer.Stop()
-		defer ticker.Stop()
-		for !found {
-			select {
-			case <-c.Request.Context().Done():
-				return resolution, feature, true, c.Request.Context().Err()
-			case <-timer.C:
-				return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
-			case <-ticker.C:
-				loadRecent()
-				if err != nil {
-					return resolution, feature, true, fmt.Errorf("load recent Codex root channel binding: %w", err)
-				}
-			}
-		}
-	}
 	if !found {
 		return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
 	}
-	rootID := strings.TrimSpace(recent.RootID)
-	if rootID == "" && feature == "guardian_approval" {
-		rootID = reviewedRootID
+	if recent.Ambiguous {
+		return resolution, feature, true, errors.New("recent Codex project-title correlation is ambiguous")
 	}
+	rootID := strings.TrimSpace(recent.RootID)
 	if rootID == "" {
 		return resolution, feature, true, errors.New("recent Codex root identity is unavailable")
 	}

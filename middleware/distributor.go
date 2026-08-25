@@ -82,7 +82,7 @@ func Distribute() func(c *gin.Context) {
 				channel = rootChannel
 			}
 		} else {
-			passiveInternalAuthorized := rootBindingFound && rootChannel != nil && isPassiveCodexInternalModel(modelRequest.Model)
+			passiveInternalAuthorized := strictPassiveRoute && rootBindingFound && rootChannel != nil && isPassiveCodexInternalModel(modelRequest.Model)
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)

@@ -199,6 +199,7 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	if rootSession.state == newAPIPolicyRootSessionResolved {
 		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSession.rootID)
 	}
+	meta.PassiveFeature = codexPassiveRootSessionOverrideFeature(c)
 	rootResolution := CodexRootSessionResolution{
 		RootID:       rootSession.rootID,
 		Resolved:     rootSession.state == newAPIPolicyRootSessionResolved,
