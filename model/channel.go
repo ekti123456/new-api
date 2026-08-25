@@ -283,6 +283,37 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	}
 }
 
+// GetEnabledKeyAt returns one exact channel key without advancing random or
+// polling selection. It is used by root-session routing so a derived Codex
+// request cannot silently move to another key inside the same channel.
+func (channel *Channel) GetEnabledKeyAt(index int) (string, *types.NewAPIError) {
+	if channel == nil {
+		return "", types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if !channel.ChannelInfo.IsMultiKey {
+		if index != 0 || strings.TrimSpace(channel.Key) == "" {
+			return "", types.NewError(errors.New("pinned channel key is unavailable"), types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+		}
+		return channel.Key, nil
+	}
+
+	lock := GetChannelPollingLock(channel.Id)
+	lock.Lock()
+	defer lock.Unlock()
+
+	keys := channel.GetKeys()
+	if index < 0 || index >= len(keys) {
+		return "", types.NewError(errors.New("pinned channel key index is unavailable"), types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+	}
+	if status, ok := channel.ChannelInfo.MultiKeyStatusList[index]; ok && status != common.ChannelStatusEnabled {
+		return "", types.NewError(errors.New("pinned channel key is disabled"), types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+	}
+	if strings.TrimSpace(keys[index]) == "" {
+		return "", types.NewError(errors.New("pinned channel key is empty"), types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+	}
+	return keys[index], nil
+}
+
 func (channel *Channel) SaveChannelInfo() error {
 	return DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error
 }

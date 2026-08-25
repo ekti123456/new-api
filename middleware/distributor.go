@@ -15,6 +15,7 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -39,6 +40,13 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
+		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+		if rootErr != nil {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+			return
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -54,11 +62,19 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
+			if rootBindingFound {
+				if rootChannel == nil || channel.Id != rootChannel.Id {
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
+				channel = rootChannel
+			}
 		} else {
+			passiveInternalAuthorized := rootBindingFound && rootChannel != nil && isPassiveCodexInternalModel(modelRequest.Model)
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
-			if modelLimitEnable {
+			if modelLimitEnable && !passiveInternalAuthorized {
 				s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
 				if !ok {
 					// token model limit is empty, all models are not allowed
@@ -101,31 +117,37 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
+				if rootChannel != nil {
+					channel = rootChannel
+					selectGroup = rootSelectedGroup
+				}
 
-				if routedChannelID, found := service.GetPreferredChannelByUserAgentRouting(c, modelRequest.Model, usingGroup); found {
-					preferred, preferredErr := model.CacheGetChannel(routedChannelID)
-					if preferredErr != nil || preferred == nil || preferred.Status != common.ChannelStatusEnabled || !preferred.UARoutingOnly ||
-						!channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-						return
-					}
-					if usingGroup == "auto" {
-						userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-						for _, g := range service.GetRequestAutoGroups(c, userGroup) {
-							if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-								selectGroup = g
-								common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-								channel = preferred
-								break
-							}
+				if channel == nil {
+					if routedChannelID, found := service.GetPreferredChannelByUserAgentRouting(c, modelRequest.Model, usingGroup); found {
+						preferred, preferredErr := model.CacheGetChannel(routedChannelID)
+						if preferredErr != nil || preferred == nil || preferred.Status != common.ChannelStatusEnabled || !preferred.UARoutingOnly ||
+							!channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+							return
 						}
-					} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-						selectGroup = usingGroup
-						channel = preferred
-					}
-					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-						return
+						if usingGroup == "auto" {
+							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+							for _, g := range service.GetRequestAutoGroups(c, userGroup) {
+								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									selectGroup = g
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									channel = preferred
+									break
+								}
+							}
+						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+							selectGroup = usingGroup
+							channel = preferred
+						}
+						if channel == nil {
+							abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+							return
+						}
 					}
 				}
 
@@ -205,10 +227,16 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if channel != nil {
+			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), types.ErrorCodeModelNotFound)
+				return
+			}
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
+			recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
 		}
 	}
 }
@@ -509,7 +537,14 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	key, index, pinned, pinnedErr := pinnedCodexRootChannelKey(c, channel)
+	if pinnedErr != nil {
+		return types.NewError(pinnedErr, types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+	}
+	var newAPIError *types.NewAPIError
+	if !pinned {
+		key, index, newAPIError = channel.GetNextEnabledKey()
+	}
 	if newAPIError != nil {
 		return newAPIError
 	}

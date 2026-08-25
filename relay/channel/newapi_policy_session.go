@@ -171,6 +171,36 @@ type newAPIPolicyRootSessionResolution struct {
 	subagentKind string
 }
 
+// CodexRootSessionResolution is the distribution-safe subset of the native
+// Codex graph analysis. Related is true only when a coherent root/leaf graph,
+// parent/fork carrier, or subagent marker proves that this is a derived request;
+// thread_source alone is never sufficient.
+type CodexRootSessionResolution struct {
+	RootID   string
+	Resolved bool
+	Related  bool
+}
+
+// ResolveCodexRootSessionForDistribution resolves the same native graph used
+// by signed policy metadata before channel selection. Parsing the reusable body
+// preserves it for the relay handler that follows.
+func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionResolution {
+	var request dto.OpenAIResponsesRequest
+	info := &relaycommon.RelayInfo{}
+	if c != nil {
+		if err := common2.UnmarshalBodyReusable(c, &request); err == nil {
+			info.Request = &request
+		}
+	}
+	stableSessionID := newAPIPolicyStableSessionID(c, info)
+	resolution := analyzeNewAPIPolicyRootSession(c, info, stableSessionID)
+	return CodexRootSessionResolution{
+		RootID:   resolution.rootID,
+		Resolved: resolution.state == newAPIPolicyRootSessionResolved,
+		Related:  resolution.relation == newAPIPolicyRootSessionRelationRelated,
+	}
+}
+
 // newAPIPolicyRootSessionID resolves the user-visible root conversation while
 // preserving the legacy leaf identity separately. A child is collapsed only
 // when an explicit parent or subagent marker proves that the differing leaf is

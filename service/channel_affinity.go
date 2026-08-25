@@ -805,6 +805,9 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 	if c == nil {
 		return false
 	}
+	if common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned) {
+		return true
+	}
 	var explicitSkipRetry *bool
 	v, ok := c.Get(ginKeyChannelAffinitySkipRetry)
 	if ok {

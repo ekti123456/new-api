@@ -555,6 +555,23 @@ func matchNewAPIPolicyBinding(bindings []newAPIPolicyBinding, actual *url.URL, a
 	return newAPIPolicyBinding{}, false
 }
 
+// IsCodex2APIPolicyDestination reports whether an exact upstream destination
+// and key are covered by an enabled Codex2API policy binding. Root-channel
+// routing uses this guard so its model-ability exception can never apply to an
+// unrelated provider channel.
+func IsCodex2APIPolicyDestination(baseURL, apiKey string) bool {
+	cfg, err := loadNewAPIPolicyConfig()
+	if err != nil || !cfg.Enabled {
+		return false
+	}
+	actual, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || actual == nil || actual.Host == "" {
+		return false
+	}
+	_, found := matchNewAPIPolicyBinding(cfg.Bindings, actual, apiKey)
+	return found
+}
+
 func policyTargetMatches(rawTarget string, actual *url.URL) bool {
 	target, err := parsePolicyTarget(rawTarget)
 	if err != nil || actual == nil || !policySchemesMatch(target.Scheme, actual.Scheme) {

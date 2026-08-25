@@ -748,6 +748,39 @@ func TestNewAPIPolicyRootSessionFingerprintProtocolVector(t *testing.T) {
 	assert.Equal(t, "a68d950522466e5efa03ef5a2e9b9314", newAPIPolicyRootSessionFingerprint("newapi", "42", rootID))
 }
 
+func TestResolveCodexRootSessionForDistributionPreservesRequestBody(t *testing.T) {
+	const (
+		rootID = "01a031a2-043b-7f42-afa6-ce5491d9be64"
+		leafID = "01a031a2-ca1e-7063-8ba7-f140c182c629"
+	)
+	body := []byte(`{"model":"gpt-5.6-luna","input":"review","client_metadata":{"session_id":"` + rootID + `","thread_id":"` + leafID + `","window_id":"` + leafID + `:4","parent_thread_id":"` + rootID + `","thread_source":"subagent","subagent_kind":"guardian"}}`)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	resolution := ResolveCodexRootSessionForDistribution(context)
+	require.True(t, resolution.Resolved)
+	require.True(t, resolution.Related)
+	require.Equal(t, rootID, resolution.RootID)
+
+	forwarded, err := io.ReadAll(context.Request.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, string(body), string(forwarded))
+}
+
+func TestResolveCodexRootSessionForDistributionDoesNotTrustThreadSourceAlone(t *testing.T) {
+	const rootID = "01a031a2-043b-7f42-afa6-ce5491d9be64"
+	body := []byte(`{"model":"gpt-5.6-luna","input":"direct","client_metadata":{"session_id":"` + rootID + `","thread_id":"` + rootID + `","window_id":"` + rootID + `:0","thread_source":"subagent"}}`)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	resolution := ResolveCodexRootSessionForDistribution(context)
+	require.True(t, resolution.Resolved)
+	require.False(t, resolution.Related)
+	require.Equal(t, rootID, resolution.RootID)
+}
+
 func TestNewAPIPolicyStableSessionIDDoesNotUsePreviousResponseID(t *testing.T) {
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
