@@ -97,6 +97,13 @@ type newAPIPolicyMeta struct {
 	SessionFingerprint string `json:"session_fingerprint,omitempty"`
 	RootSessionVersion int    `json:"root_session_version,omitempty"`
 	RootSessionState   string `json:"root_session_state,omitempty"`
+	// RootSessionRelation is derived from the validated native Codex graph. It
+	// is never inferred from thread_source alone, so a client cannot exempt an
+	// ordinary request merely by inventing a future source label.
+	RootSessionRelation string `json:"root_session_relation,omitempty"`
+	ThreadSource        string `json:"thread_source,omitempty"`
+	RequestKind         string `json:"request_kind,omitempty"`
+	SubagentKind        string `json:"subagent_kind,omitempty"`
 	// RootSessionFingerprint identifies the user-visible root conversation.
 	// Unlike the legacy SessionFingerprint it is not derived from a binding
 	// secret, so the same platform/user/session keeps one identity when traffic
@@ -178,10 +185,14 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	if sessionID != "" {
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
 	}
-	rootSessionID, rootSessionState := resolveNewAPIPolicyRootSessionID(c, info, sessionID)
-	meta.RootSessionState = rootSessionState
-	if rootSessionState == newAPIPolicyRootSessionResolved {
-		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSessionID)
+	rootSession := analyzeNewAPIPolicyRootSession(c, info, sessionID)
+	meta.RootSessionState = rootSession.state
+	meta.RootSessionRelation = rootSession.relation
+	meta.ThreadSource = rootSession.threadSource
+	meta.RequestKind = rootSession.requestKind
+	meta.SubagentKind = rootSession.subagentKind
+	if rootSession.state == newAPIPolicyRootSessionResolved {
+		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSession.rootID)
 	}
 	metaJSON, err := common2.Marshal(meta)
 	if err != nil {
