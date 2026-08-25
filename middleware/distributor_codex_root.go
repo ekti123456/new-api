@@ -109,30 +109,42 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 // the most recent root on the same user and API token. Once classified, a
 // missing root binding fails closed instead of entering ordinary scheduling.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName string) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+	feature := ""
+	correlationKey := ""
+	classified := false
 	if reviewedRootID, guardian := relaychannel.ClassifyCodexGuardianApproval(c, modelName); guardian {
-		const feature = "guardian_approval"
-		if !relaychannel.SetCodexPassiveRootSessionOverride(c, reviewedRootID, feature) {
-			return resolution, feature, true, errors.New("invalid Codex Guardian root session override")
+		feature = "guardian_approval"
+		classified = true
+		_, found, err := service.LoadCodexRootChannelBinding(userID, reviewedRootID)
+		if err != nil {
+			return resolution, feature, true, fmt.Errorf("load reviewed Codex Guardian root channel binding: %w", err)
 		}
-		resolution.RootID = reviewedRootID
-		resolution.Resolved = true
-		resolution.Related = true
-		if resolution.ThreadSource == "" {
-			resolution.ThreadSource = "subagent"
+		if found {
+			if !relaychannel.SetCodexPassiveRootSessionOverride(c, reviewedRootID, feature) {
+				return resolution, feature, true, errors.New("invalid Codex Guardian root session override")
+			}
+			resolution.RootID = reviewedRootID
+			resolution.Resolved = true
+			resolution.Related = true
+			if resolution.ThreadSource == "" {
+				resolution.ThreadSource = "subagent"
+			}
+			if resolution.RequestKind == "" {
+				resolution.RequestKind = "turn"
+			}
+			if resolution.SubagentKind == "" {
+				resolution.SubagentKind = "guardian"
+			}
+			return resolution, feature, true, nil
 		}
-		if resolution.RequestKind == "" {
-			resolution.RequestKind = "turn"
-		}
-		if resolution.SubagentKind == "" {
-			resolution.SubagentKind = "guardian"
-		}
-		return resolution, feature, true, nil
 	}
-	feature, correlationKey, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
+	if !classified {
+		feature, correlationKey, classified = relaychannel.ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
+	}
 	if !classified {
 		return resolution, "", false, nil
 	}
-	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	tokenID := common.GetContextKeyInt(c, constant.ContextKeyTokenId)
 	var recent service.CodexRecentRootChannelBinding
 	var found bool
@@ -179,6 +191,17 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	resolution.RootID = recent.RootID
 	resolution.Resolved = true
 	resolution.Related = true
+	if feature == "guardian_approval" {
+		if resolution.ThreadSource == "" {
+			resolution.ThreadSource = "subagent"
+		}
+		if resolution.RequestKind == "" {
+			resolution.RequestKind = "turn"
+		}
+		if resolution.SubagentKind == "" {
+			resolution.SubagentKind = "guardian"
+		}
+	}
 	return resolution, feature, true, nil
 }
 

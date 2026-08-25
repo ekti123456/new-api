@@ -482,6 +482,47 @@ func TestDistributorRoutesRealGuardianShapeToReviewedRootWithoutLunaAbility(t *t
 	require.NotEmpty(t, affinity["key_fp"])
 }
 
+func TestDistributorGuardianFallsBackToRecentRootAcrossUARoutingBoundary(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("ua_routing_only", true).Error)
+	model.InitChannelCache()
+	const (
+		userID         = 42
+		tokenID        = 713
+		actualRootID   = "01a03816-3b42-78d1-a818-65fdcb9e8a75"
+		reviewedRootID = "01a03860-ae10-71a3-a8c2-13f9a319c513"
+	)
+
+	mainContext, mainRecorder := codexMainRootContext(userID, tokenID, channel.Id, actualRootID)
+	common.SetContextKey(mainContext, constant.ContextKeyChannelAffinityUserAgentRouted, true)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
+
+	// The Guardian request can carry a different UA classification and a
+	// reviewed desktop ID that was not the stable ID stored by the gateway.
+	// It must reuse the same-user/same-token recent root instead of entering
+	// ordinary Luna/UA scheduling or failing before channel selection.
+	guardianContext, recorder := codexGuardianApprovalContext(userID, tokenID, reviewedRootID)
+	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyChannelAffinityUserAgentRouted))
+	Distribute()(guardianContext)
+
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, guardianContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
+	require.True(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyChannelAffinityUserAgentRouted))
+	resolved := relaychannel.ResolveCodexRootSessionForDistribution(guardianContext)
+	require.True(t, resolved.Resolved)
+	require.True(t, resolved.Related)
+	require.Equal(t, actualRootID, resolved.RootID)
+	require.Equal(t, "subagent", resolved.ThreadSource)
+	require.Equal(t, "turn", resolved.RequestKind)
+	require.Equal(t, "guardian", resolved.SubagentKind)
+}
+
 func TestDistributorGuardianShapeFailsClosedWithoutReviewedRootBinding(t *testing.T) {
 	setupCodexRootDistributorTest(t)
 	guardianContext, recorder := codexGuardianApprovalContext(43, 711, "01a03816-3b42-78d1-a818-65fdcb9e8a74")
