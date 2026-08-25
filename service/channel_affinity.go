@@ -890,6 +890,41 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 	c.Set(ginKeyChannelAffinityLogInfo, info)
 }
 
+// MarkCodexRootChannelAffinityUsed preserves the affinity marker in admin
+// usage logs when a verified Codex root-session binding selected the channel.
+// The root binding already performed the routing, so this function records
+// observability metadata only and must not create or mutate affinity cache
+// entries. An existing rule-produced marker takes precedence.
+func MarkCodexRootChannelAffinityUsed(c *gin.Context, selectedGroup, modelName string, channelID int, rootID string) {
+	rootID = strings.TrimSpace(rootID)
+	if c == nil || channelID <= 0 || rootID == "" {
+		return
+	}
+	if existing, ok := c.Get(ginKeyChannelAffinityLogInfo); ok && existing != nil {
+		return
+	}
+
+	requestPath := ""
+	if c.Request != nil && c.Request.URL != nil {
+		requestPath = c.Request.URL.Path
+	}
+	selectedGroup = strings.TrimSpace(selectedGroup)
+	c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
+		"reason":         "Codex root session",
+		"rule_name":      "Codex root session",
+		"using_group":    selectedGroup,
+		"selected_group": selectedGroup,
+		"model":          strings.TrimSpace(modelName),
+		"request_path":   requestPath,
+		"channel_id":     channelID,
+		"channel_pool":   []int{channelID},
+		"key_source":     "verified_root_session",
+		"key_key":        "root_session_id",
+		"key_hint":       buildChannelAffinityKeyHint(rootID),
+		"key_fp":         affinityFingerprint(rootID),
+	})
+}
+
 func AppendChannelAffinityAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
 	if c == nil || adminInfo == nil {
 		return

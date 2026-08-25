@@ -244,7 +244,87 @@ func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolic
 	resolution.rootID = override.rootID
 	resolution.state = newAPIPolicyRootSessionResolved
 	resolution.relation = newAPIPolicyRootSessionRelationRelated
+	if override.feature == "guardian_approval" {
+		if resolution.threadSource == "" {
+			resolution.threadSource = "subagent"
+		}
+		if resolution.requestKind == "" {
+			resolution.requestKind = "turn"
+		}
+		if resolution.subagentKind == "" {
+			resolution.subagentKind = "guardian"
+		}
+	}
 	return resolution
+}
+
+// ClassifyCodexGuardianApproval recognizes the hidden approval-review request
+// emitted by Codex. Unlike ordinary child turns, current desktop builds put
+// the authoritative parent task in a fixed input line and may omit the native
+// parent graph from transport headers. The full fixed prompt envelope is
+// required so a direct Luna request containing an arbitrary UUID cannot use
+// this route.
+func ClassifyCodexGuardianApproval(c *gin.Context, modelName string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	var request dto.OpenAIResponsesRequest
+	if err := common2.UnmarshalBodyReusable(c, &request); err != nil {
+		return "", false
+	}
+	requestedModel := normalizeCodexInternalModelName(request.Model)
+	if requestedModel == "" || requestedModel != normalizeCodexInternalModelName(modelName) ||
+		(requestedModel != "gpt-5.6-luna" && requestedModel != "codex-auto-review") ||
+		request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "low") {
+		return "", false
+	}
+
+	var instructions string
+	if common2.Unmarshal(request.Instructions, &instructions) != nil {
+		return "", false
+	}
+	instructions = strings.ReplaceAll(strings.TrimSpace(instructions), "\r\n", "\n")
+	if !strings.HasPrefix(instructions, "You are judging one planned coding-agent action.\nAssess the exact action's intrinsic risk and whether the transcript authorizes its target and side effects.") {
+		return "", false
+	}
+
+	parts := request.ParseInput()
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == "input_text" && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	inputText := strings.ReplaceAll(strings.Join(texts, "\n"), "\r\n", "\n")
+	transcriptStart := strings.Index(inputText, ">>> TRANSCRIPT START")
+	transcriptEnd := strings.LastIndex(inputText, ">>> TRANSCRIPT END")
+	approvalStart := strings.LastIndex(inputText, ">>> APPROVAL REQUEST START")
+	approvalEnd := strings.LastIndex(inputText, ">>> APPROVAL REQUEST END")
+	if !strings.HasPrefix(strings.TrimSpace(inputText), "The following is the Codex agent history whose request action you are assessing.") ||
+		transcriptStart < 0 || transcriptEnd <= transcriptStart || approvalStart <= transcriptEnd || approvalEnd <= approvalStart ||
+		!strings.Contains(inputText[transcriptEnd:approvalStart], "The Codex agent has requested the following action:") ||
+		!strings.Contains(inputText[approvalStart:approvalEnd], "Planned action JSON:") {
+		return "", false
+	}
+
+	const reviewedMarker = "Reviewed Codex session id:"
+	bridge := inputText[transcriptEnd+len(">>> TRANSCRIPT END") : approvalStart]
+	if strings.Count(bridge, reviewedMarker) != 1 {
+		return "", false
+	}
+	reviewed := bridge[strings.Index(bridge, reviewedMarker)+len(reviewedMarker):]
+	if newline := strings.IndexByte(reviewed, '\n'); newline >= 0 {
+		reviewed = reviewed[:newline]
+	}
+	fields := strings.Fields(reviewed)
+	if len(fields) != 1 {
+		return "", false
+	}
+	rootID := normalizeNewAPIPolicyRootSessionValue(fields[0])
+	if !validNewAPIPolicyRootSessionUUID(rootID) {
+		return "", false
+	}
+	return rootID, true
 }
 
 // ClassifyUnlinkedCodexPassiveInternalRequest recognizes only Codex's fixed,

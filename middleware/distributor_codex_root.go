@@ -97,6 +97,7 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	c.Set(codexRootChannelRouteContextKey, codexRootChannelRoute{binding: binding, key: key})
 	common.SetContextKey(c, constant.ContextKeyCodexRootChannelPinned, true)
 	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, channel.UARoutingOnly)
+	service.MarkCodexRootChannelAffinityUsed(c, binding.SelectedGroup, modelName, channel.Id, resolution.RootID)
 	if usingGroup == "auto" {
 		common.SetContextKey(c, constant.ContextKeyAutoGroup, binding.SelectedGroup)
 	}
@@ -109,6 +110,25 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 // These generations are intentionally fail-closed: once classified, missing
 // or stale root state must not fall through to ordinary channel scheduling.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName string) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+	if reviewedRootID, guardian := relaychannel.ClassifyCodexGuardianApproval(c, modelName); guardian {
+		const feature = "guardian_approval"
+		if !relaychannel.SetCodexPassiveRootSessionOverride(c, reviewedRootID, feature) {
+			return resolution, feature, true, errors.New("invalid Codex Guardian root session override")
+		}
+		resolution.RootID = reviewedRootID
+		resolution.Resolved = true
+		resolution.Related = true
+		if resolution.ThreadSource == "" {
+			resolution.ThreadSource = "subagent"
+		}
+		if resolution.RequestKind == "" {
+			resolution.RequestKind = "turn"
+		}
+		if resolution.SubagentKind == "" {
+			resolution.SubagentKind = "guardian"
+		}
+		return resolution, feature, true, nil
+	}
 	feature, correlationKey, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
 	if !classified {
 		return resolution, "", false, nil
