@@ -370,11 +370,19 @@ func logSkippedCodexRootBridge(c *gin.Context, resolution relaychannel.CodexRoot
 }
 
 func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) bool {
-	if c == nil || resolution.Related || isPassiveCodexInternalModel(requestModel) {
+	if c == nil || isPassiveCodexInternalModel(requestModel) {
 		return false
 	}
 	threadSource := strings.ToLower(strings.TrimSpace(resolution.ThreadSource))
 	if threadSource == "system" || threadSource == "subagent" {
+		return false
+	}
+	// Context compaction can give the user-visible main task a coherent
+	// parent/leaf graph, which makes Related true even though this is still the
+	// route that owns the root session. Accept that shape only when Codex
+	// explicitly labels it as user-sourced. Unlabelled related turns remain
+	// excluded so a derived request cannot overwrite the main channel bridge.
+	if resolution.Related && threadSource != "user" {
 		return false
 	}
 	// Project-level ambient jobs are independent background threads, not

@@ -570,6 +570,60 @@ func TestDistributorGuardianRecoversFromRootlessMainAndDifferentToken(t *testing
 	require.Zero(t, common.GetContextKeyInt(directContext, constant.ContextKeyChannelId))
 }
 
+func TestDistributorGuardianKeepsUserCompactionRootChannel(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID        = 91
+		mainTokenID   = 723
+		reviewerToken = 724
+		rootID        = "01a038a0-0f35-70e2-90dc-d14bfd2189e1"
+		compactionID  = "01a038a0-0f35-70e2-90dc-d14bfd2189e2"
+	)
+
+	mainContext, mainRecorder := codexMainRootContext(userID, mainTokenID, channel.Id, rootID)
+	mainContext.Request.Header.Set("Thread-Id", compactionID)
+	mainContext.Request.Header.Set("X-Client-Request-Id", compactionID)
+	mainContext.Request.Header.Set("X-Codex-Window-Id", compactionID+":1")
+	mainContext.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	mainContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+compactionID+`","window_id":"`+compactionID+`:1","parent_thread_id":"`+rootID+`","thread_source":"user","request_kind":"compaction"}`)
+	before := relaychannel.ResolveCodexRootSessionForDistribution(mainContext)
+	require.True(t, before.Resolved)
+	require.True(t, before.Related)
+	require.Equal(t, "user", before.ThreadSource)
+	require.Equal(t, "compaction", before.RequestKind)
+
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
+
+	guardianContext, guardianRecorder := codexGuardianApprovalContext(userID, reviewerToken, rootID)
+	Distribute()(guardianContext)
+	require.Less(t, guardianRecorder.Code, http.StatusBadRequest)
+	require.False(t, guardianContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestRelatedCodexRoutePublishesBridgeOnlyForExplicitUserSource(t *testing.T) {
+	c := codexRootDistributorContext(92)
+	resolution := relaychannel.CodexRootSessionResolution{
+		RootID: "01a038a0-0f35-70e2-90dc-d14bfd2189e3", Resolved: true, Related: true,
+	}
+
+	resolution.ThreadSource = "user"
+	require.True(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-sol"))
+
+	for _, source := range []string{"", "system", "subagent"} {
+		resolution.ThreadSource = source
+		require.False(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-sol"), source)
+	}
+
+	resolution.ThreadSource = "user"
+	require.False(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-luna"))
+}
+
 func TestInspectSelectedCodexChannelBindingReportsPolicyKeyMismatch(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 	const rootID = "01a03893-9de1-7783-bbd1-a6ad51420060"
