@@ -38,9 +38,9 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
-	// ContextKeyCodexRootChannelPinned marks a verified derived Codex request
-	// that must stay on the root conversation's original channel and key. The
-	// relay retry path treats this as strict routing and never falls back.
+	// ContextKeyCodexRootChannelPinned marks a root or verified derived Codex
+	// request that must stay on the conversation's original channel and key.
+	// The relay retry path treats this as strict routing and never falls back.
 	ContextKeyCodexRootChannelPinned ContextKey = "codex_root_channel_pinned"
 	// ContextKeyChannelAffinityUserAgentRouted marks requests routed by a
 	// User-Agent/channel-pool rule. These requests remain visible in consume

@@ -212,6 +212,226 @@ func TestApplyNewAPIPolicyHeadersSignsRelatedMetadataWithoutSessionHeaders(t *te
 	require.Equal(t, "summarizer", meta.SubagentKind)
 }
 
+func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		secret  = "0123456789abcdef0123456789abcdef"
+		rootID  = "01a03786-1743-7151-a307-c1c0f1615bb5"
+		titleID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	)
+	apiKey := "sk-codex2api-title"
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	binding := newAPIPolicyBinding{
+		PlatformID:          "primary-newapi",
+		Target:              "http://127.0.0.1:18095",
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]),
+		Secret:              secret,
+		Enabled:             true,
+	}
+	configurePolicyTest(t, []newAPIPolicyBinding{binding})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.9:4567"
+	c.Request.Header.Set("Session-Id", titleID)
+	c.Request.Header.Set("Thread-Id", titleID)
+	c.Request.Header.Set("X-Client-Request-Id", titleID)
+	c.Request.Header.Set("X-Codex-Window-Id", titleID+":0")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"system","request_kind":"turn"}`)
+	require.True(t, SetCodexPassiveRootSessionOverride(c, rootID, "thread_title"))
+
+	body := []byte(`{"model":"gpt-5.6-luna","input":"title"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		UserId: 42, UserGroup: "pro", RequestId: "req-unlinked-title",
+		OriginModelName: "gpt-5.6-luna", RelayFormat: types.RelayFormatOpenAIResponses,
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 7, ApiKey: apiKey, UpstreamModelName: "gpt-5.6-luna"},
+	}
+
+	require.NoError(t, applyNewAPIPolicyHeaders(c, req, info, bytes.NewReader(body)))
+	encoded := req.Header.Get("X-NewAPI-Policy-Meta")
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	var meta newAPIPolicyMeta
+	require.NoError(t, common2.Unmarshal(payload, &meta))
+	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	require.Equal(t, newAPIPolicyRootSessionRelationRelated, meta.RootSessionRelation)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID), meta.RootSessionFingerprint)
+	require.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", titleID), meta.SessionFingerprint)
+	require.NotEqual(t, meta.RootSessionFingerprint, meta.SessionFingerprint)
+	require.Equal(t, "system", meta.ThreadSource)
+	require.Equal(t, "turn", meta.RequestKind)
+}
+
+func TestClassifyUnlinkedCodexPassiveInternalRequestIsNarrow(t *testing.T) {
+	const titleID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	baseBody := `{
+		"model":"gpt-5.6-luna",
+		"reasoning":{"effort":"low"},
+		"input":"You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.\nUser prompt:\nFix routing",
+		"text":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"}}}}}
+	}`
+	resolution := CodexRootSessionResolution{
+		RootID: titleID, Resolved: true, ThreadSource: "system", RequestKind: "turn",
+	}
+	newContext := func(body string) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		return c
+	}
+
+	feature, ok := ClassifyUnlinkedCodexPassiveInternalRequest(newContext(baseBody), resolution, "gpt-5.6-luna")
+	require.True(t, ok)
+	require.Equal(t, "thread_title", feature)
+
+	for name, body := range map[string]string{
+		"ordinary prompt": strings.Replace(baseBody, "You are a helpful assistant. You will be presented with a user prompt", "Please answer my direct Luna request", 1),
+		"wrong effort":    strings.Replace(baseBody, `"effort":"low"`, `"effort":"high"`, 1),
+		"wrong schema":    strings.Replace(baseBody, `"description":{"type":"string"}`, `"answer":{"type":"string"}`, 1),
+		"tool enabled":    strings.Replace(baseBody, `"text":`, `"tools":[{"type":"function","name":"shell"}],"text":`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, classified := ClassifyUnlinkedCodexPassiveInternalRequest(newContext(body), resolution, "gpt-5.6-luna")
+			require.False(t, classified)
+		})
+	}
+
+	_, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(baseBody), CodexRootSessionResolution{
+		RootID: titleID, Resolved: true, Related: true, ThreadSource: "system",
+	}, "gpt-5.6-luna")
+	require.False(t, ok, "already-related requests must use their explicit lineage instead of the temporal bridge")
+	_, ok = ClassifyUnlinkedCodexPassiveInternalRequest(newContext(baseBody), resolution, "gpt-5.6-sol")
+	require.False(t, ok, "ordinary main models must never enter the passive Luna path")
+}
+
+func TestClassifyCodexSessionAccountingBypassIsNarrow(t *testing.T) {
+	const sessionID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	ambientBody := func(model string) string {
+		return `{
+			"model":"` + model + `",
+			"reasoning":{"effort":"medium"},
+			"input":"# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project.",
+			"text":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"suggestions":{"type":"array"}}}}}
+		}`
+	}
+	resolution := CodexRootSessionResolution{
+		RootID: sessionID, Resolved: true, ThreadSource: "system", RequestKind: "turn",
+	}
+	newContext := func(body string) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		return c
+	}
+
+	for _, modelName := range []string{"gpt-5.6-terra", "gpt-5.4"} {
+		feature, ok := ClassifyCodexSessionAccountingBypass(newContext(ambientBody(modelName)), resolution, modelName)
+		require.True(t, ok, modelName)
+		require.Equal(t, "ambient_suggestions", feature)
+		_, passive := ClassifyUnlinkedCodexPassiveInternalRequest(newContext(ambientBody(modelName)), resolution, modelName)
+		require.False(t, passive, "ambient jobs must never borrow the recent root")
+	}
+
+	safetyBody := `{
+		"model":"gpt-5.4-mini",
+		"instructions":"Classify Codex ambient suggestion candidates for policy safety.",
+		"input":"candidate list",
+		"text":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"exclude":{"type":"array"}}}}}
+	}`
+	feature, ok := ClassifyCodexSessionAccountingBypass(newContext(safetyBody), resolution, "gpt-5.4-mini")
+	require.True(t, ok)
+	require.Equal(t, "ambient_suggestion_safety", feature)
+
+	for name, mutate := range map[string]func(string) string{
+		"ordinary prompt": func(body string) string { return strings.Replace(body, "# Overview", "Please answer", 1) },
+		"wrong schema":    func(body string) string { return strings.Replace(body, "suggestions", "answer", 1) },
+		"wrong effort":    func(body string) string { return strings.Replace(body, `"effort":"medium"`, `"effort":"high"`, 1) },
+		"tool enabled": func(body string) string {
+			return strings.Replace(body, `"text":`, `"tools":[{"type":"function","name":"shell"}],"text":`, 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := mutate(ambientBody("gpt-5.6-terra"))
+			_, classified := ClassifyCodexSessionAccountingBypass(newContext(body), resolution, "gpt-5.6-terra")
+			require.False(t, classified)
+		})
+	}
+	_, ok = ClassifyCodexSessionAccountingBypass(newContext(ambientBody("gpt-5.6-terra")), CodexRootSessionResolution{
+		RootID: sessionID, Resolved: true, ThreadSource: "user",
+	}, "gpt-5.6-terra")
+	require.False(t, ok)
+	_, ok = ClassifyCodexSessionAccountingBypass(newContext(ambientBody("gpt-5.6-terra")), CodexRootSessionResolution{
+		RootID: sessionID, Resolved: true, Related: true, ThreadSource: "system",
+	}, "gpt-5.6-terra")
+	require.False(t, ok)
+}
+
+func TestApplyNewAPIPolicyHeadersSignsAmbientSessionAccountingBypass(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		secret    = "0123456789abcdef0123456789abcdef"
+		sessionID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	)
+	apiKey := "sk-codex2api-ambient"
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	binding := newAPIPolicyBinding{
+		PlatformID: "primary-newapi", Target: "http://127.0.0.1:18095",
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]), Secret: secret, Enabled: true,
+	}
+	configurePolicyTest(t, []newAPIPolicyBinding{binding})
+
+	body := []byte(`{
+		"model":"gpt-5.6-terra",
+		"reasoning":{"effort":"medium"},
+		"input":"# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project.",
+		"text":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"suggestions":{"type":"array"}}}}}
+	}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", bytes.NewReader(body))
+	c.Request.RemoteAddr = "203.0.113.9:4567"
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Session-Id", sessionID)
+	c.Request.Header.Set("Thread-Id", sessionID)
+	c.Request.Header.Set("X-Client-Request-Id", sessionID)
+	c.Request.Header.Set("X-Codex-Window-Id", sessionID+":0")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+sessionID+`","thread_id":"`+sessionID+`","window_id":"`+sessionID+`:0","thread_source":"system","request_kind":"turn"}`)
+	resolution := ResolveCodexRootSessionForDistribution(c)
+	require.True(t, resolution.Resolved)
+	require.False(t, resolution.Related)
+	require.Equal(t, "system", resolution.ThreadSource)
+	var parsed dto.OpenAIResponsesRequest
+	require.NoError(t, common2.UnmarshalBodyReusable(c, &parsed))
+	require.Equal(t, "gpt-5.6-terra", parsed.Model)
+	require.Equal(t, "medium", parsed.Reasoning.Effort)
+	require.True(t, hasExactStructuredProperties(parsed.Text, "suggestions"))
+	feature, classified := ClassifyCodexSessionAccountingBypass(c, resolution, "gpt-5.6-terra")
+	require.True(t, classified)
+	require.Equal(t, "ambient_suggestions", feature)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		UserId: 42, UserGroup: "pro", RequestId: "req-ambient",
+		OriginModelName: "gpt-5.6-terra", RelayFormat: types.RelayFormatOpenAIResponses,
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 7, ApiKey: apiKey, UpstreamModelName: "gpt-5.6-terra"},
+	}
+
+	require.NoError(t, applyNewAPIPolicyHeaders(c, req, info, bytes.NewReader(body)))
+	encoded := req.Header.Get("X-NewAPI-Policy-Meta")
+	payload, err := base64.RawURLEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	var meta newAPIPolicyMeta
+	require.NoError(t, common2.Unmarshal(payload, &meta))
+	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	require.Equal(t, newAPIPolicyRootSessionRelationRoot, meta.RootSessionRelation)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", sessionID), meta.RootSessionFingerprint)
+	require.Equal(t, "bypass", meta.SessionAccounting)
+	require.Equal(t, "ambient_suggestions", meta.PassiveFeature)
+}
+
 func TestAnalyzeNewAPIPolicyRootSessionUsesForkedLineageForUnknownSource(t *testing.T) {
 	const (
 		rootID  = "019c8f5d-5729-7ec2-879d-da6c4f7b2301"

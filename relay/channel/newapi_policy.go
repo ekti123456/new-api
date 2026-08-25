@@ -104,6 +104,11 @@ type newAPIPolicyMeta struct {
 	ThreadSource        string `json:"thread_source,omitempty"`
 	RequestKind         string `json:"request_kind,omitempty"`
 	SubagentKind        string `json:"subagent_kind,omitempty"`
+	// SessionAccounting is a signed, gateway-derived instruction for
+	// operational session/window accounting. Clients cannot activate it with a
+	// bare header because Codex2API accepts it only inside verified policy meta.
+	SessionAccounting string `json:"session_accounting,omitempty"`
+	PassiveFeature    string `json:"passive_feature,omitempty"`
 	// RootSessionFingerprint identifies the user-visible root conversation.
 	// Unlike the legacy SessionFingerprint it is not derived from a binding
 	// secret, so the same platform/user/session keeps one identity when traffic
@@ -185,7 +190,7 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	if sessionID != "" {
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
 	}
-	rootSession := analyzeNewAPIPolicyRootSession(c, info, sessionID)
+	rootSession := applyCodexPassiveRootSessionOverride(c, analyzeNewAPIPolicyRootSession(c, info, sessionID))
 	meta.RootSessionState = rootSession.state
 	meta.RootSessionRelation = rootSession.relation
 	meta.ThreadSource = rootSession.threadSource
@@ -193,6 +198,18 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	meta.SubagentKind = rootSession.subagentKind
 	if rootSession.state == newAPIPolicyRootSessionResolved {
 		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSession.rootID)
+	}
+	rootResolution := CodexRootSessionResolution{
+		RootID:       rootSession.rootID,
+		Resolved:     rootSession.state == newAPIPolicyRootSessionResolved,
+		Related:      rootSession.relation == newAPIPolicyRootSessionRelationRelated,
+		ThreadSource: rootSession.threadSource,
+		RequestKind:  rootSession.requestKind,
+		SubagentKind: rootSession.subagentKind,
+	}
+	if feature, ok := ClassifyCodexSessionAccountingBypass(c, rootResolution, info.OriginModelName); ok {
+		meta.SessionAccounting = "bypass"
+		meta.PassiveFeature = feature
 	}
 	metaJSON, err := common2.Marshal(meta)
 	if err != nil {

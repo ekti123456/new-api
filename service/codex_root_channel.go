@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	codexRootChannelCacheNamespace = "new-api:codex_root_channel:v1"
-	codexRootChannelCacheTTL       = 24 * time.Hour
+	codexRootChannelCacheNamespace       = "new-api:codex_root_channel:v1"
+	codexRecentRootChannelCacheNamespace = "new-api:codex_recent_root_channel:v1"
+	codexRootChannelCacheTTL             = 24 * time.Hour
+	codexProvisionalRootChannelCacheTTL  = 2 * time.Minute
+	codexRecentRootChannelCacheTTL       = 2 * time.Minute
 )
 
 // CodexRootChannelBinding pins both the NewAPI channel and its selected key.
@@ -28,9 +31,21 @@ type CodexRootChannelBinding struct {
 	UARoutingOnly  bool   `json:"ua_routing_only"`
 }
 
+// CodexRecentRootChannelBinding is a short-lived, user/token-scoped bridge for
+// Codex metadata generations (initial title and activity summary) that the
+// desktop client starts as independent system threads without a parent ID.
+// The short TTL intentionally limits temporal correlation to the root request
+// that immediately preceded the metadata generation.
+type CodexRecentRootChannelBinding struct {
+	RootID  string                  `json:"root_id"`
+	Binding CodexRootChannelBinding `json:"binding"`
+}
+
 var (
 	codexRootChannelCacheOnce sync.Once
 	codexRootChannelCache     *cachex.HybridCache[CodexRootChannelBinding]
+	codexRecentRootCacheOnce  sync.Once
+	codexRecentRootCache      *cachex.HybridCache[CodexRecentRootChannelBinding]
 )
 
 func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
@@ -53,6 +68,26 @@ func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
 	return codexRootChannelCache
 }
 
+func getCodexRecentRootChannelCache() *cachex.HybridCache[CodexRecentRootChannelBinding] {
+	codexRecentRootCacheOnce.Do(func() {
+		codexRecentRootCache = cachex.NewHybridCache[CodexRecentRootChannelBinding](cachex.HybridCacheConfig[CodexRecentRootChannelBinding]{
+			Namespace: cachex.Namespace(codexRecentRootChannelCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[CodexRecentRootChannelBinding]{},
+			Memory: func() *hot.HotCache[string, CodexRecentRootChannelBinding] {
+				return hot.NewHotCache[string, CodexRecentRootChannelBinding](hot.LRU, 100_000).
+					WithTTL(codexRecentRootChannelCacheTTL).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return codexRecentRootCache
+}
+
 func codexRootChannelCacheKey(userID int, rootID string) string {
 	rootID = strings.TrimSpace(rootID)
 	if userID <= 0 || rootID == "" {
@@ -63,11 +98,30 @@ func codexRootChannelCacheKey(userID int, rootID string) string {
 }
 
 func StoreCodexRootChannelBinding(userID int, rootID string, binding CodexRootChannelBinding) error {
+	return storeCodexRootChannelBindingWithTTL(userID, rootID, binding, codexRootChannelCacheTTL)
+}
+
+// StoreProvisionalCodexRootChannelBinding makes the root route available
+// while its first request is still in flight. A successful response replaces
+// it with the durable 24-hour binding; a failed request leaves at most a short
+// two-minute stale entry.
+func StoreProvisionalCodexRootChannelBinding(userID int, rootID string, binding CodexRootChannelBinding) error {
+	if _, found, err := LoadCodexRootChannelBinding(userID, rootID); err != nil {
+		return err
+	} else if found {
+		// Never shorten a durable binding when a later turn for the same root
+		// starts. Existing roots are routed through this stored binding first.
+		return nil
+	}
+	return storeCodexRootChannelBindingWithTTL(userID, rootID, binding, codexProvisionalRootChannelCacheTTL)
+}
+
+func storeCodexRootChannelBindingWithTTL(userID int, rootID string, binding CodexRootChannelBinding, ttl time.Duration) error {
 	key := codexRootChannelCacheKey(userID, rootID)
 	if key == "" || binding.ChannelID <= 0 || strings.TrimSpace(binding.SelectedGroup) == "" || strings.TrimSpace(binding.KeyFingerprint) == "" {
 		return nil
 	}
-	return getCodexRootChannelCache().SetWithTTL(key, binding, codexRootChannelCacheTTL)
+	return getCodexRootChannelCache().SetWithTTL(key, binding, ttl)
 }
 
 func LoadCodexRootChannelBinding(userID int, rootID string) (CodexRootChannelBinding, bool, error) {
@@ -76,4 +130,38 @@ func LoadCodexRootChannelBinding(userID int, rootID string) (CodexRootChannelBin
 		return CodexRootChannelBinding{}, false, nil
 	}
 	return getCodexRootChannelCache().Get(key)
+}
+
+func codexRecentRootChannelCacheKey(userID, tokenID int, correlationKey string) string {
+	if userID <= 0 || tokenID <= 0 {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + strconv.Itoa(tokenID) + "\x00" + strings.TrimSpace(correlationKey)))
+	return hex.EncodeToString(digest[:])
+}
+
+func StoreRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
+	return StoreRecentCodexRootChannelBindingForCorrelation(userID, tokenID, "", rootID, binding)
+}
+
+func StoreRecentCodexRootChannelBindingForCorrelation(userID, tokenID int, correlationKey, rootID string, binding CodexRootChannelBinding) error {
+	key := codexRecentRootChannelCacheKey(userID, tokenID, correlationKey)
+	rootID = strings.TrimSpace(rootID)
+	if key == "" || rootID == "" || binding.ChannelID <= 0 || strings.TrimSpace(binding.SelectedGroup) == "" || strings.TrimSpace(binding.KeyFingerprint) == "" {
+		return nil
+	}
+	value := CodexRecentRootChannelBinding{RootID: rootID, Binding: binding}
+	return getCodexRecentRootChannelCache().SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
+}
+
+func LoadRecentCodexRootChannelBinding(userID, tokenID int) (CodexRecentRootChannelBinding, bool, error) {
+	return LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID, "")
+}
+
+func LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID int, correlationKey string) (CodexRecentRootChannelBinding, bool, error) {
+	key := codexRecentRootChannelCacheKey(userID, tokenID, correlationKey)
+	if key == "" {
+		return CodexRecentRootChannelBinding{}, false, nil
+	}
+	return getCodexRecentRootChannelCache().Get(key)
 }

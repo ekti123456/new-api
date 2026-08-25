@@ -37,3 +37,68 @@ func TestCodexRootChannelBindingRejectsIncompleteValues(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+func TestCodexProvisionalRootBindingDoesNotReplaceExistingDurableBinding(t *testing.T) {
+	rootID := "root:" + t.Name()
+	durable := CodexRootChannelBinding{ChannelID: 731, SelectedGroup: "pro", KeyFingerprint: "durable-key"}
+	provisional := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "provisional-key"}
+	require.NoError(t, StoreCodexRootChannelBinding(42, rootID, durable))
+	require.NoError(t, StoreProvisionalCodexRootChannelBinding(42, rootID, provisional))
+
+	got, found, err := LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, durable, got)
+}
+
+func TestCodexRecentRootChannelBindingIsScopedByUserAndToken(t *testing.T) {
+	rootID := "root:" + t.Name()
+	binding := CodexRootChannelBinding{
+		ChannelID:      812,
+		SelectedGroup:  "pro",
+		KeyIndex:       1,
+		KeyFingerprint: "abcdef0123456789",
+	}
+	require.NoError(t, StoreRecentCodexRootChannelBinding(42, 101, rootID, binding))
+
+	got, found, err := LoadRecentCodexRootChannelBinding(42, 101)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, rootID, got.RootID)
+	require.Equal(t, binding, got.Binding)
+
+	_, found, err = LoadRecentCodexRootChannelBinding(43, 101)
+	require.NoError(t, err)
+	require.False(t, found)
+	_, found, err = LoadRecentCodexRootChannelBinding(42, 102)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestCodexRecentRootChannelBindingRejectsMissingToken(t *testing.T) {
+	rootID := "root:" + t.Name()
+	require.NoError(t, StoreRecentCodexRootChannelBinding(42, 0, rootID, CodexRootChannelBinding{
+		ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "abcdef0123456789",
+	}))
+	_, found, err := LoadRecentCodexRootChannelBinding(42, 0)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestCodexRecentRootChannelBindingsAreScopedByCorrelation(t *testing.T) {
+	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "abcdef0123456789"}
+	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(42, 103, "prompt-a", "root-a", binding))
+	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(42, 103, "prompt-b", "root-b", binding))
+
+	first, found, err := LoadRecentCodexRootChannelBindingForCorrelation(42, 103, "prompt-a")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "root-a", first.RootID)
+	second, found, err := LoadRecentCodexRootChannelBindingForCorrelation(42, 103, "prompt-b")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "root-b", second.RootID)
+	_, found, err = LoadRecentCodexRootChannelBindingForCorrelation(42, 103, "prompt-c")
+	require.NoError(t, err)
+	require.False(t, found)
+}

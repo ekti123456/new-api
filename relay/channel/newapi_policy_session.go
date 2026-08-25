@@ -2,6 +2,8 @@ package channel
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	common2 "github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -176,9 +179,19 @@ type newAPIPolicyRootSessionResolution struct {
 // parent/fork carrier, or subagent marker proves that this is a derived request;
 // thread_source alone is never sufficient.
 type CodexRootSessionResolution struct {
-	RootID   string
-	Resolved bool
-	Related  bool
+	RootID       string
+	Resolved     bool
+	Related      bool
+	ThreadSource string
+	RequestKind  string
+	SubagentKind string
+}
+
+const codexPassiveRootSessionOverrideContextKey = "newapi_codex_passive_root_session_override_v1"
+
+type codexPassiveRootSessionOverride struct {
+	rootID  string
+	feature string
 }
 
 // ResolveCodexRootSessionForDistribution resolves the same native graph used
@@ -193,12 +206,288 @@ func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionReso
 		}
 	}
 	stableSessionID := newAPIPolicyStableSessionID(c, info)
-	resolution := analyzeNewAPIPolicyRootSession(c, info, stableSessionID)
+	resolution := applyCodexPassiveRootSessionOverride(c, analyzeNewAPIPolicyRootSession(c, info, stableSessionID))
 	return CodexRootSessionResolution{
-		RootID:   resolution.rootID,
-		Resolved: resolution.state == newAPIPolicyRootSessionResolved,
-		Related:  resolution.relation == newAPIPolicyRootSessionRelationRelated,
+		RootID:       resolution.rootID,
+		Resolved:     resolution.state == newAPIPolicyRootSessionResolved,
+		Related:      resolution.relation == newAPIPolicyRootSessionRelationRelated,
+		ThreadSource: resolution.threadSource,
+		RequestKind:  resolution.requestKind,
+		SubagentKind: resolution.subagentKind,
 	}
+}
+
+// SetCodexPassiveRootSessionOverride associates a tightly classified Codex
+// metadata generation with the recent root request selected by NewAPI. The
+// override is applied again when signed policy metadata is created, so
+// Codex2API receives the same verified root fingerprint and can keep the
+// passive generation on the root account.
+func SetCodexPassiveRootSessionOverride(c *gin.Context, rootID, feature string) bool {
+	rootID = normalizeNewAPIPolicyRootSessionValue(rootID)
+	feature = strings.TrimSpace(feature)
+	if c == nil || rootID == "" || feature == "" {
+		return false
+	}
+	c.Set(codexPassiveRootSessionOverrideContextKey, codexPassiveRootSessionOverride{rootID: rootID, feature: feature})
+	return true
+}
+
+func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolicyRootSessionResolution) newAPIPolicyRootSessionResolution {
+	if c == nil {
+		return resolution
+	}
+	raw, found := c.Get(codexPassiveRootSessionOverrideContextKey)
+	override, ok := raw.(codexPassiveRootSessionOverride)
+	if !found || !ok || override.rootID == "" || override.feature == "" {
+		return resolution
+	}
+	resolution.rootID = override.rootID
+	resolution.state = newAPIPolicyRootSessionResolved
+	resolution.relation = newAPIPolicyRootSessionRelationRelated
+	return resolution
+}
+
+// ClassifyUnlinkedCodexPassiveInternalRequest recognizes only Codex's fixed,
+// structured system generations that currently lack a parent thread ID. A
+// model name or thread_source label alone is never sufficient: the request
+// must also use low reasoning, a known prompt, and the matching constrained
+// output schema. This keeps arbitrary direct Luna prompts on the normal model
+// authorization path.
+func ClassifyUnlinkedCodexPassiveInternalRequest(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
+	feature, _, ok := ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c, resolution, modelName)
+	return feature, ok
+}
+
+// ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation additionally
+// returns a prompt-derived key for the first-title generation. The key lets
+// the distributor distinguish two new Codex tasks created concurrently by
+// the same user and API token instead of relying on a last-request-wins slot.
+func ClassifyUnlinkedCodexPassiveInternalRequestWithCorrelation(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, string, bool) {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	modelName = strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix)
+	if c == nil || modelName != "gpt-5.6-luna" || !resolution.Resolved || resolution.Related || resolution.RootID == "" {
+		return "", "", false
+	}
+
+	var request dto.OpenAIResponsesRequest
+	if err := common2.UnmarshalBodyReusable(c, &request); err != nil {
+		return "", "", false
+	}
+	requestModel := strings.ToLower(strings.TrimSpace(request.Model))
+	requestModel = strings.TrimSuffix(requestModel, ratio_setting.CompactModelSuffix)
+	if requestModel != "gpt-5.6-luna" || request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "low") {
+		return "", "", false
+	}
+
+	inputs := request.ParseInput()
+	firstText := ""
+	for _, input := range inputs {
+		if input.Type == "input_text" && strings.TrimSpace(input.Text) != "" {
+			firstText = strings.TrimSpace(input.Text)
+			break
+		}
+	}
+	if firstText == "" {
+		return "", "", false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(resolution.ThreadSource)) {
+	case "system":
+		if len(request.GetToolsMap()) != 0 {
+			return "", "", false
+		}
+		if strings.HasPrefix(firstText, "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.") &&
+			hasExactStructuredProperties(request.Text, "title", "description") {
+			correlationKey := codexTitlePromptCorrelationKey(firstText)
+			if correlationKey == "" {
+				return "", "", false
+			}
+			return "thread_title", correlationKey, true
+		}
+		if strings.HasPrefix(firstText, "You write the one-line activity update displayed beneath an existing Codex task title.") &&
+			(hasExactStructuredProperties(request.Text, "summary") || hasExactStructuredProperties(request.Text, "summary", "compactSummary")) {
+			return "thread_summary", "", true
+		}
+	}
+	return "", "", false
+}
+
+// ClassifyCodexSessionAccountingBypass recognizes Codex Desktop's independent
+// ambient-suggestion jobs. These project-level background threads have no
+// trustworthy parent conversation, so they must use ordinary scheduling and
+// their own affinity identity rather than borrowing the most recent root.
+// The result is carried only in signed policy metadata and affects window
+// accounting, not concurrency, logging, billing, or model authorization.
+func ClassifyCodexSessionAccountingBypass(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
+	if c == nil || !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
+		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+		return "", false
+	}
+
+	var request dto.OpenAIResponsesRequest
+	if err := common2.UnmarshalBodyReusable(c, &request); err != nil {
+		return "", false
+	}
+	requestedModel := normalizeCodexInternalModelName(request.Model)
+	if requestedModel == "" || requestedModel != normalizeCodexInternalModelName(modelName) || len(request.GetToolsMap()) != 0 {
+		return "", false
+	}
+
+	if requestedModel == "gpt-5.4-mini" &&
+		strings.Contains(strings.TrimSpace(string(request.Instructions)), "Classify Codex ambient suggestion candidates for policy safety.") &&
+		hasExactStructuredProperties(request.Text, "exclude") {
+		return "ambient_suggestion_safety", true
+	}
+
+	if requestedModel != "gpt-5.6-terra" && requestedModel != "gpt-5.4" {
+		return "", false
+	}
+	if request.Reasoning == nil || !strings.EqualFold(strings.TrimSpace(request.Reasoning.Effort), "medium") {
+		return "", false
+	}
+	firstText := ""
+	for _, input := range request.ParseInput() {
+		if input.Type == "input_text" && strings.TrimSpace(input.Text) != "" {
+			firstText = strings.TrimSpace(strings.ReplaceAll(input.Text, "\r\n", "\n"))
+			break
+		}
+	}
+	if !strings.HasPrefix(firstText, "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex") ||
+		!hasExactStructuredProperties(request.Text, "suggestions") {
+		return "", false
+	}
+	return "ambient_suggestions", true
+}
+
+func normalizeCodexInternalModelName(modelName string) string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix)
+}
+
+// CodexRootPromptCorrelationKey extracts the initial user prompt from a
+// native Responses request and mirrors the first-title generator's 2,000
+// character prefix. It is observational only and never forwarded upstream.
+func CodexRootPromptCorrelationKey(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	var request dto.OpenAIResponsesRequest
+	if err := common2.UnmarshalBodyReusable(c, &request); err != nil {
+		return ""
+	}
+	prompt := codexLatestUserInputText(request.Input)
+	return codexPromptCorrelationKey(prompt)
+}
+
+func codexTitlePromptCorrelationKey(titlePrompt string) string {
+	const marker = "\nUser prompt:\n"
+	index := strings.LastIndex(titlePrompt, marker)
+	if index < 0 {
+		return ""
+	}
+	return codexPromptCorrelationKey(titlePrompt[index+len(marker):])
+}
+
+func codexPromptCorrelationKey(prompt string) string {
+	prompt = strings.TrimSpace(strings.ReplaceAll(prompt, "\r\n", "\n"))
+	if prompt == "" {
+		return ""
+	}
+	runes := []rune(prompt)
+	if len(runes) > 2000 {
+		prompt = string(runes[:2000])
+	}
+	digest := sha256.Sum256([]byte("codex-thread-title-v1\x00" + prompt))
+	return hex.EncodeToString(digest[:])
+}
+
+func codexLatestUserInputText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var direct string
+	if err := common2.Unmarshal(raw, &direct); err == nil {
+		return direct
+	}
+	var inputs []dto.Input
+	if err := common2.Unmarshal(raw, &inputs); err != nil {
+		return ""
+	}
+	for index := len(inputs) - 1; index >= 0; index-- {
+		if !strings.EqualFold(strings.TrimSpace(inputs[index].Role), "user") {
+			continue
+		}
+		if text := codexInputContentText(inputs[index].Content); strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func codexInputContentText(raw json.RawMessage) string {
+	var direct string
+	if err := common2.Unmarshal(raw, &direct); err == nil {
+		return direct
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := common2.Unmarshal(raw, &parts); err != nil {
+		return ""
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if (part.Type == "input_text" || part.Type == "text") && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+func hasExactStructuredProperties(raw json.RawMessage, propertyNames ...string) bool {
+	if len(raw) == 0 || len(propertyNames) == 0 {
+		return false
+	}
+	wanted := make(map[string]struct{}, len(propertyNames))
+	for _, name := range propertyNames {
+		wanted[name] = struct{}{}
+	}
+	var value any
+	if err := common2.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(current any) bool {
+		switch typed := current.(type) {
+		case map[string]any:
+			if properties, ok := typed["properties"].(map[string]any); ok && len(properties) == len(wanted) {
+				matches := true
+				for name := range properties {
+					if _, found := wanted[name]; !found {
+						matches = false
+						break
+					}
+				}
+				if matches {
+					return true
+				}
+			}
+			for _, child := range typed {
+				if visit(child) {
+					return true
+				}
+			}
+		case []any:
+			for _, child := range typed {
+				if visit(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return visit(value)
 }
 
 // newAPIPolicyRootSessionID resolves the user-visible root conversation while

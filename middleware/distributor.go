@@ -41,9 +41,18 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
+		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession, modelRequest.Model)
+		if passiveRootErr != nil {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+			return
+		}
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
 		if rootErr != nil {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+			return
+		}
+		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
@@ -232,6 +241,7 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), types.ErrorCodeModelNotFound)
 				return
 			}
+			recordProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
