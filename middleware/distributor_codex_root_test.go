@@ -523,6 +523,53 @@ func TestDistributorGuardianFallsBackToRecentRootAcrossUARoutingBoundary(t *test
 	require.Equal(t, "guardian", resolved.SubagentKind)
 }
 
+func TestDistributorGuardianRecoversFromRootlessMainAndDifferentToken(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID         = 64
+		mainTokenID    = 720
+		reviewerToken  = 721
+		reviewedRootID = "01a03893-9de1-7783-bbd1-a6ad51420059"
+	)
+
+	mainContext, mainRecorder := codexMainRootContext(userID, mainTokenID, channel.Id, reviewedRootID)
+	for _, header := range []string{"Session-Id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Window-Id", "X-Codex-Turn-Metadata"} {
+		mainContext.Request.Header.Del(header)
+	}
+	before := relaychannel.ResolveCodexRootSessionForDistribution(mainContext)
+	require.False(t, before.Resolved, "the fallback must cover clients that do not forward a stable Codex graph")
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
+
+	guardianContext, recorder := codexGuardianApprovalContext(userID, reviewerToken, reviewedRootID)
+	Distribute()(guardianContext)
+
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, guardianContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
+	resolved := relaychannel.ResolveCodexRootSessionForDistribution(guardianContext)
+	require.True(t, resolved.Resolved)
+	require.True(t, resolved.Related)
+	require.Equal(t, reviewedRootID, resolved.RootID)
+
+	// Knowing the reviewed root must not turn an ordinary user-authored Luna
+	// request into a passive internal request.
+	directContext, directRecorder := codexMainRootContext(userID, reviewerToken, 0, reviewedRootID)
+	directContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-luna","input":"ordinary direct request"}`))
+	directContext.Request.Header.Set("Content-Type", "application/json")
+	directContext.Request.Header.Set("Session-Id", reviewedRootID)
+	common.SetContextKey(directContext, constant.ContextKeyTokenModelLimitEnabled, true)
+	common.SetContextKey(directContext, constant.ContextKeyTokenModelLimit, map[string]bool{"gpt-5.6-sol": true})
+	Distribute()(directContext)
+	require.Equal(t, http.StatusForbidden, directRecorder.Code)
+	require.True(t, directContext.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(directContext, constant.ContextKeyChannelId))
+}
+
 func TestDistributorGuardianShapeFailsClosedWithoutReviewedRootBinding(t *testing.T) {
 	setupCodexRootDistributorTest(t)
 	guardianContext, recorder := codexGuardianApprovalContext(43, 711, "01a03816-3b42-78d1-a818-65fdcb9e8a74")

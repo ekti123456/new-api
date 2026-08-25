@@ -102,3 +102,21 @@ func TestCodexRecentRootChannelBindingsAreScopedByCorrelation(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+func TestCodexRecentUserGroupChannelBindingIsScopedByUserAndGroup(t *testing.T) {
+	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "gpt-pro", KeyFingerprint: "abcdef0123456789"}
+	require.NoError(t, StoreRecentCodexUserGroupChannelBinding(52, "gpt-pro", "", binding))
+
+	got, found, err := LoadRecentCodexUserGroupChannelBinding(52, "gpt-pro")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Empty(t, got.RootID, "a rootless main turn must retain only its short channel bridge")
+	require.Equal(t, binding, got.Binding)
+
+	_, found, err = LoadRecentCodexUserGroupChannelBinding(53, "gpt-pro")
+	require.NoError(t, err)
+	require.False(t, found)
+	_, found, err = LoadRecentCodexUserGroupChannelBinding(52, "other")
+	require.NoError(t, err)
+	require.False(t, found)
+}
