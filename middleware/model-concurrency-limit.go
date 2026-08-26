@@ -318,10 +318,10 @@ func codexProtectedUserConcurrency(c *gin.Context) bool {
 		return false
 	}
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	if _, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution, request.Model); linked {
+	if _, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution); linked {
 		return true
 	}
-	_, internal := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, request.Model)
+	_, internal := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
 	return internal
 }
 

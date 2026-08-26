@@ -237,11 +237,7 @@ func codexPassiveRootSessionOverrideFeature(c *gin.Context) string {
 	if !found || !ok {
 		return ""
 	}
-	feature := strings.TrimSpace(override.feature)
-	if feature == "thread_title" {
-		return "system_passive"
-	}
-	return feature
+	return strings.TrimSpace(override.feature)
 }
 
 // CodexPassiveRootSessionOverrideFeature reports the field-classified passive
@@ -263,52 +259,25 @@ func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolic
 	resolution.rootID = override.rootID
 	resolution.state = newAPIPolicyRootSessionResolved
 	resolution.relation = newAPIPolicyRootSessionRelationRelated
-	if override.feature == "guardian_approval" {
-		if resolution.threadSource == "" {
-			resolution.threadSource = "subagent"
-		}
-		if resolution.requestKind == "" {
-			resolution.requestKind = "turn"
-		}
-		if resolution.subagentKind == "" {
-			resolution.subagentKind = "guardian"
-		}
-	}
 	return resolution
 }
 
-// ClassifyUnlinkedCodexPassiveInternalRequest recognizes an independent Codex
-// internal turn by its non-user source field. Model names, prompts, reasoning
-// settings and response schemas deliberately do not participate.
-func ClassifyUnlinkedCodexPassiveInternalRequest(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
-	_ = modelName
-	threadSource := strings.TrimSpace(resolution.ThreadSource)
-	if c == nil || !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
-		threadSource == "" || strings.EqualFold(threadSource, "user") {
+// ClassifyUnlinkedCodexSystemRequest recognizes the independent system thread
+// used by project metadata generation. Other independent non-user sources are
+// complete roots of their own and must not be attached to a recent user/token
+// route merely because they are not user-authored.
+func ClassifyUnlinkedCodexSystemRequest(resolution CodexRootSessionResolution) (string, bool) {
+	if !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
+		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
 		return "", false
 	}
-	if strings.EqualFold(threadSource, "system") {
-		return "system_passive", true
-	}
-	return "related_internal", true
-}
-
-// ClassifyCodexGuardianApproval is retained for callers compiled against the
-// older API. It now consumes only the native root/child fields and deliberately
-// ignores model names and prompt bodies.
-func ClassifyCodexGuardianApproval(c *gin.Context, _ string) (string, bool) {
-	resolution := ResolveCodexRootSessionForDistribution(c)
-	if _, ok := ClassifyLinkedCodexPassiveInternalRequest(resolution, ""); !ok {
-		return "", false
-	}
-	return resolution.RootID, true
+	return "system_passive", true
 }
 
 // ClassifyLinkedCodexPassiveInternalRequest recognizes any non-user Codex child
 // from the stable native root/leaf graph. Unknown future source labels and model
 // names follow the same path; only the protocol fields decide classification.
-func ClassifyLinkedCodexPassiveInternalRequest(resolution CodexRootSessionResolution, modelName string) (string, bool) {
-	_ = modelName
+func ClassifyLinkedCodexPassiveInternalRequest(resolution CodexRootSessionResolution) (string, bool) {
 	threadSource := strings.TrimSpace(resolution.ThreadSource)
 	if !resolution.Resolved || !resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
 		threadSource == "" || strings.EqualFold(threadSource, "user") {
@@ -317,16 +286,19 @@ func ClassifyLinkedCodexPassiveInternalRequest(resolution CodexRootSessionResolu
 	return "related_internal", true
 }
 
-// ClassifyCodexSessionAccountingBypass recognizes independent Codex system
-// jobs. They must not consume user-visible windows. Prompt text and schemas
-// are intentionally ignored because desktop releases change them frequently.
-func ClassifyCodexSessionAccountingBypass(c *gin.Context, resolution CodexRootSessionResolution, modelName string) (string, bool) {
-	_ = modelName
-	if c == nil || !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
-		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+// ClassifyCodexSessionAccountingBypass recognizes independent Codex-owned
+// background roots. They may schedule normally, but must not become visible
+// user/account windows. The raw source is retained in signed metadata.
+func ClassifyCodexSessionAccountingBypass(resolution CodexRootSessionResolution) (string, bool) {
+	threadSource := strings.TrimSpace(resolution.ThreadSource)
+	if !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
+		threadSource == "" || strings.EqualFold(threadSource, "user") {
 		return "", false
 	}
-	return "system_passive", true
+	if strings.EqualFold(threadSource, "system") {
+		return "system_passive", true
+	}
+	return "independent_internal", true
 }
 
 // newAPIPolicyRootSessionID resolves the user-visible root conversation while

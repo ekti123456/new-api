@@ -16,7 +16,6 @@ import (
 const (
 	codexRootChannelCacheNamespace       = "new-api:codex_root_channel:v1"
 	codexRecentRootChannelCacheNamespace = "new-api:codex_recent_root_channel:v1"
-	codexRecentUserGroupCacheNamespace   = "new-api:codex_recent_user_group_channel:v1"
 	codexRootChannelCacheTTL             = 24 * time.Hour
 	codexProvisionalRootChannelCacheTTL  = 2 * time.Minute
 	codexRecentRootChannelCacheTTL       = 2 * time.Minute
@@ -47,8 +46,6 @@ var (
 	codexRootChannelCache     *cachex.HybridCache[CodexRootChannelBinding]
 	codexRecentRootCacheOnce  sync.Once
 	codexRecentRootCache      *cachex.HybridCache[CodexRecentRootChannelBinding]
-	codexRecentUserGroupOnce  sync.Once
-	codexRecentUserGroupCache *cachex.HybridCache[CodexRecentRootChannelBinding]
 )
 
 func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
@@ -89,26 +86,6 @@ func getCodexRecentRootChannelCache() *cachex.HybridCache[CodexRecentRootChannel
 		})
 	})
 	return codexRecentRootCache
-}
-
-func getCodexRecentUserGroupChannelCache() *cachex.HybridCache[CodexRecentRootChannelBinding] {
-	codexRecentUserGroupOnce.Do(func() {
-		codexRecentUserGroupCache = cachex.NewHybridCache[CodexRecentRootChannelBinding](cachex.HybridCacheConfig[CodexRecentRootChannelBinding]{
-			Namespace: cachex.Namespace(codexRecentUserGroupCacheNamespace),
-			Redis:     common.RDB,
-			RedisEnabled: func() bool {
-				return common.RedisEnabled && common.RDB != nil
-			},
-			RedisCodec: cachex.JSONCodec[CodexRecentRootChannelBinding]{},
-			Memory: func() *hot.HotCache[string, CodexRecentRootChannelBinding] {
-				return hot.NewHotCache[string, CodexRecentRootChannelBinding](hot.LRU, 100_000).
-					WithTTL(codexRecentRootChannelCacheTTL).
-					WithJanitor().
-					Build()
-			},
-		})
-	})
-	return codexRecentUserGroupCache
 }
 
 func codexRootChannelCacheKey(userID int, rootID string) string {
@@ -179,36 +156,4 @@ func LoadRecentCodexRootChannelBinding(userID, tokenID int) (CodexRecentRootChan
 		return CodexRecentRootChannelBinding{}, false, nil
 	}
 	return getCodexRecentRootChannelCache().Get(key)
-}
-
-func codexRecentUserGroupChannelCacheKey(userID int, group string) string {
-	group = strings.TrimSpace(group)
-	if userID <= 0 || group == "" {
-		return ""
-	}
-	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + group))
-	return hex.EncodeToString(digest[:])
-}
-
-// StoreRecentCodexUserGroupChannelBinding keeps a very short fallback for
-// Codex-owned passive requests whose reviewer transport uses a different API
-// token or omits the stable root graph. The lookup remains scoped to the same
-// authenticated NewAPI user and selected group. RootID may be empty; only a
-// tightly classified Guardian request is allowed to supply its reviewed root.
-func StoreRecentCodexUserGroupChannelBinding(userID int, group, rootID string, binding CodexRootChannelBinding) error {
-	key := codexRecentUserGroupChannelCacheKey(userID, group)
-	rootID = strings.TrimSpace(rootID)
-	if key == "" || binding.ChannelID <= 0 || strings.TrimSpace(binding.SelectedGroup) == "" || strings.TrimSpace(binding.KeyFingerprint) == "" {
-		return nil
-	}
-	value := CodexRecentRootChannelBinding{RootID: rootID, Binding: binding}
-	return getCodexRecentUserGroupChannelCache().SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
-}
-
-func LoadRecentCodexUserGroupChannelBinding(userID int, group string) (CodexRecentRootChannelBinding, bool, error) {
-	key := codexRecentUserGroupChannelCacheKey(userID, group)
-	if key == "" {
-		return CodexRecentRootChannelBinding{}, false, nil
-	}
-	return getCodexRecentUserGroupChannelCache().Get(key)
 }

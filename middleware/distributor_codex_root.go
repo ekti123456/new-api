@@ -71,6 +71,12 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	if c == nil || !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" {
 		return nil, "", false, nil
 	}
+	if isIndependentCodexInternalRoot(resolution) {
+		// Independent background roots are ordinary scheduling units. Ignoring
+		// any legacy binding for the same ID also makes the behavior effective
+		// immediately after upgrading from the old over-broad bridge logic.
+		return nil, "", false, nil
+	}
 	passiveInternal := codexPassiveRouteAuthorized(c, resolution)
 	binding, found, err := service.LoadCodexRootChannelBinding(c.GetInt(string(constant.ContextKeyUserId)), resolution.RootID)
 	if err != nil {
@@ -115,19 +121,26 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	return channel, binding.SelectedGroup, true, nil
 }
 
-// resolveUnlinkedCodexPassiveRoot pins a field-classified child to its exact
-// root. For an independent non-user thread without a parent graph, it uses the
-// short-lived root bridge scoped to the same authenticated user and API token.
-// A missing binding fails closed instead of entering ordinary scheduling.
-func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName string) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionResolution) bool {
+	threadSource := strings.TrimSpace(resolution.ThreadSource)
+	return resolution.Resolved && !resolution.Related && strings.TrimSpace(resolution.RootID) != "" &&
+		threadSource != "" && !strings.EqualFold(threadSource, "user") && !strings.EqualFold(threadSource, "system")
+}
+
+// resolveUnlinkedCodexPassiveRoot pins an explicitly related child to its exact
+// root. The independent system thread used for project metadata may recover the
+// user's most recent root through the short-lived user/token bridge. Other
+// independent internal roots use ordinary scheduling and never borrow that
+// bridge, which prevents concurrent Codex windows from being cross-bound.
+func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (relaychannel.CodexRootSessionResolution, string, bool, error) {
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
-	if feature, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution, modelName); linked {
+	if feature, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution); linked {
 		if !relaychannel.SetCodexPassiveRootSessionOverride(c, resolution.RootID, feature) {
 			return resolution, feature, true, errors.New("invalid linked Codex passive root session override")
 		}
 		return resolution, feature, true, nil
 	}
-	feature, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, modelName)
+	feature, classified := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
 	if !classified {
 		return resolution, "", false, nil
 	}
@@ -274,13 +287,15 @@ func logSkippedCodexRootBridge(c *gin.Context, resolution relaychannel.CodexRoot
 	))
 }
 
-func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) bool {
+func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) bool {
 	if c == nil {
 		return false
 	}
-	_ = requestModel
 	threadSource := strings.ToLower(strings.TrimSpace(resolution.ThreadSource))
-	if threadSource == "system" || threadSource == "subagent" {
+	// Only an ordinary user root may own and publish a durable channel binding.
+	// Any non-user source is an internal root or child; allowing a future source
+	// label through here would make a later request pin to that background job.
+	if threadSource != "" && threadSource != "user" {
 		return false
 	}
 	// Context compaction can give the user-visible main task a coherent
@@ -294,8 +309,8 @@ func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSes
 	return true
 }
 
-func selectedCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) (int, int, string, service.CodexRootChannelBinding, bool) {
-	if !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" || !isCodexRecentMainRoute(c, resolution, requestModel) {
+func selectedCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (int, int, string, service.CodexRootChannelBinding, bool) {
+	if !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" || !isCodexRecentMainRoute(c, resolution) {
 		return 0, 0, "", service.CodexRootChannelBinding{}, false
 	}
 	userID, tokenID, binding, ok := selectedCodexChannelBinding(c)
@@ -306,19 +321,12 @@ func selectedCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Cod
 }
 
 func recordProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
-	mainRoute := isCodexRecentMainRoute(c, resolution, requestModel)
-	userID, _, recentBinding, recentOK, bindingReason := inspectSelectedCodexChannelBinding(c)
+	mainRoute := isCodexRecentMainRoute(c, resolution)
+	_, _, _, recentOK, bindingReason := inspectSelectedCodexChannelBinding(c)
 	if mainRoute && !recentOK {
 		logSkippedCodexRootBridge(c, resolution, requestModel, bindingReason)
 	}
-	if recentOK && mainRoute {
-		rootID := ""
-		if resolution.Resolved {
-			rootID = resolution.RootID
-		}
-		storeRecentCodexUserGroupChannelBinding(userID, rootID, recentBinding, "store")
-	}
-	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution, requestModel)
+	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
 	if !ok {
 		return
 	}
@@ -333,15 +341,7 @@ func recordCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Codex
 	if c == nil || c.Writer == nil || c.Writer.Status() >= http.StatusBadRequest {
 		return
 	}
-	userID, _, recentBinding, recentOK := selectedCodexChannelBinding(c)
-	if recentOK && isCodexRecentMainRoute(c, resolution, requestModel) {
-		rootID := ""
-		if resolution.Resolved {
-			rootID = resolution.RootID
-		}
-		storeRecentCodexUserGroupChannelBinding(userID, rootID, recentBinding, "refresh")
-	}
-	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution, requestModel)
+	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
 	if !ok {
 		return
 	}
@@ -357,11 +357,5 @@ func recordCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Codex
 func storeRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding service.CodexRootChannelBinding, action string) {
 	if err := service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding); err != nil {
 		common.SysError(fmt.Sprintf("%s recent Codex root channel binding failed: user=%d token=%d channel=%d err=%v", action, userID, tokenID, binding.ChannelID, err))
-	}
-}
-
-func storeRecentCodexUserGroupChannelBinding(userID int, rootID string, binding service.CodexRootChannelBinding, action string) {
-	if err := service.StoreRecentCodexUserGroupChannelBinding(userID, binding.SelectedGroup, rootID, binding); err != nil {
-		common.SysError(fmt.Sprintf("%s recent Codex user/group channel binding failed: user=%d group=%s channel=%d err=%v", action, userID, binding.SelectedGroup, binding.ChannelID, err))
 	}
 }

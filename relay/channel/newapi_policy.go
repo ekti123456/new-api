@@ -208,7 +208,7 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		RequestKind:  rootSession.requestKind,
 		SubagentKind: rootSession.subagentKind,
 	}
-	if feature, ok := ClassifyCodexSessionAccountingBypass(c, rootResolution, info.OriginModelName); ok {
+	if feature, ok := ClassifyCodexSessionAccountingBypass(rootResolution); ok {
 		meta.SessionAccounting = "bypass"
 		meta.PassiveFeature = feature
 	}

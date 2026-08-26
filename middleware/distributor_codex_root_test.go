@@ -221,7 +221,7 @@ func TestConcurrentNewCodexTitlesUseMatchingRootInsteadOfLatestRoot(t *testing.T
 	// recreate the retired correlation classifier.
 	titleContext.Request.Header.Del("X-Codex-Turn-Metadata")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
-	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution, "gpt-5.6-luna")
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
 	require.NoError(t, err)
 	require.False(t, strict)
 	require.Empty(t, feature)
@@ -253,7 +253,7 @@ func TestDetectedIdenticalCodexTitleCorrelationFailsClosed(t *testing.T) {
 	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 
-	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution, "gpt-5.6-luna")
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
 	require.NoError(t, err)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
@@ -398,7 +398,7 @@ func TestUnlinkedCodexTitleUsesProvisionalRootChannelAndKey(t *testing.T) {
 	titleID := "01a03787-1743-7151-a307-c1c0f1615bb6"
 	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, titleID)
 	titleResolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
-	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, titleResolution, "gpt-5.6-luna")
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, titleResolution)
 	require.NoError(t, err)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
@@ -433,7 +433,7 @@ func TestUnlinkedSystemLunaDoesNotWaitForRecentRootSelection(t *testing.T) {
 	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	started := time.Now()
-	_, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution, "gpt-5.6-luna")
+	_, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
 	require.Error(t, err)
 	require.Less(t, time.Since(started), 40*time.Millisecond)
 	require.True(t, strict)
@@ -442,7 +442,7 @@ func TestUnlinkedSystemLunaDoesNotWaitForRecentRootSelection(t *testing.T) {
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
 	titleContext, _ = codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	resolution = relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
-	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution, "gpt-5.6-luna")
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
 	require.NoError(t, err)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
@@ -561,7 +561,7 @@ func TestDistributorRoutesCurrentDesktopGuardianGraphWithoutPromptTemplateDepend
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
 	require.True(t, resolution.Resolved)
 	require.True(t, resolution.Related)
-	feature, classified := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution, "gpt-5.6-luna")
+	feature, classified := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution)
 	require.True(t, classified)
 	require.Equal(t, "related_internal", feature)
 
@@ -687,15 +687,15 @@ func TestRelatedCodexRoutePublishesBridgeOnlyForExplicitUserSource(t *testing.T)
 	}
 
 	resolution.ThreadSource = "user"
-	require.True(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-sol"))
+	require.True(t, isCodexRecentMainRoute(c, resolution))
 
 	for _, source := range []string{"", "system", "subagent"} {
 		resolution.ThreadSource = source
-		require.False(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-sol"), source)
+		require.False(t, isCodexRecentMainRoute(c, resolution), source)
 	}
 
 	resolution.ThreadSource = "user"
-	require.True(t, isCodexRecentMainRoute(c, resolution, "gpt-5.6-luna"))
+	require.True(t, isCodexRecentMainRoute(c, resolution))
 }
 
 func TestInspectSelectedCodexChannelBindingReportsPolicyKeyMismatch(t *testing.T) {
@@ -786,7 +786,7 @@ func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
 	c.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
 	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	feature, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, "gpt-5.6-luna")
+	feature, classified := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
 	require.True(t, classified)
 	require.Equal(t, "system_passive", feature)
 
@@ -795,27 +795,42 @@ func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
 	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
 
-func TestSubagentFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
-	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
-	rootID := "01a03786-1743-7151-a307-c1c0f1615bb5"
-	binding := service.CodexRootChannelBinding{
-		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
+
+	for _, tc := range []struct {
+		source, sessionID string
+	}{
+		{source: "ambient_suggestions", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb6"},
+		{source: "agent_created_thread", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb8"},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			// A stale binding left by the retired implementation must not keep the
+			// request pinned or turn an otherwise schedulable request into a 503.
+			require.NoError(t, service.StoreCodexRootChannelBinding(42, tc.sessionID, service.CodexRootChannelBinding{
+				ChannelID: 999999, SelectedGroup: "pro", KeyFingerprint: "stale-key",
+			}))
+			sessionID := tc.sessionID
+			c, recorder := codexUnlinkedTitleContext(42, 706, sessionID)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"independent internal task"}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("Session-Id", sessionID)
+			c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+sessionID+`","thread_id":"`+sessionID+`","thread_source":"`+tc.source+`","request_kind":"turn"}`)
+
+			resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+			require.True(t, resolution.Resolved)
+			require.False(t, resolution.Related)
+			_, _, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
+			require.NoError(t, err)
+			require.False(t, strict, "independent internal roots must use ordinary scheduling")
+
+			Distribute()(c)
+			require.Less(t, recorder.Code, http.StatusBadRequest)
+			require.False(t, c.IsAborted())
+			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+		})
 	}
-	storeRecentCodexTitleBinding(t, 42, 706, rootID, binding)
-
-	c, _ := codexUnlinkedTitleContext(42, 706, "01a03787-1743-7151-a307-c1c0f1615bb6")
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"codex-auto-review","input":"release-independent subagent task"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"subagent","request_kind":"turn"}`)
-	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	feature, classified := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, "codex-auto-review")
-	require.True(t, classified)
-	require.Equal(t, "related_internal", feature)
-
-	Distribute()(c)
-	require.False(t, c.IsAborted())
-	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
 
 func TestAmbientSuggestionDoesNotPublishRootChannelBinding(t *testing.T) {
@@ -829,11 +844,13 @@ func TestAmbientSuggestionDoesNotPublishRootChannelBinding(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	resolution := relaychannel.CodexRootSessionResolution{
-		RootID: sessionID, Resolved: true, ThreadSource: "system", RequestKind: "turn",
+	for _, source := range []string{"system", "ambient_suggestions", "agent_created_thread", "future_internal_source"} {
+		resolution := relaychannel.CodexRootSessionResolution{
+			RootID: sessionID, Resolved: true, ThreadSource: source, RequestKind: "turn",
+		}
+		_, _, _, _, selected := selectedCodexRootChannelBinding(c, resolution)
+		require.False(t, selected, source+" must not replace the user's root binding")
 	}
-	_, _, _, _, selected := selectedCodexRootChannelBinding(c, resolution, "gpt-5.6-terra")
-	require.False(t, selected, "ambient background task must not replace the user's recent root binding")
 }
 
 func TestUnlinkedCodexTitleDoesNotFallBackAfterPinnedKeyChange(t *testing.T) {

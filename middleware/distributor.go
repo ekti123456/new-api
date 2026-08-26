@@ -41,7 +41,7 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
-		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession, modelRequest.Model)
+		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
