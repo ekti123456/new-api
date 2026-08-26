@@ -265,6 +265,57 @@ func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *test
 	require.Equal(t, "turn", meta.RequestKind)
 }
 
+func TestApplyNewAPIPolicyHeadersUsesRootOverrideForUnlinkedCodexChild(t *testing.T) {
+	const (
+		secret  = "0123456789abcdef0123456789abcdef"
+		rootID  = "01a03d21-1743-7151-a307-c1c0f1615bb6"
+		childID = "01a03d22-1743-7151-a307-c1c0f1615bb6"
+	)
+	apiKey := "sk-codex2api-child"
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	binding := newAPIPolicyBinding{
+		PlatformID:          "primary-newapi",
+		Target:              "http://127.0.0.1:18095",
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]),
+		Secret:              secret,
+		Enabled:             true,
+	}
+	configurePolicyTest(t, []newAPIPolicyBinding{binding})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.9:4567"
+	c.Request.Header.Set("Session-Id", childID)
+	c.Request.Header.Set("Thread-Id", childID)
+	c.Request.Header.Set("X-Client-Request-Id", childID)
+	c.Request.Header.Set("X-Codex-Window-Id", childID+":0")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+childID+`","thread_id":"`+childID+`","window_id":"`+childID+`:0","thread_source":"agent_created_thread","request_kind":"turn"}`)
+	require.True(t, SetCodexPassiveRootSessionOverride(c, rootID, "related_internal"))
+
+	body := []byte(`{"model":"gpt-5.6-sol","input":"child turn"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		UserId: 42, UserGroup: "pro", RequestId: "req-unlinked-child",
+		OriginModelName: "gpt-5.6-sol", RelayFormat: types.RelayFormatOpenAIResponses,
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 7, ApiKey: apiKey, UpstreamModelName: "gpt-5.6-sol"},
+	}
+
+	require.NoError(t, applyNewAPIPolicyHeaders(c, req, info, bytes.NewReader(body)))
+	payload, err := base64.RawURLEncoding.DecodeString(req.Header.Get("X-NewAPI-Policy-Meta"))
+	require.NoError(t, err)
+	var meta newAPIPolicyMeta
+	require.NoError(t, common2.Unmarshal(payload, &meta))
+	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	require.Equal(t, newAPIPolicyRootSessionRelationRelated, meta.RootSessionRelation)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID), meta.RootSessionFingerprint)
+	require.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", childID), meta.SessionFingerprint)
+	require.Equal(t, "agent_created_thread", meta.ThreadSource)
+	require.Equal(t, "related_internal", meta.PassiveFeature)
+	require.Empty(t, meta.SessionAccounting)
+}
+
 func TestClassifyUnlinkedCodexSystemRequestUsesOnlyStableMetadata(t *testing.T) {
 	const titleID = "01a03787-1743-7151-a307-c1c0f1615bb6"
 	baseBody := `{
@@ -331,6 +382,33 @@ func TestClassifyCodexSessionAccountingBypassUsesStableSystemMetadata(t *testing
 		RootID: sessionID, Resolved: true, Related: true, ThreadSource: "system",
 	})
 	require.False(t, ok)
+}
+
+func TestClassifyUnlinkedCodexRecentRootRequestUsesSourceFields(t *testing.T) {
+	base := CodexRootSessionResolution{
+		RootID: "01a03d21-1743-7151-a307-c1c0f1615bb6", Resolved: true,
+	}
+	for _, tc := range []struct {
+		source, feature string
+	}{
+		{source: "system", feature: "system_passive"},
+		{source: "agent_created_thread", feature: "related_internal"},
+		{source: "subagent", feature: "related_internal"},
+		{source: "guardian_review", feature: "related_internal"},
+		{source: "future_internal_source", feature: "related_internal"},
+	} {
+		candidate := base
+		candidate.ThreadSource = tc.source
+		feature, ok := ClassifyUnlinkedCodexRecentRootRequest(candidate)
+		require.True(t, ok, tc.source)
+		require.Equal(t, tc.feature, feature)
+	}
+	for _, source := range []string{"", "user", "ambient_suggestions"} {
+		candidate := base
+		candidate.ThreadSource = source
+		_, ok := ClassifyUnlinkedCodexRecentRootRequest(candidate)
+		require.False(t, ok, source)
+	}
 }
 
 func TestApplyNewAPIPolicyHeadersSignsAmbientSessionAccountingBypass(t *testing.T) {

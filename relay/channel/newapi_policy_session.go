@@ -262,16 +262,31 @@ func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolic
 	return resolution
 }
 
-// ClassifyUnlinkedCodexSystemRequest recognizes the independent system thread
-// used by project metadata generation. Other independent non-user sources are
-// complete roots of their own and must not be attached to a recent user/token
-// route merely because they are not user-authored.
-func ClassifyUnlinkedCodexSystemRequest(resolution CodexRootSessionResolution) (string, bool) {
+// ClassifyUnlinkedCodexRecentRootRequest recognizes Codex-owned turns that are
+// emitted as a new transport thread before their parent/root graph is available.
+// They recover only the recent binding scoped to the same authenticated user and
+// API token. Ambient suggestions remain independent because they are project
+// background work rather than a continuation of the active user window.
+func ClassifyUnlinkedCodexRecentRootRequest(resolution CodexRootSessionResolution) (string, bool) {
 	if !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
-		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+		strings.TrimSpace(resolution.ThreadSource) == "" ||
+		strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "user") ||
+		strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "ambient_suggestions") {
 		return "", false
 	}
-	return "system_passive", true
+	if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+		return "system_passive", true
+	}
+	return "related_internal", true
+}
+
+// ClassifyUnlinkedCodexSystemRequest is kept for callers that only need to
+// identify the project-metadata system thread.
+func ClassifyUnlinkedCodexSystemRequest(resolution CodexRootSessionResolution) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+		return "", false
+	}
+	return ClassifyUnlinkedCodexRecentRootRequest(resolution)
 }
 
 // ClassifyLinkedCodexPassiveInternalRequest recognizes any non-user Codex child

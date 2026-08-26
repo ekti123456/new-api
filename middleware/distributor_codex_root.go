@@ -146,10 +146,10 @@ func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionReso
 }
 
 // resolveUnlinkedCodexPassiveRoot pins an explicitly related child to its exact
-// root. The independent system thread used for project metadata may recover the
-// user's most recent root through the short-lived user/token bridge. Other
-// independent internal roots use ordinary scheduling and never borrow that
-// bridge, which prevents concurrent Codex windows from being cross-bound.
+// root. Codex-owned turns that arrive before their parent graph is available may
+// recover the user's most recent root through the short-lived user/token bridge.
+// Project-level ambient suggestions remain independent and use ordinary
+// scheduling.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (relaychannel.CodexRootSessionResolution, string, bool, error) {
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	if feature, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution); linked {
@@ -158,7 +158,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		}
 		return resolution, feature, true, nil
 	}
-	feature, classified := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
+	feature, classified := relaychannel.ClassifyUnlinkedCodexRecentRootRequest(resolution)
 	if !classified {
 		return resolution, "", false, nil
 	}

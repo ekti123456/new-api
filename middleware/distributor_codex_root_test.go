@@ -664,6 +664,47 @@ func TestDistributorUnlistedUACannotReuseNormalCodexRootBinding(t *testing.T) {
 	require.NotContains(t, adminInfo, "channel_affinity", "UA reroute must not show the stale root-affinity star")
 }
 
+func TestDistributorKeepsRootAffinityAcrossMultipleUserTurns(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 74
+		tokenID = 732
+		rootID  = "01a03d20-6f27-7f10-b723-88683446062b"
+	)
+
+	first, firstRecorder := codexMainRootContext(userID, tokenID, channel.Id, rootID)
+	Distribute()(first)
+	require.Less(t, firstRecorder.Code, http.StatusBadRequest)
+	require.False(t, first.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(first, constant.ContextKeyChannelId))
+
+	var expectedHint, expectedFingerprint string
+	for turn := 2; turn <= 5; turn++ {
+		current, recorder := codexMainRootContext(userID, tokenID, 0, rootID)
+		Distribute()(current)
+
+		require.Less(t, recorder.Code, http.StatusBadRequest, "turn %d", turn)
+		require.False(t, current.IsAborted(), "turn %d", turn)
+		require.Equal(t, channel.Id, common.GetContextKeyInt(current, constant.ContextKeyChannelId), "turn %d", turn)
+		require.True(t, common.GetContextKeyBool(current, constant.ContextKeyCodexRootChannelPinned), "turn %d", turn)
+
+		adminInfo := map[string]interface{}{}
+		service.AppendChannelAffinityAdminInfo(current, adminInfo)
+		affinity, ok := adminInfo["channel_affinity"].(map[string]interface{})
+		require.True(t, ok, "turn %d must keep the root-affinity marker", turn)
+		require.Equal(t, "Codex root session", affinity["rule_name"], "turn %d", turn)
+		require.Equal(t, channel.Id, affinity["channel_id"], "turn %d", turn)
+		if turn == 2 {
+			expectedHint, _ = affinity["key_hint"].(string)
+			expectedFingerprint, _ = affinity["key_fp"].(string)
+			require.NotEmpty(t, expectedHint)
+			require.NotEmpty(t, expectedFingerprint)
+		}
+		require.Equal(t, expectedHint, affinity["key_hint"], "turn %d", turn)
+		require.Equal(t, expectedFingerprint, affinity["key_fp"], "turn %d", turn)
+	}
+}
+
 func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 	const (
@@ -856,40 +897,73 @@ func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
 	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
 
-func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T) {
+func TestAmbientSuggestionsScheduleWithoutRecentRootBinding(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 
-	for _, tc := range []struct {
-		source, sessionID string
-	}{
-		{source: "ambient_suggestions", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb6"},
-		{source: "agent_created_thread", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb8"},
-	} {
-		t.Run(tc.source, func(t *testing.T) {
-			// A stale binding left by the retired implementation must not keep the
-			// request pinned or turn an otherwise schedulable request into a 503.
-			require.NoError(t, service.StoreCodexRootChannelBinding(42, tc.sessionID, service.CodexRootChannelBinding{
-				ChannelID: 999999, SelectedGroup: "pro", KeyFingerprint: "stale-key",
-			}))
-			sessionID := tc.sessionID
-			c, recorder := codexUnlinkedTitleContext(42, 706, sessionID)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"independent internal task"}`))
-			c.Request.Header.Set("Content-Type", "application/json")
-			c.Request.Header.Set("Session-Id", sessionID)
-			c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+sessionID+`","thread_id":"`+sessionID+`","thread_source":"`+tc.source+`","request_kind":"turn"}`)
+	const sessionID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	// A stale binding left by the retired implementation must not keep the
+	// request pinned or turn an otherwise schedulable request into a 503.
+	require.NoError(t, service.StoreCodexRootChannelBinding(42, sessionID, service.CodexRootChannelBinding{
+		ChannelID: 999999, SelectedGroup: "pro", KeyFingerprint: "stale-key",
+	}))
+	c, recorder := codexUnlinkedTitleContext(42, 706, sessionID)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"ambient suggestions"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Session-Id", sessionID)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+sessionID+`","thread_id":"`+sessionID+`","thread_source":"ambient_suggestions","request_kind":"turn"}`)
 
-			resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-			require.True(t, resolution.Resolved)
-			require.False(t, resolution.Related)
-			_, _, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-			require.NoError(t, err)
-			require.False(t, strict, "independent internal roots must use ordinary scheduling")
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+	require.True(t, resolution.Resolved)
+	require.False(t, resolution.Related)
+	_, _, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
+	require.NoError(t, err)
+	require.False(t, strict, "ambient suggestions must use ordinary scheduling")
+
+	Distribute()(c)
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, c.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestUnlinkedCodexOwnedTurnsRecoverRecentRootBinding(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 42
+		tokenID = 733
+		rootID  = "01a03d21-1743-7151-a307-c1c0f1615bb6"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	require.NoError(t, service.StoreCodexRootChannelBinding(userID, rootID, binding))
+	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+
+	for index, source := range []string{"agent_created_thread", "subagent", "guardian_review", "memory_consolidation"} {
+		t.Run(source, func(t *testing.T) {
+			childID := fmt.Sprintf("01a03d2%d-1743-7151-a307-c1c0f1615bb6", index+2)
+			c, recorder := codexUnlinkedTitleContext(userID, tokenID, childID)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"Codex-owned child turn"}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("Session-Id", childID)
+			c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+childID+`","thread_id":"`+childID+`","thread_source":"`+source+`","request_kind":"turn"}`)
 
 			Distribute()(c)
 			require.Less(t, recorder.Code, http.StatusBadRequest)
 			require.False(t, c.IsAborted())
 			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
-			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+			require.Equal(t, key, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+			require.True(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+
+			resolved := relaychannel.ResolveCodexRootSessionForDistribution(c)
+			require.True(t, resolved.Resolved)
+			require.True(t, resolved.Related)
+			require.Equal(t, rootID, resolved.RootID)
+			adminInfo := map[string]interface{}{}
+			service.AppendChannelAffinityAdminInfo(c, adminInfo)
+			affinity, ok := adminInfo["channel_affinity"].(map[string]interface{})
+			require.True(t, ok)
+			require.Equal(t, "Codex root session", affinity["rule_name"])
 		})
 	}
 }
