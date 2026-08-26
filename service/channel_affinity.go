@@ -25,6 +25,7 @@ const (
 	ginKeyChannelAffinityCacheKey   = "channel_affinity_cache_key"
 	ginKeyChannelAffinityTTLSeconds = "channel_affinity_ttl_seconds"
 	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
+	ginKeyChannelAffinityStats      = "channel_affinity_stats_context"
 	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
 	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
 	ginKeyChannelAffinityHardPool   = "channel_affinity_hard_pool"
@@ -392,17 +393,29 @@ func GetChannelAffinityStatsContext(c *gin.Context) (ChannelAffinityStatsContext
 	if c == nil {
 		return ChannelAffinityStatsContext{}, false
 	}
-	meta, ok := getChannelAffinityMeta(c)
-	if !ok {
+	statsCtx := ChannelAffinityStatsContext{}
+	if meta, ok := getChannelAffinityMeta(c); ok {
+		statsCtx = ChannelAffinityStatsContext{
+			RuleName:       meta.RuleName,
+			UsingGroup:     meta.UsingGroup,
+			KeyFingerprint: meta.KeyFingerprint,
+			TTLSeconds:     int64(meta.TTLSeconds),
+		}
+	} else if anyStats, ok := c.Get(ginKeyChannelAffinityStats); ok {
+		statsCtx, ok = anyStats.(ChannelAffinityStatsContext)
+		if !ok {
+			return ChannelAffinityStatsContext{}, false
+		}
+	} else {
 		return ChannelAffinityStatsContext{}, false
 	}
-	ruleName := strings.TrimSpace(meta.RuleName)
-	keyFp := strings.TrimSpace(meta.KeyFingerprint)
-	usingGroup := strings.TrimSpace(meta.UsingGroup)
+	ruleName := strings.TrimSpace(statsCtx.RuleName)
+	keyFp := strings.TrimSpace(statsCtx.KeyFingerprint)
+	usingGroup := strings.TrimSpace(statsCtx.UsingGroup)
 	if ruleName == "" || keyFp == "" {
 		return ChannelAffinityStatsContext{}, false
 	}
-	ttlSeconds := int64(meta.TTLSeconds)
+	ttlSeconds := statsCtx.TTLSeconds
 	if ttlSeconds <= 0 {
 		return ChannelAffinityStatsContext{}, false
 	}
@@ -910,7 +923,9 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 // usage logs when a verified Codex root-session binding selected the channel.
 // The root binding already performed the routing, so this function records
 // observability metadata only and must not create or mutate affinity cache
-// entries. An existing rule-produced marker takes precedence.
+// entries. Its separate stats context lets usage aggregation work without
+// changing channel selection state. An existing rule-produced marker takes
+// precedence.
 func MarkCodexRootChannelAffinityUsed(c *gin.Context, selectedGroup, modelName string, channelID int, rootID string) {
 	rootID = strings.TrimSpace(rootID)
 	if c == nil || channelID <= 0 || rootID == "" {
@@ -925,6 +940,17 @@ func MarkCodexRootChannelAffinityUsed(c *gin.Context, selectedGroup, modelName s
 		requestPath = c.Request.URL.Path
 	}
 	selectedGroup = strings.TrimSpace(selectedGroup)
+	keyFingerprint := affinityFingerprint(rootID)
+	statsTTLSeconds := 3600
+	if setting := operation_setting.GetChannelAffinitySetting(); setting != nil && setting.DefaultTTLSeconds > 0 {
+		statsTTLSeconds = setting.DefaultTTLSeconds
+	}
+	c.Set(ginKeyChannelAffinityStats, ChannelAffinityStatsContext{
+		RuleName:       "Codex root session",
+		UsingGroup:     selectedGroup,
+		KeyFingerprint: keyFingerprint,
+		TTLSeconds:     int64(statsTTLSeconds),
+	})
 	c.Set(ginKeyChannelAffinityLogInfo, map[string]interface{}{
 		"reason":         "Codex root session",
 		"rule_name":      "Codex root session",
@@ -937,7 +963,7 @@ func MarkCodexRootChannelAffinityUsed(c *gin.Context, selectedGroup, modelName s
 		"key_source":     "verified_root_session",
 		"key_key":        "root_session_id",
 		"key_hint":       buildChannelAffinityKeyHint(rootID),
-		"key_fp":         affinityFingerprint(rootID),
+		"key_fp":         keyFingerprint,
 	})
 }
 

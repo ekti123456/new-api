@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +34,53 @@ func TestMarkCodexRootChannelAffinityUsedRecordsRedactedAdminInfo(t *testing.T) 
 	require.NotEmpty(t, affinity["key_fp"])
 	require.NotContains(t, affinity["key_hint"], rootID)
 	require.Equal(t, affinityFingerprint(rootID), affinity["key_fp"])
+}
+
+func TestMarkCodexRootChannelAffinityUsedRecordsUsageCacheStats(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	const (
+		rootID     = "01a03816-3b42-78d1-a818-65fdcb9e8a74"
+		ruleName   = "Codex root session"
+		usingGroup = "gpt-pro"
+	)
+	keyFP := affinityFingerprint(rootID)
+	entryKey := channelAffinityUsageCacheEntryKey(ruleName, usingGroup, keyFP)
+	statsCache := getChannelAffinityUsageCacheStatsCache()
+	_, _ = statsCache.DeleteMany([]string{entryKey})
+	t.Cleanup(func() {
+		_, _ = statsCache.DeleteMany([]string{entryKey})
+	})
+
+	MarkCodexRootChannelAffinityUsed(c, usingGroup, "gpt-5.6-luna", 22, rootID)
+	_, _, hasAffinityCache := getChannelAffinityContext(c)
+	require.False(t, hasAffinityCache)
+	_, hasAffinityMeta := getChannelAffinityMeta(c)
+	require.False(t, hasAffinityMeta)
+
+	usage := &dto.Usage{
+		PromptTokens:     17645,
+		CompletionTokens: 294,
+		TotalTokens:      17939,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 4864,
+		},
+	}
+	ObserveChannelAffinityUsageCacheByRelayFormat(c, usage, types.RelayFormatOpenAIResponses)
+
+	stats := GetChannelAffinityUsageCacheStats(ruleName, usingGroup, keyFP)
+	require.Equal(t, ruleName, stats.RuleName)
+	require.Equal(t, usingGroup, stats.UsingGroup)
+	require.Equal(t, keyFP, stats.KeyFingerprint)
+	require.EqualValues(t, 1, stats.Total)
+	require.EqualValues(t, 1, stats.Hit)
+	require.EqualValues(t, 17645, stats.PromptTokens)
+	require.EqualValues(t, 4864, stats.CachedTokens)
+	require.EqualValues(t, 294, stats.CompletionTokens)
+	require.EqualValues(t, 17939, stats.TotalTokens)
+	require.Positive(t, stats.WindowSeconds)
+	require.Positive(t, stats.LastSeenAt)
 }
 
 func TestMarkCodexRootChannelAffinityUsedDoesNotOverwriteRuleInfo(t *testing.T) {
