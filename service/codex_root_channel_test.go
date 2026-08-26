@@ -85,46 +85,6 @@ func TestCodexRecentRootChannelBindingRejectsMissingToken(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestCodexRecentRootChannelBindingCorrelationSeparatesConcurrentPrompts(t *testing.T) {
-	first := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "first-key"}
-	second := CodexRootChannelBinding{ChannelID: 913, SelectedGroup: "pro", KeyFingerprint: "second-key"}
-	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(42, 101, "prompt-a", "root-a", first))
-	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(42, 101, "prompt-b", "root-b", second))
-
-	got, found, err := LoadRecentCodexRootChannelBindingForCorrelation(42, 101, "prompt-a")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "root-a", got.RootID)
-	require.Equal(t, first, got.Binding)
-	got, found, err = LoadRecentCodexRootChannelBindingForCorrelation(42, 101, "prompt-b")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "root-b", got.RootID)
-	require.Equal(t, second, got.Binding)
-}
-
-func TestCodexRecentRootChannelBindingCorrelationMarksDifferentRootsAmbiguous(t *testing.T) {
-	first := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "first-key"}
-	second := CodexRootChannelBinding{ChannelID: 913, SelectedGroup: "pro", KeyFingerprint: "second-key"}
-	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(43, 102, "same-prompt", "root-a", first))
-	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(43, 102, "same-prompt", "root-b", second))
-
-	got, found, err := LoadRecentCodexRootChannelBindingForCorrelation(43, 102, "same-prompt")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.True(t, got.Ambiguous)
-	require.Empty(t, got.RootID)
-	require.Zero(t, got.Binding.ChannelID)
-
-	// A retry from either root cannot silently clear the collision and make the
-	// result depend on arrival order.
-	require.NoError(t, StoreRecentCodexRootChannelBindingForCorrelation(43, 102, "same-prompt", "root-a", first))
-	got, found, err = LoadRecentCodexRootChannelBindingForCorrelation(43, 102, "same-prompt")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.True(t, got.Ambiguous)
-}
-
 func TestCodexRecentUserGroupChannelBindingIsScopedByUserAndGroup(t *testing.T) {
 	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "gpt-pro", KeyFingerprint: "abcdef0123456789"}
 	require.NoError(t, StoreRecentCodexUserGroupChannelBinding(52, "gpt-pro", "", binding))

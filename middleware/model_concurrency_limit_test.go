@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +72,33 @@ func TestLocalUserConcurrencyAcquireRelease(t *testing.T) {
 	require.True(t, acquireLocalUserConcurrency(7, 2, "req-3"))
 	require.Equal(t, 2, getLocalUserConcurrency(7))
 	require.Equal(t, 3, getLocalTotalConcurrency())
+}
+
+func TestCodexInternalRequestGetsExactlyOneProtectedUserConcurrencySlot(t *testing.T) {
+	resetLocalUserConcurrencyForTest()
+	t.Cleanup(resetLocalUserConcurrencyForTest)
+
+	const (
+		userID = 42
+		rootID = "01a03816-3b42-78d1-a818-65fdcb9e8a74"
+		leafID = "01a03817-4c53-79e2-b929-76aecbaf9b85"
+	)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"future-internal-model","input":"changed internal prompt"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Session-Id", rootID)
+	c.Request.Header.Set("Thread-Id", leafID)
+	c.Request.Header.Set("X-Client-Request-Id", leafID)
+	c.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	c.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","parent_thread_id":"`+rootID+`","thread_source":"subagent","request_kind":"turn","subagent_kind":"guardian"}`)
+	require.True(t, codexProtectedUserConcurrency(c))
+
+	require.True(t, acquireLocalUserConcurrency(userID, 1, "main"))
+	require.True(t, acquireLocalUserConcurrency(userID, 2, "guardian"))
+	require.False(t, acquireLocalUserConcurrency(userID, 2, "second-guardian"), "only one protected slot may exceed the configured limit")
+	require.False(t, acquireLocalUserConcurrency(userID, 1, "ordinary"), "ordinary traffic must still see the configured limit")
 }
 
 func TestRedisUserConcurrencyAcquireRelease(t *testing.T) {

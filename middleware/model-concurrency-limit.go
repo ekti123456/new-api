@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
@@ -307,6 +309,22 @@ func GetTotalOccupiedConcurrency(ctx context.Context) (int, error) {
 	return countUserConcurrencyScript.Run(ctx, common.RDB, []string{totalConcurrencyKey}).Int()
 }
 
+func codexProtectedUserConcurrency(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	request, _, err := getModelRequest(c)
+	if err != nil || strings.TrimSpace(request.Model) == "" {
+		return false
+	}
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+	if _, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution, request.Model); linked {
+		return true
+	}
+	_, internal := relaychannel.ClassifyUnlinkedCodexPassiveInternalRequest(c, resolution, request.Model)
+	return internal
+}
+
 // ModelRequestConcurrencyLimit limits active model requests per authenticated user.
 // c.Next does not return until normal HTTP, SSE, or WebSocket handling completes.
 func ModelRequestConcurrencyLimit() gin.HandlerFunc {
@@ -330,7 +348,13 @@ func ModelRequestConcurrencyLimit() gin.HandlerFunc {
 		if requestID == "" {
 			requestID = common.NewRequestId()
 		}
-		acquired, err := acquireUserConcurrency(c.Request.Context(), userID, limit, requestID)
+		protectedInternal := codexProtectedUserConcurrency(c)
+		effectiveLimit := limit
+		if protectedInternal && effectiveLimit > 0 {
+			effectiveLimit++
+			cooldown = 0
+		}
+		acquired, err := acquireUserConcurrency(c.Request.Context(), userID, effectiveLimit, requestID)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "并发限制服务暂时不可用，请稍后重试")
 			return

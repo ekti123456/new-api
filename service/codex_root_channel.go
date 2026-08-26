@@ -38,9 +38,8 @@ type CodexRootChannelBinding struct {
 // The short TTL intentionally limits temporal correlation to the root request
 // that immediately preceded the metadata generation.
 type CodexRecentRootChannelBinding struct {
-	RootID    string                  `json:"root_id"`
-	Binding   CodexRootChannelBinding `json:"binding"`
-	Ambiguous bool                    `json:"ambiguous,omitempty"`
+	RootID  string                  `json:"root_id"`
+	Binding CodexRootChannelBinding `json:"binding"`
 }
 
 var (
@@ -48,13 +47,8 @@ var (
 	codexRootChannelCache     *cachex.HybridCache[CodexRootChannelBinding]
 	codexRecentRootCacheOnce  sync.Once
 	codexRecentRootCache      *cachex.HybridCache[CodexRecentRootChannelBinding]
-	// Correlated title writes are a read-modify-write operation: when two roots
-	// publish the same prompt key, the cache must become ambiguous instead of
-	// silently changing from A to B. Multi-replica atomicity remains delegated
-	// to the shared cache architecture; this lock closes the in-process race.
-	codexRecentRootCorrelationMu sync.Mutex
-	codexRecentUserGroupOnce     sync.Once
-	codexRecentUserGroupCache    *cachex.HybridCache[CodexRecentRootChannelBinding]
+	codexRecentUserGroupOnce  sync.Once
+	codexRecentUserGroupCache *cachex.HybridCache[CodexRecentRootChannelBinding]
 )
 
 func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
@@ -161,52 +155,26 @@ func LoadCodexRootChannelBinding(userID int, rootID string) (CodexRootChannelBin
 	return getCodexRootChannelCache().Get(key)
 }
 
-func codexRecentRootChannelCacheKey(userID, tokenID int, correlationKey string) string {
+func codexRecentRootChannelCacheKey(userID, tokenID int) string {
 	if userID <= 0 || tokenID <= 0 {
 		return ""
 	}
-	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + strconv.Itoa(tokenID) + "\x00" + strings.TrimSpace(correlationKey)))
+	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + strconv.Itoa(tokenID)))
 	return hex.EncodeToString(digest[:])
 }
 
 func StoreRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
-	return StoreRecentCodexRootChannelBindingForCorrelation(userID, tokenID, "", rootID, binding)
-}
-
-func StoreRecentCodexRootChannelBindingForCorrelation(userID, tokenID int, correlationKey, rootID string, binding CodexRootChannelBinding) error {
-	key := codexRecentRootChannelCacheKey(userID, tokenID, correlationKey)
+	key := codexRecentRootChannelCacheKey(userID, tokenID)
 	rootID = strings.TrimSpace(rootID)
 	if key == "" || rootID == "" || binding.ChannelID <= 0 || strings.TrimSpace(binding.SelectedGroup) == "" || strings.TrimSpace(binding.KeyFingerprint) == "" {
 		return nil
 	}
 	value := CodexRecentRootChannelBinding{RootID: rootID, Binding: binding}
-	cache := getCodexRecentRootChannelCache()
-	if strings.TrimSpace(correlationKey) == "" {
-		return cache.SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
-	}
-
-	codexRecentRootCorrelationMu.Lock()
-	defer codexRecentRootCorrelationMu.Unlock()
-	current, found, err := cache.Get(key)
-	if err != nil {
-		return err
-	}
-	if found && (current.Ambiguous || (strings.TrimSpace(current.RootID) != "" && !strings.EqualFold(current.RootID, rootID))) {
-		// The title request carries only the prompt, not a trustworthy parent ID.
-		// Once two roots share that prompt key, choosing either channel could mix
-		// API keys/account configuration. Retain only an ambiguity marker so the
-		// distributor fails closed until the short cache entry expires.
-		value = CodexRecentRootChannelBinding{Ambiguous: true}
-	}
-	return cache.SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
+	return getCodexRecentRootChannelCache().SetWithTTL(key, value, codexRecentRootChannelCacheTTL)
 }
 
 func LoadRecentCodexRootChannelBinding(userID, tokenID int) (CodexRecentRootChannelBinding, bool, error) {
-	return LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID, "")
-}
-
-func LoadRecentCodexRootChannelBindingForCorrelation(userID, tokenID int, correlationKey string) (CodexRecentRootChannelBinding, bool, error) {
-	key := codexRecentRootChannelCacheKey(userID, tokenID, correlationKey)
+	key := codexRecentRootChannelCacheKey(userID, tokenID)
 	if key == "" {
 		return CodexRecentRootChannelBinding{}, false, nil
 	}
