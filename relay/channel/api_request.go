@@ -63,10 +63,12 @@ var stableConversationHeaderNames = []string{
 	"OpenAI-Session-ID",
 	"Thread-Id",
 	"X-Client-Request-Id",
+	"X-Codex-Turn-State",
 	"X-Codex-Turn-Metadata",
 	"X-Codex-Window-Id",
 	"X-Codex-Parent-Thread-Id",
 	"X-OpenAI-Subagent",
+	"X-OpenAI-Memgen-Request",
 }
 
 // applyStableConversationHeaders is independent from body parameter override.

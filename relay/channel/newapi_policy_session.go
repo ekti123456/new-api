@@ -163,6 +163,7 @@ type newAPIPolicyRootSessionEvidence struct {
 
 type newAPIPolicyRootSessionResolution struct {
 	rootID       string
+	forkedFromID string
 	state        string
 	relation     string
 	threadSource string
@@ -331,6 +332,7 @@ func analyzeNewAPIPolicyRootSession(c *gin.Context, info *relaycommon.RelayInfo,
 	}
 	return newAPIPolicyRootSessionResolution{
 		rootID:       rootID,
+		forkedFromID: evidence.forkedFrom.value,
 		state:        state,
 		relation:     relation,
 		threadSource: evidence.threadSources.resolved(),

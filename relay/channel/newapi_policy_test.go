@@ -463,9 +463,61 @@ func TestAnalyzeNewAPIPolicyRootSessionUsesForkedLineageForUnknownSource(t *test
 	resolution := analyzeNewAPIPolicyRootSession(c, nil, childID)
 	require.Equal(t, newAPIPolicyRootSessionResolved, resolution.state)
 	require.Equal(t, rootID, resolution.rootID)
+	require.Equal(t, rootID, resolution.forkedFromID)
 	require.Equal(t, newAPIPolicyRootSessionRelationRelated, resolution.relation)
 	require.Equal(t, "future_new_source", resolution.threadSource)
 	require.Equal(t, "future_task", resolution.requestKind)
+}
+
+func TestApplyNewAPIPolicyHeadersSignsUserForkSourceAffinity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		secret   = "0123456789abcdef0123456789abcdef"
+		sourceID = "01a03dd9-5601-76d0-a76f-f3643be350ff"
+		forkID   = "01a03e64-9934-78b3-aa52-2bed5b16e0e4"
+	)
+	apiKey := "sk-codex2api-user-fork"
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	binding := newAPIPolicyBinding{
+		PlatformID:          "primary-newapi",
+		Target:              "http://127.0.0.1:18095",
+		CodexKeyFingerprint: hex.EncodeToString(keyDigest[:]),
+		Secret:              secret,
+		Enabled:             true,
+	}
+	configurePolicyTest(t, []newAPIPolicyBinding{binding})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses", nil)
+	c.Request.RemoteAddr = "203.0.113.9:4567"
+	c.Request.Header.Set("Session-Id", forkID)
+	c.Request.Header.Set("Thread-Id", forkID)
+	c.Request.Header.Set("X-Client-Request-Id", forkID)
+	c.Request.Header.Set("X-Codex-Window-Id", forkID+":0")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+forkID+`","thread_id":"`+forkID+`","window_id":"`+forkID+`:0","forked_from_thread_id":"`+sourceID+`","thread_source":"user","request_kind":"turn"}`)
+
+	body := []byte(`{"model":"gpt-5.6-sol","input":"continue from fork"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		UserId: 42, UserGroup: "default", RequestId: "req-user-fork",
+		OriginModelName: "gpt-5.6-sol", RelayFormat: types.RelayFormatOpenAIResponses,
+		FinalRequestRelayFormat: types.RelayFormatOpenAIResponses,
+		ChannelMeta:             &relaycommon.ChannelMeta{ChannelId: 7, ApiKey: apiKey, UpstreamModelName: "gpt-5.6-sol"},
+		Request:                 &dto.OpenAIResponsesRequest{ClientMetadata: []byte(`{"session_id":"` + forkID + `","thread_id":"` + forkID + `","forked_from_thread_id":"` + sourceID + `","thread_source":"user","request_kind":"turn"}`)},
+	}
+
+	require.NoError(t, applyNewAPIPolicyHeaders(c, req, info, bytes.NewReader(body)))
+	payload, err := base64.RawURLEncoding.DecodeString(req.Header.Get("X-NewAPI-Policy-Meta"))
+	require.NoError(t, err)
+	var meta newAPIPolicyMeta
+	require.NoError(t, common2.Unmarshal(payload, &meta))
+	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
+	require.Equal(t, newAPIPolicyRootSessionRelationRelated, meta.RootSessionRelation)
+	require.Equal(t, "user", meta.ThreadSource)
+	require.Empty(t, meta.SessionAccounting)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", forkID), meta.RootSessionFingerprint)
+	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", sourceID), meta.ForkedFromSessionFingerprint)
 }
 
 func TestResolveNewAPIPolicyRootSessionIDReportsConflictAndUnavailable(t *testing.T) {

@@ -115,6 +115,9 @@ type newAPIPolicyMeta struct {
 	// moves between bindings. The enclosing policy metadata signature protects
 	// this value from tampering.
 	RootSessionFingerprint string `json:"root_session_fingerprint,omitempty"`
+	// ForkedFromSessionFingerprint is a signed account-affinity hint. It lets
+	// Codex2API prefer the source account without merging the fork's root/window.
+	ForkedFromSessionFingerprint string `json:"forked_from_session_fingerprint,omitempty"`
 }
 
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
@@ -198,6 +201,9 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	meta.SubagentKind = rootSession.subagentKind
 	if rootSession.state == newAPIPolicyRootSessionResolved {
 		meta.RootSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSession.rootID)
+		if strings.EqualFold(strings.TrimSpace(rootSession.threadSource), "user") && strings.TrimSpace(rootSession.subagentKind) == "" {
+			meta.ForkedFromSessionFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, rootSession.forkedFromID)
+		}
 	}
 	meta.PassiveFeature = codexPassiveRootSessionOverrideFeature(c)
 	rootResolution := CodexRootSessionResolution{

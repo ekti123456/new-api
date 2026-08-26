@@ -32,8 +32,12 @@ func TestApplyStableConversationHeadersWithoutParamOverride(t *testing.T) {
 	c.Request.Header.Set("X-Session-ID", "generic-session")
 	c.Request.Header.Set("OpenAI-Session-ID", "openai-session")
 	c.Request.Header.Set("Thread-Id", "child-thread")
+	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set("X-Codex-Window-Id", "child-thread:2")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", "parent-thread")
+	c.Request.Header.Set("X-Codex-Forked-From-Thread-Id", "fork-thread")
 	c.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	c.Request.Header.Set("X-OpenAI-Memgen-Request", "true")
 	req := httptest.NewRequest(http.MethodPost, "https://upstream.example/v1/responses", nil)
 
 	applyStableConversationHeaders(c, req)
@@ -42,8 +46,12 @@ func TestApplyStableConversationHeadersWithoutParamOverride(t *testing.T) {
 	require.Equal(t, "generic-session", req.Header.Get("X-Session-ID"))
 	require.Equal(t, "openai-session", req.Header.Get("OpenAI-Session-ID"))
 	require.Equal(t, "child-thread", req.Header.Get("Thread-Id"))
+	require.Equal(t, "turn-state", req.Header.Get("X-Codex-Turn-State"))
 	require.Equal(t, "child-thread:2", req.Header.Get("X-Codex-Window-Id"))
+	require.Equal(t, "parent-thread", req.Header.Get("X-Codex-Parent-Thread-Id"))
+	require.Empty(t, req.Header.Get("X-Codex-Forked-From-Thread-Id"))
 	require.Equal(t, "guardian", req.Header.Get("X-OpenAI-Subagent"))
+	require.Equal(t, "true", req.Header.Get("X-OpenAI-Memgen-Request"))
 }
 
 func TestDoWssRequestForwardsStableConversationHeaders(t *testing.T) {
@@ -65,8 +73,12 @@ func TestDoWssRequestForwardsStableConversationHeaders(t *testing.T) {
 	c.Request.Header.Set("X-Session-ID", "generic-session")
 	c.Request.Header.Set("OpenAI-Session-ID", "openai-session")
 	c.Request.Header.Set("Thread-Id", "child-thread")
+	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set("X-Codex-Window-Id", "child-thread:3")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", "parent-thread")
+	c.Request.Header.Set("X-Codex-Forked-From-Thread-Id", "fork-thread")
 	c.Request.Header.Set("X-OpenAI-Subagent", "guardian")
+	c.Request.Header.Set("X-OpenAI-Memgen-Request", "true")
 
 	adaptor := stableConversationWebSocketAdaptor{url: "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/responses"}
 	conn, err := DoWssRequest(adaptor, c, &relaycommon.RelayInfo{}, nil)
@@ -78,6 +90,10 @@ func TestDoWssRequestForwardsStableConversationHeaders(t *testing.T) {
 	require.Equal(t, "generic-session", headers.Get("X-Session-ID"))
 	require.Equal(t, "openai-session", headers.Get("OpenAI-Session-ID"))
 	require.Equal(t, "child-thread", headers.Get("Thread-Id"))
+	require.Equal(t, "turn-state", headers.Get("X-Codex-Turn-State"))
 	require.Equal(t, "child-thread:3", headers.Get("X-Codex-Window-Id"))
+	require.Equal(t, "parent-thread", headers.Get("X-Codex-Parent-Thread-Id"))
+	require.Empty(t, headers.Get("X-Codex-Forked-From-Thread-Id"))
 	require.Equal(t, "guardian", headers.Get("X-OpenAI-Subagent"))
+	require.Equal(t, "true", headers.Get("X-OpenAI-Memgen-Request"))
 }
