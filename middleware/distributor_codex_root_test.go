@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -601,6 +602,66 @@ func TestDistributorGuardianNeverBorrowsConcurrentRecentRootAcrossUARoutingBound
 	require.True(t, guardianContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestDistributorUnlistedUACannotReuseNormalCodexRootBinding(t *testing.T) {
+	normalChannel, key, _ := setupCodexRootDistributorTest(t)
+	baseURL := normalChannel.GetBaseURL()
+	priority := int64(1)
+	routedChannel := &model.Channel{
+		Id: 98102, Type: constant.ChannelTypeOpenAI, Key: key,
+		Status: common.ChannelStatusEnabled, Name: "ua-routed-codex-channel",
+		BaseURL: &baseURL, Models: "gpt-5.6-sol", Group: "pro", Priority: &priority,
+		UARoutingOnly: true,
+	}
+	require.NoError(t, model.DB.Create(routedChannel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "pro", Model: "gpt-5.6-sol", ChannelId: routedChannel.Id, Enabled: true, Priority: &priority,
+	}).Error)
+	model.InitChannelCache()
+
+	setting := operation_setting.GetUserAgentRoutingSetting()
+	originalSetting := *setting
+	setting.Enabled = true
+	setting.UserAgentWhitelist = []string{"Claude", "codex-tui"}
+	setting.ChannelIDs = []int{routedChannel.Id}
+	setting.GroupNames = []string{"pro"}
+	t.Cleanup(func() { *setting = originalSetting })
+
+	const (
+		userID  = 73
+		tokenID = 731
+		rootID  = "01a03910-6f27-7f10-b723-88683446062a"
+	)
+	allowed, allowedRecorder := codexMainRootContext(userID, tokenID, normalChannel.Id, rootID)
+	allowed.Request.Header.Set("User-Agent", "codex-tui/0.149.0")
+	Distribute()(allowed)
+	require.Less(t, allowedRecorder.Code, http.StatusBadRequest)
+	require.False(t, allowed.IsAborted())
+	require.Equal(t, normalChannel.Id, common.GetContextKeyInt(allowed, constant.ContextKeyChannelId))
+	allowedRepeat, allowedRepeatRecorder := codexMainRootContext(userID, tokenID, 0, rootID)
+	allowedRepeat.Request.Header.Set("User-Agent", "codex-tui/0.149.0")
+	Distribute()(allowedRepeat)
+	require.Less(t, allowedRepeatRecorder.Code, http.StatusBadRequest)
+	require.False(t, allowedRepeat.IsAborted())
+	require.Equal(t, normalChannel.Id, common.GetContextKeyInt(allowedRepeat, constant.ContextKeyChannelId))
+	require.True(t, common.GetContextKeyBool(allowedRepeat, constant.ContextKeyCodexRootChannelPinned))
+	allowedAdminInfo := map[string]interface{}{}
+	service.AppendChannelAffinityAdminInfo(allowedRepeat, allowedAdminInfo)
+	require.Contains(t, allowedAdminInfo, "channel_affinity", "allowlisted UA should retain the valid root-affinity star")
+
+	unlisted, unlistedRecorder := codexMainRootContext(userID, tokenID, 0, rootID)
+	unlisted.Request.Header.Set("User-Agent", "multica-agent-sdk/1.0")
+	Distribute()(unlisted)
+	require.Less(t, unlistedRecorder.Code, http.StatusBadRequest)
+	require.False(t, unlisted.IsAborted())
+	require.Equal(t, routedChannel.Id, common.GetContextKeyInt(unlisted, constant.ContextKeyChannelId))
+	require.True(t, common.GetContextKeyBool(unlisted, constant.ContextKeyChannelAffinityUserAgentRouted))
+	require.False(t, common.GetContextKeyBool(unlisted, constant.ContextKeyCodexRootChannelPinned))
+
+	adminInfo := map[string]interface{}{}
+	service.AppendChannelAffinityAdminInfo(unlisted, adminInfo)
+	require.NotContains(t, adminInfo, "channel_affinity", "UA reroute must not show the stale root-affinity star")
 }
 
 func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testing.T) {

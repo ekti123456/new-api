@@ -668,27 +668,28 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	return 0, false
 }
 
-// GetPreferredChannelByUserAgentRouting applies the simple UA split policy.
-// It deliberately runs outside channel affinity: an allowlisted UA or user
-// returns no match so the normal scheduler and legacy affinity can proceed.
-func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usingGroup string) (int, bool) {
+// PrepareUserAgentRoutingMode decides the routing boundary before any stored
+// channel/root affinity is restored. A user or User-Agent allowlist match keeps
+// normal dispatch; every other request in scope is marked UA-only immediately
+// so a forged session fingerprint cannot recover a normal channel binding.
+func PrepareUserAgentRoutingMode(c *gin.Context, usingGroup string) bool {
 	setting := operation_setting.GetUserAgentRoutingSetting()
-	if setting == nil || !setting.Enabled || len(setting.ChannelIDs) == 0 {
-		return 0, false
+	if c == nil || setting == nil || !setting.Enabled || len(setting.ChannelIDs) == 0 {
+		return false
 	}
 	if !userAgentRoutingGroupMatches(c, setting.GroupNames, usingGroup) {
-		return 0, false
+		return false
 	}
 	if common.GetContextKeyBool(c, constant.ContextKeyUserAgentRoutingWhitelist) {
-		return 0, false
+		return false
 	}
 	userAgent := ""
-	if c != nil && c.Request != nil {
+	if c.Request != nil {
 		userAgent = c.Request.UserAgent()
 	}
 	if matchAnyIncludeFold(setting.UserAgentWhitelist, userAgent) {
 		common.SetContextKey(c, constant.ContextKeyUserAgentRoutingSystemWhitelist, true)
-		return 0, false
+		return false
 	}
 	// Mark the request as strict before selecting. This also makes an empty or
 	// fully-disabled pool return 503 instead of falling through to normal
@@ -696,6 +697,21 @@ func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usi
 	c.Set(ginKeyChannelAffinityHardPool, true)
 	c.Set(ginKeyChannelAffinitySkipRetry, true)
 	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, true)
+	return true
+}
+
+// GetPreferredChannelByUserAgentRouting applies the simple UA split policy.
+// It deliberately runs outside channel affinity: an allowlisted UA or user
+// returns no match so the normal scheduler and legacy affinity can proceed.
+func GetPreferredChannelByUserAgentRouting(c *gin.Context, modelName string, usingGroup string) (int, bool) {
+	if !PrepareUserAgentRoutingMode(c, usingGroup) {
+		return 0, false
+	}
+	userAgent := ""
+	if c != nil && c.Request != nil {
+		userAgent = c.Request.UserAgent()
+	}
+	setting := operation_setting.GetUserAgentRoutingSetting()
 	return chooseConfiguredAffinityChannel(c, setting.ChannelIDs, modelName, usingGroup, userAgent, true)
 }
 

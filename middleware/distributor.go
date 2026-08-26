@@ -40,6 +40,11 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+		// Establish the UA routing side before resolving any durable Codex root
+		// binding. Otherwise a client can forge a valid-looking session graph and
+		// recover a normal channel before UA routing gets a chance to run.
+		service.PrepareUserAgentRoutingMode(c, usingGroup)
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
 		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
 		if passiveRootErr != nil {
@@ -47,14 +52,13 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
-		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
 		if rootErr != nil {
 			logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
-		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) {
+		if strictPassiveRoute && !codexRootChannelCrossedUABoundary(c) && (!rootBindingFound || rootChannel == nil) {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return

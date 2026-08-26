@@ -19,6 +19,7 @@ import (
 )
 
 const codexRootChannelRouteContextKey = "codex_root_channel_route_v1"
+const codexRootChannelUABoundaryContextKey = "codex_root_channel_ua_boundary_v1"
 
 type codexRootChannelRoute struct {
 	binding service.CodexRootChannelBinding
@@ -68,7 +69,11 @@ func requestCanUseStoredCodexGroup(c *gin.Context, usingGroup, storedGroup strin
 }
 
 func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName, usingGroup string) (*model.Channel, string, bool, error) {
-	if c == nil || !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" {
+	if c == nil {
+		return nil, "", false, nil
+	}
+	c.Set(codexRootChannelUABoundaryContextKey, false)
+	if !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" {
 		return nil, "", false, nil
 	}
 	if isIndependentCodexInternalRoot(resolution) {
@@ -83,6 +88,15 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 		return nil, "", false, fmt.Errorf("load root channel binding: %w", err)
 	}
 	if !found {
+		return nil, "", false, nil
+	}
+	requestUARoutingOnly := common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted)
+	if binding.UARoutingOnly != requestUARoutingOnly {
+		// UA routing is a hard boundary. A stable/forged Codex session may reuse a
+		// binding only when the current request independently belongs to the same
+		// routing side. Do not mark affinity here: the request will be selected by
+		// its current UA policy and should not display the root-affinity star.
+		c.Set(codexRootChannelUABoundaryContextKey, true)
 		return nil, "", false, nil
 	}
 	if !requestCanUseStoredCodexGroup(c, usingGroup, binding.SelectedGroup) {
@@ -119,6 +133,10 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 		common.SetContextKey(c, constant.ContextKeyAutoGroup, binding.SelectedGroup)
 	}
 	return channel, binding.SelectedGroup, true, nil
+}
+
+func codexRootChannelCrossedUABoundary(c *gin.Context) bool {
+	return c != nil && c.GetBool(codexRootChannelUABoundaryContextKey)
 }
 
 func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionResolution) bool {
