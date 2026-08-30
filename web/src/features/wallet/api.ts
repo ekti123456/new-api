@@ -34,6 +34,8 @@ import type {
   ReferralSummaryResponse,
   ReferralCommissionFilters,
   ReferralCommissionPage,
+  ReferralMemberFilters,
+  ReferralMemberPage,
   BillingHistoryResponse,
   CompleteOrderRequest,
   CreemPaymentRequest,
@@ -218,6 +220,22 @@ export async function getReferralCommissions(
   const res = await api.get(
     `/api/user/referral/commissions?${params.toString()}`
   )
+  return res.data
+}
+
+export async function getReferralMembers(
+  page: number,
+  pageSize: number,
+  filters: ReferralMemberFilters = {}
+): Promise<ApiResponse<ReferralMemberPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (filters.keyword) params.set('keyword', filters.keyword)
+  if (filters.status) params.set('status', filters.status)
+
+  const res = await api.get(`/api/user/referral/members?${params.toString()}`)
   return res.data
 }
 

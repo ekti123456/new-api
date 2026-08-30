@@ -108,6 +108,7 @@ type User struct {
 	ReferralTopUpQuota  int64                      `json:"referral_topup_quota" gorm:"type:bigint;default:0;column:referral_topup_quota"`
 	ReferralQualifiedAt int64                      `json:"referral_qualified_at" gorm:"type:bigint;default:0;column:referral_qualified_at"`
 	ReferralEligible    bool                       `json:"referral_eligible" gorm:"column:referral_eligible"`
+	ReferralLegacy      bool                       `json:"referral_legacy" gorm:"column:referral_legacy"`
 	AffRateBps          int                        `json:"aff_rate_bps" gorm:"-:all"`
 	DeletedAt           gorm.DeletedAt             `gorm:"index"`
 	LinuxDOId           string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`

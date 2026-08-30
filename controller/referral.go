@@ -54,3 +54,23 @@ func GetReferralCommissions(c *gin.Context) {
 	pageInfo.SetItems(commissions)
 	common.ApiSuccess(c, pageInfo)
 }
+
+func GetReferralMembers(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	filter := model.ReferralMemberFilter{
+		Keyword: strings.TrimSpace(c.Query("keyword")),
+		Status:  strings.ToLower(strings.TrimSpace(c.Query("status"))),
+	}
+	if filter.Status != "" && filter.Status != model.ReferralMemberStatusQualified && filter.Status != model.ReferralMemberStatusPending {
+		common.ApiErrorMsg(c, "invalid status")
+		return
+	}
+	members, total, err := model.GetReferralMembers(c.GetInt("id"), pageInfo, filter)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(members)
+	common.ApiSuccess(c, pageInfo)
+}

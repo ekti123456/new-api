@@ -323,6 +323,12 @@ func InitResources() error {
 		}
 	}
 	model.InitOptionMap()
+	if common.IsMasterNode {
+		if err := model.InitializeLegacyReferrals(); err != nil {
+			common.FatalLog("failed to initialize legacy referrals: " + err.Error())
+			return err
+		}
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

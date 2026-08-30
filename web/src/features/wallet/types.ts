@@ -268,6 +268,25 @@ export interface ReferralCommissionFilters {
   end_time?: number
 }
 
+export interface ReferralMemberFilters {
+  keyword?: string
+  status?: 'qualified' | 'pending'
+}
+
+export interface ReferralMember {
+  id: number
+  username: string
+  created_at: number
+  referral_topup_quota: number
+  referral_qualified_at: number
+  legacy: boolean
+}
+
+export interface ReferralMemberPage {
+  items: ReferralMember[]
+  total: number
+}
+
 export interface ReferralCommission {
   id: number
   trade_no: string

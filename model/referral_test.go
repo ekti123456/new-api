@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"math"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -127,6 +129,142 @@ func TestLegacyInviteRelationshipDoesNotQualifyOrEarn(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestInitializeLegacyReferralsBackfillsQualificationWithoutRewards(t *testing.T) {
+	setupReferralTest(t)
+	require.NoError(t, DB.AutoMigrate(&Option{}))
+	require.NoError(t, DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}).Error)
+	t.Cleanup(func() { DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}) })
+
+	inviter := createReferralUser(t, "migration-inviter", 0, false)
+	legacy := createReferralUser(t, "migration-legacy", inviter.Id, false)
+	otherInviter := createReferralUser(t, "migration-other-inviter", 0, false)
+	otherLegacy := createReferralUser(t, "migration-other-legacy", otherInviter.Id, false)
+
+	historical := []TopUp{
+		{UserId: legacy.Id, Amount: 5, TradeNo: "USR1NOlegacy-paid-before-provider", Status: common.TopUpStatusSuccess},
+		{UserId: legacy.Id, Amount: 5, Money: 5, TradeNo: "legacy-paid-stripe", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess},
+		{UserId: legacy.Id, Money: 100, TradeNo: "legacy-subscription", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess},
+		{UserId: legacy.Id, Amount: 100, TradeNo: "legacy-cancelled", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusFailed},
+		{UserId: legacy.Id, Amount: 100, TradeNo: "legacy-balance", PaymentMethod: PaymentMethodBalance, PaymentProvider: PaymentProviderBalance, Status: common.TopUpStatusSuccess},
+		{UserId: legacy.Id, Amount: 100, Money: 1, TradeNo: "ref_ambiguous_without_method", Status: common.TopUpStatusSuccess},
+		{UserId: otherLegacy.Id, Amount: 4, TradeNo: "legacy-other-paid", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusSuccess},
+	}
+	require.NoError(t, DB.Create(&historical).Error)
+	require.NoError(t, DB.Create(&SubscriptionOrder{
+		UserId: legacy.Id, TradeNo: "legacy-subscription", PaymentMethod: PaymentMethodStripe, Status: common.TopUpStatusSuccess,
+	}).Error)
+
+	require.NoError(t, InitializeLegacyReferrals())
+	require.NoError(t, InitializeLegacyReferrals())
+
+	require.NoError(t, DB.First(&legacy, legacy.Id).Error)
+	assert.True(t, legacy.ReferralEligible)
+	assert.True(t, legacy.ReferralLegacy)
+	assert.Equal(t, int64(10*500000), legacy.ReferralTopUpQuota)
+	assert.NotZero(t, legacy.ReferralQualifiedAt)
+	require.NoError(t, DB.First(&otherLegacy, otherLegacy.Id).Error)
+	assert.Equal(t, int64(4*500000), otherLegacy.ReferralTopUpQuota)
+	assert.Zero(t, otherLegacy.ReferralQualifiedAt)
+
+	require.NoError(t, DB.First(&inviter, inviter.Id).Error)
+	assert.Equal(t, 1, inviter.AffQualifiedCount)
+	assert.Zero(t, inviter.AffFrozenQuota)
+	assert.Zero(t, inviter.AffQuota)
+	assert.Zero(t, inviter.AffHistoryQuota)
+	assert.Zero(t, inviter.AffCommissionQuota)
+	var commissionCount int64
+	require.NoError(t, DB.Model(&ReferralCommission{}).Count(&commissionCount).Error)
+	assert.Zero(t, commissionCount)
+
+	summary, err := GetReferralSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.QualifiedCount)
+	assert.Equal(t, 500, summary.RateBps)
+	assert.Equal(t, int64(10*500000), summary.ReferredTopUpQuota)
+	assert.Zero(t, summary.HistoryQuota)
+	assert.Zero(t, summary.CommissionCount)
+}
+
+func TestInitializeLegacyReferralsIsSafeWhenCalledConcurrently(t *testing.T) {
+	setupReferralTest(t)
+	require.NoError(t, DB.AutoMigrate(&Option{}))
+	require.NoError(t, DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}).Error)
+	t.Cleanup(func() { DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}) })
+	inviter := createReferralUser(t, "concurrent-inviter", 0, false)
+	invitee := createReferralUser(t, "concurrent-invitee", inviter.Id, false)
+	topUp := TopUp{UserId: invitee.Id, Amount: 10, TradeNo: "USR-concurrent", PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- InitializeLegacyReferrals()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	var count int64
+	require.NoError(t, DB.Model(&ReferralCommission{}).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, DB.First(&invitee, invitee.Id).Error)
+	assert.True(t, invitee.ReferralLegacy)
+	assert.NotZero(t, invitee.ReferralQualifiedAt)
+}
+
+func TestHistoricalTopUpCreditedQuotaRejectsSaturatedValues(t *testing.T) {
+	setupReferralTest(t)
+
+	assert.Zero(t, historicalTopUpCreditedQuota(&TopUp{
+		Amount:          1,
+		Money:           math.MaxFloat64,
+		PaymentProvider: PaymentProviderStripe,
+	}))
+	assert.Zero(t, historicalTopUpCreditedQuota(&TopUp{
+		Amount:          math.MaxInt64,
+		PaymentProvider: PaymentProviderEpay,
+	}))
+}
+
+func TestLegacyReferralEarnsOnlyOnTopUpsCompletedAfterMigration(t *testing.T) {
+	setupReferralTest(t)
+	require.NoError(t, DB.AutoMigrate(&Option{}))
+	require.NoError(t, DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}).Error)
+	t.Cleanup(func() { DB.Where(commonKeyCol+" = ?", legacyReferralMigrationKey).Delete(&Option{}) })
+
+	inviter := createReferralUser(t, "future-inviter", 0, false)
+	legacy := createReferralUser(t, "future-legacy", inviter.Id, false)
+	historical := TopUp{
+		UserId: legacy.Id, Amount: 5, TradeNo: "future-historical", PaymentMethod: "alipay",
+		PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(&historical).Error)
+	require.NoError(t, InitializeLegacyReferrals())
+	require.NoError(t, DB.First(&legacy, legacy.Id).Error)
+	assert.Equal(t, int64(5*500000), legacy.ReferralTopUpQuota)
+	assert.Zero(t, legacy.ReferralQualifiedAt)
+
+	future := createEpayTopUp(t, legacy.Id, 5, "future-paid")
+	require.NoError(t, RechargeEpay(future.TradeNo, "wechat", "127.0.0.1"))
+
+	var commissions []ReferralCommission
+	require.NoError(t, DB.Find(&commissions).Error)
+	require.Len(t, commissions, 1)
+	assert.Equal(t, future.Id, commissions[0].TopUpId)
+	assert.Equal(t, 5*500000, commissions[0].BaseQuota)
+	assert.Equal(t, 125000, commissions[0].RewardQuota)
+	require.NoError(t, DB.First(&legacy, legacy.Id).Error)
+	assert.Equal(t, int64(10*500000), legacy.ReferralTopUpQuota)
+	require.NoError(t, DB.First(&inviter, inviter.Id).Error)
+	assert.Equal(t, 1, inviter.AffQualifiedCount)
+	assert.Equal(t, 125000, inviter.AffFrozenQuota)
+}
+
 func TestRedemptionDoesNotQualifyInviteeOrEarnCommission(t *testing.T) {
 	setupReferralTest(t)
 	require.NoError(t, DB.AutoMigrate(&Redemption{}))
@@ -244,4 +382,50 @@ func TestGetReferralCommissionsRejectsUnsafeKeywordPattern(t *testing.T) {
 		ReferralCommissionFilter{Keyword: "a%%%"},
 	)
 	require.Error(t, err)
+}
+
+func TestGetReferralMembersFiltersPaginatesAndIsolatesInviters(t *testing.T) {
+	setupReferralTest(t)
+	inviter := createReferralUser(t, "member-inviter", 0, false)
+	legacyQualified := createReferralUser(t, "alice-legacy", inviter.Id, true)
+	pending := createReferralUser(t, "alice-pending", inviter.Id, true)
+	currentQualified := createReferralUser(t, "bob-current", inviter.Id, true)
+	otherInviter := createReferralUser(t, "member-other-inviter", 0, false)
+	otherMember := createReferralUser(t, "alice-other", otherInviter.Id, true)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", legacyQualified.Id).Updates(map[string]interface{}{
+		"referral_legacy":       true,
+		"referral_topup_quota":  int64(12 * 500000),
+		"referral_qualified_at": int64(100),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", pending.Id).Update("referral_topup_quota", int64(5*500000)).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", currentQualified.Id).Updates(map[string]interface{}{
+		"referral_topup_quota":  int64(10 * 500000),
+		"referral_qualified_at": int64(200),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", otherMember.Id).Updates(map[string]interface{}{
+		"referral_legacy":       true,
+		"referral_topup_quota":  int64(20 * 500000),
+		"referral_qualified_at": int64(300),
+	}).Error)
+
+	members, total, err := GetReferralMembers(inviter.Id, &common.PageInfo{Page: 1, PageSize: 1}, ReferralMemberFilter{
+		Keyword: "alice",
+		Status:  ReferralMemberStatusQualified,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, members, 1)
+	assert.Equal(t, legacyQualified.Id, members[0].Id)
+	assert.Equal(t, "alice-legacy", members[0].Username)
+	assert.Equal(t, int64(12*500000), members[0].ReferralTopUpQuota)
+	assert.Equal(t, int64(100), members[0].ReferralQualifiedAt)
+	assert.True(t, members[0].Legacy)
+
+	members, total, err = GetReferralMembers(inviter.Id, &common.PageInfo{Page: 1, PageSize: 10}, ReferralMemberFilter{Status: ReferralMemberStatusPending})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, members, 1)
+	assert.Equal(t, pending.Id, members[0].Id)
+	assert.False(t, members[0].Legacy)
 }

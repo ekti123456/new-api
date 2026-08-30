@@ -101,6 +101,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/passkey", middleware.DisableCache(), controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.GET("/referral/summary", controller.GetReferralSummary)
+				selfRoute.GET("/referral/members", controller.GetReferralMembers)
 				selfRoute.GET("/referral/commissions", controller.GetReferralCommissions)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)

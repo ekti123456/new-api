@@ -20,16 +20,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
-import { getReferralCommissions } from '@/features/wallet/api'
+import {
+  getReferralCommissions,
+  getReferralMembers,
+} from '@/features/wallet/api'
 import { TransferDialog } from '@/features/wallet/components/dialogs/transfer-dialog'
 import { useAffiliate, useTopupInfo } from '@/features/wallet/hooks'
 import type {
   PaymentMethod,
   ReferralCommission,
   ReferralCommissionFilters,
+  ReferralMember,
+  ReferralMemberFilters,
 } from '@/features/wallet/types'
 
 import { ReferralCommissionDetails } from './components/referral-commission-details'
+import { ReferralMembers } from './components/referral-members'
 import { ReferralOverview } from './components/referral-overview'
 
 const DEFAULT_PAGE_SIZE = 10
@@ -45,8 +51,16 @@ export function ReferralPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [filters, setFilters] = useState<ReferralCommissionFilters>({})
   const [recordsLoading, setRecordsLoading] = useState(true)
+  const [members, setMembers] = useState<ReferralMember[]>([])
+  const [memberTotal, setMemberTotal] = useState(0)
+  const [memberPage, setMemberPage] = useState(1)
+  const [memberPageSize, setMemberPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [memberFilters, setMemberFilters] = useState<ReferralMemberFilters>({})
+  const [membersLoading, setMembersLoading] = useState(true)
+  const [membersError, setMembersError] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
   const requestIdRef = useRef(0)
+  const memberRequestIdRef = useRef(0)
   const paymentMethods = useMemo(() => {
     const methods = new Map<string, PaymentMethod>()
     for (const method of topupInfo?.pay_methods ?? []) {
@@ -95,6 +109,37 @@ export function ReferralPage() {
     fetchRecords()
   }, [fetchRecords])
 
+  const fetchMembers = useCallback(async () => {
+    const requestId = ++memberRequestIdRef.current
+    try {
+      setMembersLoading(true)
+      const response = await getReferralMembers(
+        memberPage,
+        memberPageSize,
+        memberFilters
+      )
+      if (
+        requestId === memberRequestIdRef.current &&
+        response.success &&
+        response.data
+      ) {
+        setMembers(response.data.items ?? [])
+        setMemberTotal(response.data.total ?? 0)
+        setMembersError(false)
+      } else if (requestId === memberRequestIdRef.current) {
+        setMembersError(true)
+      }
+    } catch {
+      if (requestId === memberRequestIdRef.current) setMembersError(true)
+    } finally {
+      if (requestId === memberRequestIdRef.current) setMembersLoading(false)
+    }
+  }, [memberFilters, memberPage, memberPageSize])
+
+  useEffect(() => {
+    fetchMembers()
+  }, [fetchMembers])
+
   const handleTransfer = async (quota: number) => {
     const success = await transferQuota(quota)
     if (success) await fetchRecords()
@@ -109,6 +154,16 @@ export function ReferralPage() {
   const handlePageSizeChange = (nextPageSize: number) => {
     setPage(1)
     setPageSize(nextPageSize)
+  }
+
+  const handleMemberSearch = (nextFilters: ReferralMemberFilters) => {
+    setMemberPage(1)
+    setMemberFilters(nextFilters)
+  }
+
+  const handleMemberPageSizeChange = (nextPageSize: number) => {
+    setMemberPage(1)
+    setMemberPageSize(nextPageSize)
   }
 
   return (
@@ -126,6 +181,20 @@ export function ReferralPage() {
               loading={loading}
               summary={summary}
               onTransfer={() => setTransferOpen(true)}
+            />
+
+            <ReferralMembers
+              members={members}
+              total={memberTotal}
+              page={memberPage}
+              pageSize={memberPageSize}
+              qualifiedTopupQuota={summary?.qualified_topup_quota ?? 0}
+              loading={membersLoading}
+              error={membersError}
+              onSearch={handleMemberSearch}
+              onRetry={fetchMembers}
+              onPageChange={setMemberPage}
+              onPageSizeChange={handleMemberPageSizeChange}
             />
 
             <ReferralCommissionDetails

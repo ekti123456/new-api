@@ -296,7 +296,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
-	if key == retiredThemeOptionKey || key == "QuotaForInviter" || key == "QuotaForInvitee" {
+	if key == retiredThemeOptionKey || key == legacyReferralMigrationKey || key == "QuotaForInviter" || key == "QuotaForInvitee" {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()

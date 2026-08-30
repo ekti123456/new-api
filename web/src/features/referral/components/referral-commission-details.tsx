@@ -380,7 +380,9 @@ export function ReferralCommissionDetails(
         <ReceiptText className='mb-2 size-8 opacity-40' />
         <p className='text-sm font-medium'>{t('No commission records')}</p>
         <p className='mt-1 text-xs'>
-          {t('New commission records will appear here.')}
+          {t(
+            "Past commissions are not backfilled. New commission records will appear after a member's next successful online top-up."
+          )}
         </p>
       </div>
     )
@@ -399,7 +401,7 @@ export function ReferralCommissionDetails(
                 <div className='min-w-0'>
                   <p className='text-muted-foreground text-xs'>{t('Member')}</p>
                   <p className='truncate font-medium'>
-                    {record.invitee_name || record.invitee_id}
+                    {record.invitee_name || t('Member unavailable')}
                   </p>
                 </div>
                 <StatusBadge
@@ -471,7 +473,9 @@ export function ReferralCommissionDetails(
             <ReceiptText className='mb-2 size-8 opacity-40' />
             <p className='text-sm font-medium'>{t('No commission records')}</p>
             <p className='mt-1 text-xs'>
-              {t('New commission records will appear here.')}
+              {t(
+                "Past commissions are not backfilled. New commission records will appear after a member's next successful online top-up."
+              )}
             </p>
           </div>
         </TableCell>
@@ -484,8 +488,11 @@ export function ReferralCommissionDetails(
       return (
         <TableRow key={record.id}>
           <TableCell className='max-w-48 font-medium'>
-            <span className='block truncate' title={record.invitee_name}>
-              {record.invitee_name || record.invitee_id}
+            <span
+              className='block truncate'
+              title={record.invitee_name || t('Member unavailable')}
+            >
+              {record.invitee_name || t('Member unavailable')}
             </span>
           </TableCell>
           <TableCell>
@@ -531,7 +538,11 @@ export function ReferralCommissionDetails(
   }
 
   return (
-    <Card data-card-hover='false' className='gap-0 py-0'>
+    <Card
+      data-card-hover='false'
+      className='gap-0 py-0'
+      data-referral-commissions
+    >
       <CardHeader className='gap-1 border-b p-4 sm:p-5'>
         <CardTitle className='text-base font-semibold'>
           {t('Commission details')}

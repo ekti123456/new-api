@@ -110,7 +110,7 @@ export function ReferralOverview(props: ReferralOverviewProps) {
   }> = [
     {
       description: t(
-        'Commission is calculated from each successful online top-up credited to an invited member.'
+        'After an invitation joins this program, commission is calculated from each subsequent successful online top-up.'
       ),
       icon: Calculator,
       title: t('Calculation basis'),
@@ -135,7 +135,7 @@ export function ReferralOverview(props: ReferralOverviewProps) {
     },
     {
       description: t(
-        'Only invitations created after the new referral commission program was enabled count.'
+        'Traceable historical invitations are included. Their past successful online top-ups count toward qualification, but past commissions are not backfilled.'
       ),
       icon: CalendarDays,
       title: t('Counting scope'),

@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -54,6 +55,25 @@ type ReferralCommissionFilter struct {
 	EndTime       int64
 }
 
+const (
+	ReferralMemberStatusQualified = "qualified"
+	ReferralMemberStatusPending   = "pending"
+)
+
+type ReferralMember struct {
+	Id                  int    `json:"id" gorm:"column:id"`
+	Username            string `json:"username" gorm:"column:username"`
+	CreatedAt           int64  `json:"created_at" gorm:"column:created_at"`
+	ReferralTopUpQuota  int64  `json:"referral_topup_quota" gorm:"column:referral_topup_quota"`
+	ReferralQualifiedAt int64  `json:"referral_qualified_at" gorm:"column:referral_qualified_at"`
+	Legacy              bool   `json:"legacy" gorm:"column:referral_legacy"`
+}
+
+type ReferralMemberFilter struct {
+	Keyword string
+	Status  string
+}
+
 // applyReferralCommissionWithTx records a commission in the same transaction
 // that credits the top-up. Redemption codes and other balance adjustments do
 // not call this function and therefore never contribute to referral totals.
@@ -66,9 +86,6 @@ func applyReferralCommissionWithTx(tx *gorm.DB, topUp *TopUp, creditedQuota int)
 	if err := lockForUpdate(tx).First(&invitee, topUp.UserId).Error; err != nil {
 		return err
 	}
-	// Existing invite relationships predate this commission program and are
-	// intentionally excluded. Only registrations marked eligible at creation
-	// can contribute qualified users or commissions.
 	if !invitee.ReferralEligible || invitee.InviterId <= 0 || invitee.InviterId == invitee.Id {
 		return nil
 	}
@@ -180,15 +197,22 @@ func GetReferralSummary(userId int) (*ReferralSummary, error) {
 		return nil, err
 	}
 	var commissionAggregate struct {
-		HistoryQuota       int64
-		ReferredTopUpQuota int64
-		CommissionCount    int64
+		HistoryQuota    int64
+		CommissionCount int64
 	}
 	if err := DB.Model(&ReferralCommission{}).Where("inviter_id = ?", userId).
 		Select(`COALESCE(SUM(reward_quota), 0) AS history_quota,
-			COALESCE(SUM(base_quota), 0) AS referred_top_up_quota,
 			COUNT(*) AS commission_count`).
 		Scan(&commissionAggregate).Error; err != nil {
+		return nil, err
+	}
+	var memberAggregate struct {
+		ReferredTopUpQuota int64
+	}
+	if err := DB.Model(&User{}).
+		Where("inviter_id = ? AND referral_eligible = ?", userId, true).
+		Select("COALESCE(SUM(referral_topup_quota), 0) AS referred_top_up_quota").
+		Scan(&memberAggregate).Error; err != nil {
 		return nil, err
 	}
 	rateBps := ReferralRateBps(user.AffQualifiedCount)
@@ -212,9 +236,49 @@ func GetReferralSummary(userId int) (*ReferralSummary, error) {
 		FrozenQuota:         user.AffFrozenQuota,
 		AvailableQuota:      user.AffQuota,
 		HistoryQuota:        common.QuotaFromDecimal(decimal.NewFromInt(commissionAggregate.HistoryQuota)),
-		ReferredTopUpQuota:  commissionAggregate.ReferredTopUpQuota,
+		ReferredTopUpQuota:  memberAggregate.ReferredTopUpQuota,
 		CommissionCount:     commissionAggregate.CommissionCount,
 	}, nil
+}
+
+func GetReferralMembers(userId int, pageInfo *common.PageInfo, filter ReferralMemberFilter) ([]*ReferralMember, int64, error) {
+	if userId <= 0 {
+		return nil, 0, errors.New("invalid user id")
+	}
+	var members []*ReferralMember
+	var total int64
+	query := DB.Model(&User{}).
+		Where("inviter_id = ? AND referral_eligible = ?", userId, true)
+	if filter.Keyword != "" {
+		pattern, err := sanitizeLikePattern(filter.Keyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !strings.Contains(pattern, "%") && len([]rune(pattern)) >= 2 {
+			pattern = "%" + pattern + "%"
+		}
+		query = query.Where("username LIKE ? ESCAPE '!'", pattern)
+	}
+	switch filter.Status {
+	case ReferralMemberStatusQualified:
+		query = query.Where("referral_qualified_at > 0")
+	case ReferralMemberStatusPending:
+		query = query.Where("referral_qualified_at = 0")
+	case "":
+	default:
+		return nil, 0, errors.New("invalid referral member status")
+	}
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := query.
+		Select("id, username, created_at, referral_topup_quota, referral_qualified_at, referral_legacy").
+		Order("created_at DESC").Order("id DESC").
+		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).
+		Scan(&members).Error; err != nil {
+		return nil, 0, err
+	}
+	return members, total, nil
 }
 
 func GetReferralCommissions(userId int, pageInfo *common.PageInfo, filter ReferralCommissionFilter) ([]*ReferralCommission, int64, error) {
