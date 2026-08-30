@@ -10,7 +10,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -77,41 +76,48 @@ func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id                 int                        `json:"id"`
-	Username           string                     `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password           string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword   string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName        string                     `json:"display_name" gorm:"index" validate:"max=20"`
-	Role               int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status             int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email              string                     `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId           string                     `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId          string                     `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId             string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId           string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId         string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode   string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
-	AccessToken        *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota              int                        `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota          int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount       int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group              string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
-	ConcurrencyLimit   *int                       `json:"concurrency_limit" gorm:"column:concurrency_limit;default:null"`
-	UARoutingWhitelist *bool                      `json:"ua_routing_whitelist" gorm:"column:ua_routing_whitelist;default:null"`
-	AffCode            string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount           int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota           int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota    int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId          int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt          gorm.DeletedAt             `gorm:"index"`
-	LinuxDOId          string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting            string                     `json:"setting" gorm:"type:text;column:setting"`
-	Remark             string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer     string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt          int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	LastLoginAt        int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
-	AuthVersion        int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
-	AdminPermissions   map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	Id                  int                        `json:"id"`
+	Username            string                     `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password            string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	OriginalPassword    string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName         string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	Role                int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status              int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email               string                     `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId            string                     `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId           string                     `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId              string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId            string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId          string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode    string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	AccessToken         *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota               int                        `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota           int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount        int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group               string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	ConcurrencyLimit    *int                       `json:"concurrency_limit" gorm:"column:concurrency_limit;default:null"`
+	UARoutingWhitelist  *bool                      `json:"ua_routing_whitelist" gorm:"column:ua_routing_whitelist;default:null"`
+	AffCode             string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount            int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"` // registered invitees
+	AffQualifiedCount   int                        `json:"aff_qualified_count" gorm:"type:int;default:0;column:aff_qualified_count"`
+	AffQuota            int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"` // 邀请剩余额度
+	AffFrozenQuota      int                        `json:"aff_frozen_quota" gorm:"type:int;default:0;column:aff_frozen_quota"`
+	AffHistoryQuota     int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	AffCommissionQuota  int                        `json:"aff_commission_quota" gorm:"type:int;default:0;column:aff_commission_quota"`
+	InviterId           int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	ReferralTopUpQuota  int64                      `json:"referral_topup_quota" gorm:"type:bigint;default:0;column:referral_topup_quota"`
+	ReferralQualifiedAt int64                      `json:"referral_qualified_at" gorm:"type:bigint;default:0;column:referral_qualified_at"`
+	ReferralEligible    bool                       `json:"referral_eligible" gorm:"column:referral_eligible"`
+	AffRateBps          int                        `json:"aff_rate_bps" gorm:"-:all"`
+	DeletedAt           gorm.DeletedAt             `gorm:"index"`
+	LinuxDOId           string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting             string                     `json:"setting" gorm:"type:text;column:setting"`
+	Remark              string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer      string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	CreatedAt           int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	LastLoginAt         int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	AuthVersion         int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
+	AdminPermissions    map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -206,9 +212,10 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 个人中心区域 - 所有用户都可以访问
 	defaultConfig["personal"] = map[string]interface{}{
-		"enabled":  true,
-		"topup":    true,
-		"personal": true,
+		"enabled":   true,
+		"topup":     true,
+		"promotion": true,
+		"personal":  true,
 	}
 
 	// 管理员区域 - 根据角色决定
@@ -498,15 +505,35 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+func recordInvitation(inviterId int) error {
+	return DB.Model(&User{}).Where("id = ?", inviterId).
+		UpdateColumn("aff_count", gorm.Expr("aff_count + ?", 1)).Error
+}
+
+func ReferralRateBps(qualifiedCount int) int {
+	base := common.ReferralBaseRateBps
+	maximum := common.ReferralMaxRateBps
+	if base < 0 {
+		base = 0
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	if maximum < 0 {
+		maximum = 0
+	}
+	usersPerTier := common.ReferralUsersPerTier
+	if usersPerTier < 1 {
+		usersPerTier = 1
+	}
+	rate := base + qualifiedCount/usersPerTier*100
+	if rate > maximum {
+		return maximum
+	}
+	return rate
+}
+
+func PopulateReferralRates(users []*User) {
+	for _, user := range users {
+		user.AffRateBps = ReferralRateBps(user.AffQualifiedCount)
+	}
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -531,6 +558,9 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	// 再次检查用户的AffQuota是否足够
 	if user.AffQuota < quota {
 		return errors.New("邀请额度不足！")
+	}
+	if user.Quota > common.MaxQuota-quota {
+		return errors.New("转移后额度超出系统支持范围！")
 	}
 
 	// 更新用户额度
@@ -605,6 +635,8 @@ func (user *User) Insert(inviterId int) error {
 			}
 			user.Quota = common.QuotaForNewUser
 			user.AffCode = common.GetRandomString(4)
+			user.InviterId = inviterId
+			user.ReferralEligible = inviterId > 0
 
 			// 初始化用户设置，包括默认的边栏配置
 			if user.Setting == "" {
@@ -642,16 +674,8 @@ func (user *User) finishInsert(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
-		}
+	if inviterId != 0 {
+		_ = recordInvitation(inviterId)
 	}
 }
 
@@ -669,6 +693,8 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 		user.Quota = common.QuotaForNewUser
 		user.AffCode = common.GetRandomString(4)
+		user.InviterId = inviterId
+		user.ReferralEligible = inviterId > 0
 
 		// 初始化用户设置
 		if user.Setting == "" {
@@ -699,15 +725,8 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
-		}
+	if inviterId != 0 {
+		_ = recordInvitation(inviterId)
 	}
 }
 

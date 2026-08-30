@@ -61,8 +61,9 @@ const BILLING_SECTIONS = [
         defaultValues={{
           QuotaForNewUser: settings.QuotaForNewUser,
           PreConsumedQuota: settings.PreConsumedQuota,
-          QuotaForInviter: settings.QuotaForInviter,
-          QuotaForInvitee: settings.QuotaForInvitee,
+          ReferralBaseRate: settings.ReferralBaseRate,
+          ReferralUsersPerTier: settings.ReferralUsersPerTier,
+          ReferralMaxRate: settings.ReferralMaxRate,
           TopUpLink: settings.TopUpLink,
           general_setting: {
             docs_link: settings['general_setting.docs_link'],

@@ -223,8 +223,9 @@ export function useUsersColumns(): ColumnDef<User>[] {
       header: t('Invite Info'),
       cell: ({ row }) => {
         const user = row.original
-        const affCount = user.aff_count || 0
-        const affHistoryQuota = user.aff_history_quota || 0
+        const affCount = user.aff_qualified_count || 0
+        const commissionQuota = user.aff_commission_quota || 0
+        const affRateBps = user.aff_rate_bps ?? 0
         const inviterId = user.inviter_id || 0
 
         return (
@@ -241,14 +242,16 @@ export function useUsersColumns(): ColumnDef<User>[] {
                 }
               />
               <TooltipContent>
-                <p className='text-xs'>{t('Number of users invited')}</p>
+                <p className='text-xs'>
+                  {t('Number of qualified users invited')}
+                </p>
               </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <StatusBadge
-                    label={`${t('Revenue')}: ${formatQuota(affHistoryQuota)}`}
+                    label={`${t('Revenue')}: ${formatQuota(commissionQuota)}`}
                     variant='neutral'
                     copyable={false}
                     className='cursor-help'
@@ -257,6 +260,23 @@ export function useUsersColumns(): ColumnDef<User>[] {
               />
               <TooltipContent>
                 <p className='text-xs'>{t('Total invitation revenue')}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <StatusBadge
+                    label={`${t('Referral rate')}: ${(affRateBps / 100).toFixed(0)}%`}
+                    variant='neutral'
+                    copyable={false}
+                    className='cursor-help'
+                  />
+                }
+              />
+              <TooltipContent>
+                <p className='text-xs'>
+                  {t('Current referral commission rate')}
+                </p>
               </TooltipContent>
             </Tooltip>
             {inviterId > 0 && (

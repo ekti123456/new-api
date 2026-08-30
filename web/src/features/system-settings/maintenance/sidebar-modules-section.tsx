@@ -124,6 +124,10 @@ export function SidebarModulesSection({
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),
       },
+      promotion: {
+        title: t('Promotion'),
+        description: t('Referral rewards and invitation details'),
+      },
       personal: {
         title: t('Profile'),
         description: t('Personal settings and profile management.'),

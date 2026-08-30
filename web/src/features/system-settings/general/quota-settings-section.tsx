@@ -50,19 +50,25 @@ import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
-const quotaSchema = z.object({
-  QuotaForNewUser: z.coerce.number().min(0),
-  PreConsumedQuota: z.coerce.number().min(0),
-  QuotaForInviter: z.coerce.number().min(0),
-  QuotaForInvitee: z.coerce.number().min(0),
-  TopUpLink: z.string(),
-  general_setting: z.object({
-    docs_link: z.string(),
-  }),
-  quota_setting: z.object({
-    enable_free_model_pre_consume: z.boolean(),
-  }),
-})
+const quotaSchema = z
+  .object({
+    QuotaForNewUser: z.coerce.number().min(0),
+    PreConsumedQuota: z.coerce.number().min(0),
+    ReferralBaseRate: z.coerce.number().int().min(0).max(100),
+    ReferralUsersPerTier: z.coerce.number().int().min(1),
+    ReferralMaxRate: z.coerce.number().int().min(0).max(100),
+    TopUpLink: z.string(),
+    general_setting: z.object({
+      docs_link: z.string(),
+    }),
+    quota_setting: z.object({
+      enable_free_model_pre_consume: z.boolean(),
+    }),
+  })
+  .refine((values) => values.ReferralBaseRate <= values.ReferralMaxRate, {
+    message: 'Maximum referral rate must not be lower than the base rate',
+    path: ['ReferralMaxRate'],
+  })
 
 type QuotaFormValues = z.infer<typeof quotaSchema>
 type QuotaInputValue = number | ''
@@ -184,10 +190,58 @@ export function QuotaSettingsSection({
 
             <FormField
               control={form.control}
-              name='QuotaForInviter'
+              name='ReferralBaseRate'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('Inviter Reward')}</FormLabel>
+                  <FormLabel>{t('Base referral rate')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Commission rate before tier bonuses, in percent.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='ReferralUsersPerTier'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Qualified users per tier')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Every this many qualified users adds 1% commission.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='ReferralMaxRate'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Maximum referral rate')}</FormLabel>
                   <FormControl>
                     <Input
                       type='number'
@@ -200,37 +254,8 @@ export function QuotaSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'Quota given to users who invite others ({{formattedQuota}})',
-                      {
-                        formattedQuota: formatQuotaInputValue(field.value),
-                      }
+                      'Maximum commission rate after tier bonuses, in percent.'
                     )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='QuotaForInvitee'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Invitee Reward')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      type='number'
-                      value={field.value ?? ''}
-                      onChange={handleNumberChange(field.onChange)}
-                      name={field.name}
-                      onBlur={field.onBlur}
-                      ref={field.ref}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Quota given to invited users ({{formattedQuota}})', {
-                      formattedQuota: formatQuotaInputValue(field.value),
-                    })}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

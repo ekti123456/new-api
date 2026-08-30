@@ -41,6 +41,7 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
+export type ReferralSummaryResponse = ApiResponse<ReferralSummary>
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
 export type WaffoPaymentResponse = ApiResponse<
   { payment_url?: string } | string
@@ -242,6 +243,39 @@ export interface UserWalletData {
   aff_count: number
   /** User group */
   group: string
+}
+
+export interface ReferralSummary {
+  aff_code: string
+  invited_count: number
+  qualified_count: number
+  rate_bps: number
+  users_per_tier: number
+  next_tier_remaining: number
+  max_rate_bps: number
+  qualified_topup_quota: number
+  frozen_quota: number
+  available_quota: number
+  history_quota: number
+}
+
+export interface ReferralCommission {
+  id: number
+  trade_no: string
+  invitee_id: number
+  invitee_name: string
+  payment_method: string
+  base_quota: number
+  rate_bps: number
+  reward_quota: number
+  status: 'frozen' | 'available'
+  available_at: number
+  create_time: number
+}
+
+export interface ReferralCommissionPage {
+  items: ReferralCommission[]
+  total: number
 }
 
 /**

@@ -27,10 +27,10 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatQuota } from '@/lib/format'
 
-import type { UserWalletData } from '../types'
+import type { ReferralSummary } from '../types'
 
 interface AffiliateRewardsCardProps {
-  user: UserWalletData | null
+  summary: ReferralSummary | null
   affiliateLink: string
   onTransfer: () => void
   complianceConfirmed?: boolean
@@ -38,7 +38,7 @@ interface AffiliateRewardsCardProps {
 }
 
 export function AffiliateRewardsCard({
-  user,
+  summary,
   affiliateLink,
   onTransfer,
   complianceConfirmed = true,
@@ -60,7 +60,7 @@ export function AffiliateRewardsCard({
     )
   }
 
-  const hasRewards = (user?.aff_quota ?? 0) > 0
+  const hasRewards = (summary?.available_quota ?? 0) > 0
 
   return (
     <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -83,9 +83,9 @@ export function AffiliateRewardsCard({
 
         <div className='grid grid-cols-3 gap-1.5 text-center'>
           {[
-            [t('Pending'), formatQuota(user?.aff_quota ?? 0)],
-            [t('Total Earned'), formatQuota(user?.aff_history_quota ?? 0)],
-            [t('Invites'), String(user?.aff_count ?? 0)],
+            [t('Pending'), formatQuota(summary?.frozen_quota ?? 0)],
+            [t('Total Earned'), formatQuota(summary?.history_quota ?? 0)],
+            [t('Invites'), String(summary?.qualified_count ?? 0)],
           ].map(([label, value]) => (
             <div key={label}>
               <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>

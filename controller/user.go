@@ -331,6 +331,7 @@ func GetAllUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.PopulateReferralRates(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -361,6 +362,7 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.PopulateReferralRates(users)
 
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
@@ -402,6 +404,7 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	user.AffRateBps = model.ReferralRateBps(user.AffQualifiedCount)
 	response := adminUserResponse{User: user}
 	if c.Query("include_runtime") == "true" {
 		currentConcurrency, concurrencyErr := middleware.GetUserCurrentConcurrency(c.Request.Context(), user.Id)
@@ -489,6 +492,10 @@ func TransferAffQuota(c *gin.Context) {
 	}
 
 	id := c.GetInt("id")
+	if err := model.ReleaseMaturedReferralCommissions(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	user, err := model.GetUserById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
@@ -564,31 +571,34 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 	permissions := calculateUserPermissions(user.Role)
 	permissions["admin_permissions"] = authz.Capabilities(user.Id, user.Role)
 	return map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
-		"group":             user.Group,
-		"quota":             user.Quota,
-		"used_quota":        user.UsedQuota,
-		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
-		"linux_do_id":       user.LinuxDOId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,
+		"id":                  user.Id,
+		"username":            user.Username,
+		"display_name":        user.DisplayName,
+		"role":                user.Role,
+		"status":              user.Status,
+		"email":               user.Email,
+		"github_id":           user.GitHubId,
+		"discord_id":          user.DiscordId,
+		"oidc_id":             user.OidcId,
+		"wechat_id":           user.WeChatId,
+		"telegram_id":         user.TelegramId,
+		"group":               user.Group,
+		"quota":               user.Quota,
+		"used_quota":          user.UsedQuota,
+		"request_count":       user.RequestCount,
+		"aff_code":            user.AffCode,
+		"aff_count":           user.AffQualifiedCount,
+		"aff_qualified_count": user.AffQualifiedCount,
+		"aff_quota":           user.AffQuota,
+		"aff_frozen_quota":    user.AffFrozenQuota,
+		"aff_history_quota":   user.AffHistoryQuota,
+		"aff_rate_bps":        model.ReferralRateBps(user.AffQualifiedCount),
+		"inviter_id":          user.InviterId,
+		"linux_do_id":         user.LinuxDOId,
+		"setting":             user.Setting,
+		"stripe_customer":     user.StripeCustomer,
+		"sidebar_modules":     userSetting.SidebarModules, // 正确提取sidebar_modules字段
+		"permissions":         permissions,
 	}
 }
 

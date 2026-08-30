@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -136,8 +137,9 @@ func InitOptionMap() {
 	common.OptionMap["TurnstileSiteKey"] = ""
 	common.OptionMap["TurnstileSecretKey"] = ""
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
-	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
-	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	common.OptionMap["ReferralBaseRate"] = strconv.Itoa(common.ReferralBaseRateBps / 100)
+	common.OptionMap["ReferralUsersPerTier"] = strconv.Itoa(common.ReferralUsersPerTier)
+	common.OptionMap["ReferralMaxRate"] = strconv.Itoa(common.ReferralMaxRateBps / 100)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
@@ -221,6 +223,18 @@ func validateOptionValue(key string, value string) error {
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
+	if key == "ReferralBaseRate" || key == "ReferralMaxRate" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 || parsed > 100 {
+			return fmt.Errorf("%s must be between 0 and 100 percent", key)
+		}
+	}
+	if key == "ReferralUsersPerTier" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 1000000 {
+			return fmt.Errorf("ReferralUsersPerTier must be between 1 and 1000000")
+		}
+	}
 	return nil
 }
 
@@ -282,7 +296,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
-	if key == retiredThemeOptionKey {
+	if key == retiredThemeOptionKey || key == "QuotaForInviter" || key == "QuotaForInvitee" {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()
@@ -550,10 +564,14 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
-	case "QuotaForInviter":
-		common.QuotaForInviter, _ = strconv.Atoi(value)
-	case "QuotaForInvitee":
-		common.QuotaForInvitee, _ = strconv.Atoi(value)
+	case "ReferralBaseRate":
+		parsed, _ := strconv.Atoi(value)
+		common.ReferralBaseRateBps = parsed * 100
+	case "ReferralUsersPerTier":
+		common.ReferralUsersPerTier, _ = strconv.Atoi(value)
+	case "ReferralMaxRate":
+		parsed, _ := strconv.Atoi(value)
+		common.ReferralMaxRateBps = parsed * 100
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":

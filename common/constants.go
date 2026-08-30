@@ -126,8 +126,16 @@ var TelegramBotToken = ""
 var TelegramBotName = ""
 
 var QuotaForNewUser = 0
-var QuotaForInviter = 0
-var QuotaForInvitee = 0
+
+// Referral commissions use basis points so settlement never depends on
+// floating-point percentage arithmetic. 500 = 5%, 1000 = 10%.
+var ReferralBaseRateBps = 500
+var ReferralUsersPerTier = 5
+var ReferralMaxRateBps = 1000
+
+const ReferralQualifiedTopUpUnits = 10
+const ReferralFreezeHours = 24
+
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
