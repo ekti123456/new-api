@@ -32,6 +32,7 @@ import type {
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   ReferralSummaryResponse,
+  ReferralCommissionFilters,
   ReferralCommissionPage,
   BillingHistoryResponse,
   CompleteOrderRequest,
@@ -198,10 +199,24 @@ export async function getReferralSummary(): Promise<ReferralSummaryResponse> {
 
 export async function getReferralCommissions(
   page: number,
-  pageSize: number
+  pageSize: number,
+  filters: ReferralCommissionFilters = {}
 ): Promise<ApiResponse<ReferralCommissionPage>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (filters.keyword) params.set('keyword', filters.keyword)
+  if (filters.payment_method) {
+    params.set('payment_method', filters.payment_method)
+  }
+  if (filters.start_time) {
+    params.set('start_time', filters.start_time.toString())
+  }
+  if (filters.end_time) params.set('end_time', filters.end_time.toString())
+
   const res = await api.get(
-    `/api/user/referral/commissions?p=${page}&page_size=${pageSize}`
+    `/api/user/referral/commissions?${params.toString()}`
   )
   return res.data
 }

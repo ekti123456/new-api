@@ -164,3 +164,84 @@ func TestReferralRateUsesNewTierOnQualifyingTopUp(t *testing.T) {
 	assert.Equal(t, 600, commission.RateBps)
 	assert.Equal(t, 300000, commission.RewardQuota)
 }
+
+func TestReferralSummaryAggregatesReferredTopUpsAndCommissionCount(t *testing.T) {
+	setupReferralTest(t)
+	inviter := createReferralUser(t, "summary-inviter", 0, false)
+	invitee := createReferralUser(t, "summary-invitee", inviter.Id, true)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("aff_count", 9).Error)
+
+	first := createEpayTopUp(t, invitee.Id, 4, "summary-first")
+	require.NoError(t, RechargeEpay(first.TradeNo, "alipay", "127.0.0.1"))
+	second := createEpayTopUp(t, invitee.Id, 7, "summary-second")
+	require.NoError(t, RechargeEpay(second.TradeNo, "wechat", "127.0.0.1"))
+
+	summary, err := GetReferralSummary(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(11*500000), summary.ReferredTopUpQuota)
+	assert.Equal(t, int64(2), summary.CommissionCount)
+	assert.Equal(t, 275000, summary.HistoryQuota)
+	assert.Equal(t, 1, summary.InvitedCount)
+	assert.Equal(t, 1, summary.QualifiedCount)
+}
+
+func TestGetReferralCommissionsFiltersAndPaginates(t *testing.T) {
+	setupReferralTest(t)
+	inviter := createReferralUser(t, "filter-inviter", 0, false)
+	alice := createReferralUser(t, "alice_member", inviter.Id, true)
+	bob := createReferralUser(t, "bob-member", inviter.Id, true)
+	otherInviter := createReferralUser(t, "other-inviter", 0, false)
+	otherInvitee := createReferralUser(t, "alice_member_other", otherInviter.Id, true)
+
+	topUps := []TopUp{
+		{UserId: alice.Id, TradeNo: "filter-alice-alipay", PaymentMethod: "alipay", Status: common.TopUpStatusSuccess},
+		{UserId: alice.Id, TradeNo: "filter-alice-wechat", PaymentMethod: "wechat", Status: common.TopUpStatusSuccess},
+		{UserId: bob.Id, TradeNo: "filter-bob-alipay", PaymentMethod: "alipay", Status: common.TopUpStatusSuccess},
+		{UserId: otherInvitee.Id, TradeNo: "filter-other", PaymentMethod: "alipay", Status: common.TopUpStatusSuccess},
+	}
+	for index := range topUps {
+		require.NoError(t, DB.Create(&topUps[index]).Error)
+	}
+	availableAt := common.GetTimestamp() + 10000
+	commissions := []ReferralCommission{
+		{TopUpId: topUps[0].Id, InviterId: inviter.Id, InviteeId: alice.Id, BaseQuota: 100, RewardQuota: 5, Status: ReferralCommissionFrozen, AvailableAt: availableAt, CreateTime: 100},
+		{TopUpId: topUps[1].Id, InviterId: inviter.Id, InviteeId: alice.Id, BaseQuota: 200, RewardQuota: 10, Status: ReferralCommissionFrozen, AvailableAt: availableAt, CreateTime: 200},
+		{TopUpId: topUps[2].Id, InviterId: inviter.Id, InviteeId: bob.Id, BaseQuota: 300, RewardQuota: 15, Status: ReferralCommissionFrozen, AvailableAt: availableAt, CreateTime: 300},
+		{TopUpId: topUps[3].Id, InviterId: otherInviter.Id, InviteeId: otherInvitee.Id, BaseQuota: 400, RewardQuota: 20, Status: ReferralCommissionFrozen, AvailableAt: availableAt, CreateTime: 200},
+	}
+	require.NoError(t, DB.Create(&commissions).Error)
+
+	pageInfo := &common.PageInfo{Page: 1, PageSize: 1}
+	filter := ReferralCommissionFilter{
+		Keyword:       "%alice_member%",
+		PaymentMethod: "wechat",
+		StartTime:     150,
+		EndTime:       250,
+	}
+	results, total, err := GetReferralCommissions(inviter.Id, pageInfo, filter)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, results, 1)
+	assert.Equal(t, commissions[1].Id, results[0].Id)
+	assert.Equal(t, "alice_member", results[0].InviteeName)
+	assert.Equal(t, "wechat", results[0].PaymentMethod)
+
+	results, total, err = GetReferralCommissions(inviter.Id, &common.PageInfo{Page: 1, PageSize: 2}, ReferralCommissionFilter{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, results, 2)
+	assert.Equal(t, commissions[2].Id, results[0].Id)
+	assert.Equal(t, commissions[1].Id, results[1].Id)
+}
+
+func TestGetReferralCommissionsRejectsUnsafeKeywordPattern(t *testing.T) {
+	setupReferralTest(t)
+	inviter := createReferralUser(t, "invalid-filter-inviter", 0, false)
+
+	_, _, err := GetReferralCommissions(
+		inviter.Id,
+		&common.PageInfo{Page: 1, PageSize: 10},
+		ReferralCommissionFilter{Keyword: "a%%%"},
+	)
+	require.Error(t, err)
+}

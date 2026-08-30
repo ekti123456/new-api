@@ -257,6 +257,15 @@ export interface ReferralSummary {
   frozen_quota: number
   available_quota: number
   history_quota: number
+  referred_topup_quota: number
+  commission_count: number
+}
+
+export interface ReferralCommissionFilters {
+  keyword?: string
+  payment_method?: string
+  start_time?: number
+  end_time?: number
 }
 
 export interface ReferralCommission {

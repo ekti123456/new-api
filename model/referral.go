@@ -27,8 +27,8 @@ type ReferralCommission struct {
 	Status        string `json:"status" gorm:"type:varchar(20);index"`
 	AvailableAt   int64  `json:"available_at" gorm:"index"`
 	CreateTime    int64  `json:"create_time" gorm:"index"`
-	InviteeName   string `json:"invitee_name" gorm:"-:all"`
-	PaymentMethod string `json:"payment_method" gorm:"-:all"`
+	InviteeName   string `json:"invitee_name" gorm:"->;-:migration"`
+	PaymentMethod string `json:"payment_method" gorm:"->;-:migration"`
 }
 
 type ReferralSummary struct {
@@ -43,6 +43,15 @@ type ReferralSummary struct {
 	FrozenQuota         int    `json:"frozen_quota"`
 	AvailableQuota      int    `json:"available_quota"`
 	HistoryQuota        int    `json:"history_quota"`
+	ReferredTopUpQuota  int64  `json:"referred_topup_quota"`
+	CommissionCount     int64  `json:"commission_count"`
+}
+
+type ReferralCommissionFilter struct {
+	Keyword       string
+	PaymentMethod string
+	StartTime     int64
+	EndTime       int64
 }
 
 // applyReferralCommissionWithTx records a commission in the same transaction
@@ -170,9 +179,16 @@ func GetReferralSummary(userId int) (*ReferralSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	var commissionHistory int64
+	var commissionAggregate struct {
+		HistoryQuota       int64
+		ReferredTopUpQuota int64
+		CommissionCount    int64
+	}
 	if err := DB.Model(&ReferralCommission{}).Where("inviter_id = ?", userId).
-		Select("COALESCE(SUM(reward_quota), 0)").Scan(&commissionHistory).Error; err != nil {
+		Select(`COALESCE(SUM(reward_quota), 0) AS history_quota,
+			COALESCE(SUM(base_quota), 0) AS referred_top_up_quota,
+			COUNT(*) AS commission_count`).
+		Scan(&commissionAggregate).Error; err != nil {
 		return nil, err
 	}
 	rateBps := ReferralRateBps(user.AffQualifiedCount)
@@ -195,24 +211,43 @@ func GetReferralSummary(userId int) (*ReferralSummary, error) {
 		QualifiedTopUpQuota: common.QuotaFromFloat(float64(common.ReferralQualifiedTopUpUnits) * common.QuotaPerUnit),
 		FrozenQuota:         user.AffFrozenQuota,
 		AvailableQuota:      user.AffQuota,
-		HistoryQuota:        common.QuotaFromDecimal(decimal.NewFromInt(commissionHistory)),
+		HistoryQuota:        common.QuotaFromDecimal(decimal.NewFromInt(commissionAggregate.HistoryQuota)),
+		ReferredTopUpQuota:  commissionAggregate.ReferredTopUpQuota,
+		CommissionCount:     commissionAggregate.CommissionCount,
 	}, nil
 }
 
-func GetReferralCommissions(userId int, pageInfo *common.PageInfo) ([]*ReferralCommission, int64, error) {
+func GetReferralCommissions(userId int, pageInfo *common.PageInfo, filter ReferralCommissionFilter) ([]*ReferralCommission, int64, error) {
 	if err := ReleaseMaturedReferralCommissions(userId); err != nil {
 		return nil, 0, err
 	}
 	var commissions []*ReferralCommission
 	var total int64
-	query := DB.Model(&ReferralCommission{}).Where("referral_commissions.inviter_id = ?", userId)
+	query := DB.Model(&ReferralCommission{}).
+		Joins("LEFT JOIN users ON users.id = referral_commissions.invitee_id").
+		Joins("LEFT JOIN top_ups ON top_ups.id = referral_commissions.top_up_id").
+		Where("referral_commissions.inviter_id = ?", userId)
+	if filter.Keyword != "" {
+		pattern, err := sanitizeLikePattern(filter.Keyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		query = query.Where("users.username LIKE ? ESCAPE '!'", pattern)
+	}
+	if filter.PaymentMethod != "" {
+		query = query.Where("top_ups.payment_method = ?", filter.PaymentMethod)
+	}
+	if filter.StartTime > 0 {
+		query = query.Where("referral_commissions.create_time >= ?", filter.StartTime)
+	}
+	if filter.EndTime > 0 {
+		query = query.Where("referral_commissions.create_time <= ?", filter.EndTime)
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := query.
 		Select("referral_commissions.*, users.username AS invitee_name, top_ups.payment_method AS payment_method").
-		Joins("LEFT JOIN users ON users.id = referral_commissions.invitee_id").
-		Joins("LEFT JOIN top_ups ON top_ups.id = referral_commissions.top_up_id").
 		Order("referral_commissions.id DESC").
 		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&commissions).Error; err != nil {
 		return nil, 0, err
