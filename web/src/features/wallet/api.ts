@@ -234,6 +234,8 @@ export async function getReferralMembers(
   })
   if (filters.keyword) params.set('keyword', filters.keyword)
   if (filters.status) params.set('status', filters.status)
+  if (filters.sort_by) params.set('sort_by', filters.sort_by)
+  if (filters.sort_order) params.set('sort_order', filters.sort_order)
 
   const res = await api.get(`/api/user/referral/members?${params.toString()}`)
   return res.data

@@ -104,10 +104,10 @@ type User struct {
 	AffFrozenQuota      int                        `json:"aff_frozen_quota" gorm:"type:int;default:0;column:aff_frozen_quota"`
 	AffHistoryQuota     int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	AffCommissionQuota  int                        `json:"aff_commission_quota" gorm:"type:int;default:0;column:aff_commission_quota"`
-	InviterId           int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	InviterId           int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index;index:idx_users_referral_eligible_inviter,priority:2"`
 	ReferralTopUpQuota  int64                      `json:"referral_topup_quota" gorm:"type:bigint;default:0;column:referral_topup_quota"`
 	ReferralQualifiedAt int64                      `json:"referral_qualified_at" gorm:"type:bigint;default:0;column:referral_qualified_at"`
-	ReferralEligible    bool                       `json:"referral_eligible" gorm:"column:referral_eligible"`
+	ReferralEligible    bool                       `json:"referral_eligible" gorm:"column:referral_eligible;index:idx_users_referral_eligible_inviter,priority:1"`
 	ReferralLegacy      bool                       `json:"referral_legacy" gorm:"column:referral_legacy"`
 	AffRateBps          int                        `json:"aff_rate_bps" gorm:"-:all"`
 	DeletedAt           gorm.DeletedAt             `gorm:"index"`
@@ -115,7 +115,7 @@ type User struct {
 	Setting             string                     `json:"setting" gorm:"type:text;column:setting"`
 	Remark              string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer      string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt           int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	CreatedAt           int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at;index"`
 	LastLoginAt         int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 	AuthVersion         int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
 	AdminPermissions    map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`

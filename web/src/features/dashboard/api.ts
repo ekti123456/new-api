@@ -22,6 +22,8 @@ import type {
   FlowQuotaDataItem,
   FullSessionWindowsData,
   QuotaDataItem,
+  ReferralRankingPage,
+  ReferralRankingPeriod,
   UptimeGroupResult,
   UserAgentStatsData,
   UserPerformanceAnomaliesData,
@@ -66,6 +68,33 @@ export async function getUserQuotaDataByUsers(params: {
     '/api/data/users',
     { params }
   )
+  return res.data
+}
+
+export async function getReferralRankings(params: {
+  period: ReferralRankingPeriod
+  page: number
+  pageSize: number
+  startTimestamp?: number
+  endTimestamp?: number
+}) {
+  const res = await api.get<{
+    success: boolean
+    data?: ReferralRankingPage
+    message?: string
+  }>('/api/data/referral-rankings', {
+    params: {
+      period: params.period,
+      p: params.page,
+      page_size: params.pageSize,
+      ...(params.startTimestamp != null && params.endTimestamp != null
+        ? {
+            start_timestamp: params.startTimestamp,
+            end_timestamp: params.endTimestamp,
+          }
+        : {}),
+    },
+  })
   return res.data
 }
 

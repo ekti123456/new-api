@@ -303,6 +303,7 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
+		dataRoute.GET("/referral-rankings", middleware.AdminAuth(), controller.GetAdminReferralRankings)
 		dataRoute.GET("/user-agents", middleware.RootAuth(), controller.GetUserAgentStats)
 		dataRoute.GET("/user-performance-anomalies", middleware.RootAuth(), controller.GetUserPerformanceAnomalies)
 		dataRoute.POST("/user-performance-anomalies/contact", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.SendUserPerformanceAlert)

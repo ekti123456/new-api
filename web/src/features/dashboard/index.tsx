@@ -125,6 +125,12 @@ const LazyUserCharts = lazy(() =>
   }))
 )
 
+const LazyReferralRanking = lazy(() =>
+  import('./components/users/referral-ranking').then((m) => ({
+    default: m.ReferralRanking,
+  }))
+)
+
 const LazyFlowCharts = lazy(() =>
   import('./components/flow/flow-charts').then((m) => ({
     default: m.FlowCharts,
@@ -432,15 +438,22 @@ export function Dashboard() {
               </FadeIn>
             </>
           )}
-          {activeSection === 'users' && (
-            <FadeIn>
-              <Suspense fallback={<ModelChartsFallback />}>
-                <LazyUserCharts
-                  filters={userChartsFilters}
-                  onFiltersChange={setUserChartsFilters}
-                />
-              </Suspense>
-            </FadeIn>
+          {activeSection === 'users' && isAdmin && (
+            <>
+              <FadeIn>
+                <Suspense fallback={<ModelChartsFallback />}>
+                  <LazyUserCharts
+                    filters={userChartsFilters}
+                    onFiltersChange={setUserChartsFilters}
+                  />
+                </Suspense>
+              </FadeIn>
+              <FadeIn delay={0.05}>
+                <Suspense fallback={<ModelChartsFallback />}>
+                  <LazyReferralRanking />
+                </Suspense>
+              </FadeIn>
+            </>
           )}
           {activeSection === 'flow' && (
             <FadeIn>

@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -58,6 +59,10 @@ type ReferralCommissionFilter struct {
 const (
 	ReferralMemberStatusQualified = "qualified"
 	ReferralMemberStatusPending   = "pending"
+	ReferralMemberSortCreatedAt   = "created_at"
+	ReferralMemberSortTopUpQuota  = "topup_quota"
+	ReferralMemberSortAscending   = "asc"
+	ReferralMemberSortDescending  = "desc"
 )
 
 type ReferralMember struct {
@@ -70,8 +75,32 @@ type ReferralMember struct {
 }
 
 type ReferralMemberFilter struct {
-	Keyword string
-	Status  string
+	Keyword   string
+	Status    string
+	SortBy    string
+	SortOrder string
+}
+
+const (
+	AdminReferralRankingPeriodAll   = "all"
+	AdminReferralRankingPeriodToday = "today"
+)
+
+type AdminReferralRankingFilter struct {
+	Period    string
+	StartTime int64
+	EndTime   int64
+}
+
+type AdminReferralRanking struct {
+	UserId          int    `json:"user_id" gorm:"column:user_id"`
+	Username        string `json:"username" gorm:"column:username"`
+	DisplayName     string `json:"display_name" gorm:"column:display_name"`
+	InvitedCount    int64  `json:"invited_count" gorm:"column:invited_count"`
+	QualifiedCount  int64  `json:"qualified_count" gorm:"column:qualified_count"`
+	TopUpQuota      int64  `json:"topup_quota" gorm:"column:topup_quota"`
+	CommissionQuota int64  `json:"commission_quota" gorm:"column:commission_quota"`
+	CommissionCount int64  `json:"commission_count" gorm:"column:commission_count"`
 }
 
 // applyReferralCommissionWithTx records a commission in the same transaction
@@ -271,14 +300,172 @@ func GetReferralMembers(userId int, pageInfo *common.PageInfo, filter ReferralMe
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+	sortBy, sortOrder := resolveReferralMemberSort(filter.SortBy, filter.SortOrder)
+	sortColumn := "created_at"
+	if sortBy == ReferralMemberSortTopUpQuota {
+		sortColumn = "referral_topup_quota"
+	}
+	descending := sortOrder == ReferralMemberSortDescending
 	if err := query.
 		Select("id, username, created_at, referral_topup_quota, referral_qualified_at, referral_legacy").
-		Order("created_at DESC").Order("id DESC").
+		Order(clause.OrderByColumn{Column: clause.Column{Name: sortColumn}, Desc: descending}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: descending}).
 		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).
 		Scan(&members).Error; err != nil {
 		return nil, 0, err
 	}
+	for _, member := range members {
+		member.Username = maskReferralMemberUsername(member.Username)
+	}
 	return members, total, nil
+}
+
+func maskReferralMemberUsername(username string) string {
+	runes := []rune(username)
+	switch len(runes) {
+	case 0:
+		return ""
+	case 1:
+		return "*"
+	case 2:
+		return string(runes[0]) + "*"
+	default:
+		return string(runes[0]) + strings.Repeat("*", len(runes)-2) + string(runes[len(runes)-1])
+	}
+}
+
+func resolveReferralMemberSort(sortBy string, sortOrder string) (string, string) {
+	sortBy = strings.ToLower(strings.TrimSpace(sortBy))
+	switch sortBy {
+	case ReferralMemberSortCreatedAt, ReferralMemberSortTopUpQuota:
+	default:
+		sortBy = ReferralMemberSortCreatedAt
+	}
+
+	sortOrder = strings.ToLower(strings.TrimSpace(sortOrder))
+	if sortOrder != ReferralMemberSortAscending && sortOrder != ReferralMemberSortDescending {
+		sortOrder = ReferralMemberSortDescending
+	}
+	return sortBy, sortOrder
+}
+
+func GetAdminReferralRankings(pageInfo *common.PageInfo, filter AdminReferralRankingFilter) ([]*AdminReferralRanking, int64, error) {
+	if pageInfo == nil {
+		return nil, 0, errors.New("page info is required")
+	}
+	if pageInfo.GetPage() < 1 || pageInfo.GetPageSize() < 1 || pageInfo.GetPageSize() > 100 {
+		return nil, 0, errors.New("invalid referral ranking pagination")
+	}
+	startTime, endTime, err := resolveAdminReferralRankingRange(filter, time.Now())
+	if err != nil {
+		return nil, 0, err
+	}
+
+	memberStats := DB.Table("users AS invitees").
+		Where("invitees.inviter_id > 0 AND invitees.inviter_id <> invitees.id AND invitees.referral_eligible = ? AND invitees.deleted_at IS NULL", true)
+	commissionStats := DB.Table("referral_commissions AS ranked_commissions")
+
+	const selectedTopUpQuota = "member_stats.topup_quota"
+	switch filter.Period {
+	case AdminReferralRankingPeriodAll:
+		memberStats = memberStats.
+			Select(`invitees.inviter_id AS inviter_id,
+				COUNT(*) AS invited_count,
+				SUM(CASE WHEN invitees.referral_qualified_at > 0 THEN 1 ELSE 0 END) AS qualified_count,
+				COALESCE(SUM(invitees.referral_topup_quota), 0) AS topup_quota`).
+			Group("invitees.inviter_id")
+		commissionStats = commissionStats.
+			Select(`ranked_commissions.inviter_id AS inviter_id,
+				COALESCE(SUM(ranked_commissions.reward_quota), 0) AS commission_quota,
+				COUNT(*) AS commission_count`).
+			Group("ranked_commissions.inviter_id")
+	case AdminReferralRankingPeriodToday:
+		// Keep every metric on the same acquisition cohort: users registered
+		// through an invitation during the requested local calendar day. Using
+		// qualification or commission timestamps here would mix older invitees
+		// into today's ranking and make legacy migration timestamps look like
+		// new customer acquisition.
+		memberStats = memberStats.
+			Select(`invitees.inviter_id AS inviter_id,
+				COUNT(*) AS invited_count,
+				SUM(CASE WHEN invitees.referral_qualified_at > 0 THEN 1 ELSE 0 END) AS qualified_count,
+				COALESCE(SUM(invitees.referral_topup_quota), 0) AS topup_quota`).
+			Where("invitees.created_at >= ? AND invitees.created_at < ?", startTime, endTime).
+			Group("invitees.inviter_id")
+		commissionStats = commissionStats.
+			Joins(`JOIN users AS ranked_invitees
+				ON ranked_invitees.id = ranked_commissions.invitee_id
+				AND ranked_invitees.inviter_id = ranked_commissions.inviter_id`).
+			Select(`ranked_commissions.inviter_id AS inviter_id,
+				COALESCE(SUM(ranked_commissions.reward_quota), 0) AS commission_quota,
+				COUNT(*) AS commission_count`).
+			Where(`ranked_invitees.referral_eligible = ?
+				AND ranked_invitees.deleted_at IS NULL
+				AND ranked_invitees.created_at >= ?
+				AND ranked_invitees.created_at < ?`, true, startTime, endTime).
+			Group("ranked_commissions.inviter_id")
+	default:
+		return nil, 0, errors.New("invalid referral ranking period")
+	}
+
+	query := DB.Table("users AS inviters").
+		Joins("LEFT JOIN (?) AS member_stats ON member_stats.inviter_id = inviters.id", memberStats).
+		Joins("LEFT JOIN (?) AS commission_stats ON commission_stats.inviter_id = inviters.id", commissionStats).
+		Where("inviters.deleted_at IS NULL")
+	query = query.Where(`COALESCE(member_stats.invited_count, 0) > 0 OR
+		COALESCE(member_stats.qualified_count, 0) > 0 OR
+		COALESCE(` + selectedTopUpQuota + `, 0) > 0 OR
+		COALESCE(commission_stats.commission_quota, 0) > 0 OR
+		COALESCE(commission_stats.commission_count, 0) > 0`)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rankings []*AdminReferralRanking
+	selectColumns := `inviters.id AS user_id,
+		inviters.username AS username,
+		inviters.display_name AS display_name,
+		COALESCE(member_stats.invited_count, 0) AS invited_count,
+		COALESCE(member_stats.qualified_count, 0) AS qualified_count,
+		COALESCE(` + selectedTopUpQuota + `, 0) AS topup_quota,
+		COALESCE(commission_stats.commission_quota, 0) AS commission_quota,
+		COALESCE(commission_stats.commission_count, 0) AS commission_count`
+	if err := query.Select(selectColumns).
+		Order("qualified_count DESC").
+		Order("topup_quota DESC").
+		Order("invited_count DESC").
+		Order("user_id ASC").
+		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).
+		Scan(&rankings).Error; err != nil {
+		return nil, 0, err
+	}
+	return rankings, total, nil
+}
+
+func resolveAdminReferralRankingRange(filter AdminReferralRankingFilter, now time.Time) (int64, int64, error) {
+	switch filter.Period {
+	case AdminReferralRankingPeriodAll:
+		if filter.StartTime != 0 || filter.EndTime != 0 {
+			return 0, 0, errors.New("time range is only valid for today's referral rankings")
+		}
+		return 0, 0, nil
+	case AdminReferralRankingPeriodToday:
+		if (filter.StartTime == 0) != (filter.EndTime == 0) {
+			return 0, 0, errors.New("start_time and end_time must be provided together")
+		}
+		if filter.StartTime != 0 {
+			nowUnix := now.Unix()
+			if filter.StartTime <= 0 || filter.EndTime <= filter.StartTime || filter.EndTime-filter.StartTime > 26*60*60 || filter.StartTime > nowUnix || filter.EndTime <= nowUnix {
+				return 0, 0, errors.New("invalid referral ranking time range")
+			}
+			return filter.StartTime, filter.EndTime, nil
+		}
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		return dayStart.Unix(), dayStart.AddDate(0, 0, 1).Unix(), nil
+	default:
+		return 0, 0, errors.New("invalid referral ranking period")
+	}
 }
 
 func GetReferralCommissions(userId int, pageInfo *common.PageInfo, filter ReferralCommissionFilter) ([]*ReferralCommission, int64, error) {
@@ -315,6 +502,9 @@ func GetReferralCommissions(userId int, pageInfo *common.PageInfo, filter Referr
 		Order("referral_commissions.id DESC").
 		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&commissions).Error; err != nil {
 		return nil, 0, err
+	}
+	for _, commission := range commissions {
+		commission.InviteeName = maskReferralMemberUsername(commission.InviteeName)
 	}
 	return commissions, total, nil
 }

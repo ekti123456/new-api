@@ -74,6 +74,9 @@ const { ReferralOverview } = await import('../referral-overview')
 const { ReferralCommissionDetails } =
   await import('../referral-commission-details')
 const { ReferralMembers } = await import('../referral-members')
+const { DEFAULT_REFERRAL_MEMBER_FILTERS } =
+  await import('../../lib/member-filters')
+const { maskReferralMemberName } = await import('../../lib/member-name')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -318,7 +321,7 @@ describe('referral page layout', () => {
     assert.equal(searchCalls.at(-1)?.keyword, 'a')
   })
 
-  test('shows concrete historical and new invited members without exposing numeric IDs', async () => {
+  test('defaults to qualified members, hides invitation type, and changes sorting immediately', async () => {
     const searchCalls: ReferralMemberFilters[] = []
     const container = await renderComponent(
       <ReferralMembers
@@ -338,7 +341,6 @@ describe('referral page layout', () => {
 
     assert.deepEqual(textValues(container.querySelectorAll('thead th')), [
       '成员',
-      '邀请类型',
       '累计在线充值',
       '资格状态',
       '邀请时间',
@@ -350,16 +352,18 @@ describe('referral page layout', () => {
 
     const rows = [...container.querySelectorAll('tbody tr')]
     const legacyRow = rows.find((row) =>
-      row.textContent?.includes('legacy-alice')
+      row.textContent?.includes('l**********e')
     )
-    const newRow = rows.find((row) => row.textContent?.includes('new-bob'))
+    const newRow = rows.find((row) => row.textContent?.includes('n*****b'))
     assert.ok(legacyRow)
     assert.ok(newRow)
-    assert.equal(legacyRow.textContent?.includes('旧邀请'), true)
+    assert.equal(legacyRow.textContent?.includes('旧邀请'), false)
     assert.equal(legacyRow.textContent?.includes('已达标'), true)
     assert.equal(legacyRow.textContent?.includes(formatQuota(750_000)), true)
-    assert.equal(newRow.textContent?.includes('新邀请'), true)
+    assert.equal(newRow.textContent?.includes('新邀请'), false)
     assert.equal(newRow.textContent?.includes('待达标'), true)
+    assert.equal(container.textContent?.includes('legacy-alice'), false)
+    assert.equal(container.textContent?.includes('new-bob'), false)
     assert.equal(container.textContent?.includes('81726354'), false)
     assert.equal(container.textContent?.includes('91827364'), false)
     assert.equal(
@@ -368,6 +372,32 @@ describe('referral page layout', () => {
       ),
       true
     )
+
+    const statusTrigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="资格状态"]'
+    )
+    const sortTrigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="邀请成员排序"]'
+    )
+    assert.ok(statusTrigger)
+    assert.ok(sortTrigger)
+    assert.equal(statusTrigger.textContent?.includes('已达标'), true)
+    assert.equal(sortTrigger.textContent?.includes('邀请时间：最新优先'), true)
+    assert.deepEqual(DEFAULT_REFERRAL_MEMBER_FILTERS, {
+      status: 'qualified',
+      sort_by: 'created_at',
+      sort_order: 'desc',
+    })
+
+    await act(async () => sortTrigger.click())
+    const topupDescendingOption = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]'),
+    ].find((item) => item.textContent?.includes('累计在线充值：从高到低'))
+    assert.ok(topupDescendingOption)
+    await act(async () => topupDescendingOption.click())
+    assert.equal(searchCalls.at(-1)?.status, 'qualified')
+    assert.equal(searchCalls.at(-1)?.sort_by, 'topup_quota')
+    assert.equal(searchCalls.at(-1)?.sort_order, 'desc')
 
     const searchInput = container.querySelector<HTMLInputElement>(
       'input[aria-label="搜索邀请成员"]'
@@ -382,6 +412,18 @@ describe('referral page layout', () => {
     })
     await act(async () => searchButton.click())
     assert.equal(searchCalls.at(-1)?.keyword, '%alice%')
+    assert.equal(searchCalls.at(-1)?.status, 'qualified')
+    assert.equal(searchCalls.at(-1)?.sort_by, 'topup_quota')
+    assert.equal(searchCalls.at(-1)?.sort_order, 'desc')
+  })
+
+  test('masks referral member names by Unicode character length', () => {
+    assert.deepEqual(
+      ['', 'A', 'AB', 'ABC', 'ABCD', '中文名', '中文名字'].map(
+        maskReferralMemberName
+      ),
+      ['', '*', 'A*', 'A*C', 'A**D', '中*名', '中**字']
+    )
   })
 
   test('distinguishes the unfiltered and filtered invited-member empty states', async () => {
@@ -401,10 +443,10 @@ describe('referral page layout', () => {
       />
     )
 
-    assert.equal(container.textContent?.includes('暂无邀请成员'), true)
+    assert.equal(container.textContent?.includes('暂无已达标成员'), true)
     assert.equal(
       container.textContent?.includes(
-        '通过你的邀请链接注册的成员会显示在这里。'
+        '成员累计在线充值达到门槛后会显示在这里。'
       ),
       true
     )
@@ -431,7 +473,7 @@ describe('referral page layout', () => {
     )
   })
 
-  test('uses a localized unavailable-member label instead of a numeric commission invitee ID', async () => {
+  test('masks commission member names and uses the unavailable placeholder without exposing IDs', async () => {
     const records: ReferralCommission[] = [
       {
         id: 1,
@@ -443,6 +485,19 @@ describe('referral page layout', () => {
         rate_bps: 500,
         reward_quota: 25_000,
         status: 'frozen',
+        available_at: 1_725_100_000,
+        create_time: 1_725_000_000,
+      },
+      {
+        id: 2,
+        trade_no: 'commission-with-name',
+        invitee_id: 12345678,
+        invitee_name: 'Alice',
+        payment_method: 'stripe',
+        base_quota: 500_000,
+        rate_bps: 500,
+        reward_quota: 25_000,
+        status: 'available',
         available_at: 1_725_100_000,
         create_time: 1_725_000_000,
       },
@@ -462,7 +517,10 @@ describe('referral page layout', () => {
     )
 
     assert.equal(container.textContent?.includes('成员信息不可用'), true)
+    assert.equal(container.textContent?.includes('A***e'), true)
+    assert.equal(container.textContent?.includes('Alice'), false)
     assert.equal(container.textContent?.includes('74839261'), false)
+    assert.equal(container.textContent?.includes('12345678'), false)
   })
 
   test('shows retry instead of an empty-member state when member loading fails', async () => {
@@ -486,7 +544,7 @@ describe('referral page layout', () => {
     )
 
     assert.equal(container.textContent?.includes('加载失败'), true)
-    assert.equal(container.textContent?.includes('暂无邀请成员'), false)
+    assert.equal(container.textContent?.includes('暂无已达标成员'), false)
     const retryButton = [...container.querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === '重试'
     )
@@ -518,9 +576,11 @@ describe('referral page layout', () => {
     const alert = container.querySelector('[role="alert"]')
     assert.ok(alert)
     assert.equal(alert.textContent?.includes('加载失败'), true)
-    assert.equal(container.textContent?.includes('legacy-alice'), true)
-    assert.equal(container.textContent?.includes('new-bob'), true)
-    assert.equal(container.textContent?.includes('暂无邀请成员'), false)
+    assert.equal(container.textContent?.includes('l**********e'), true)
+    assert.equal(container.textContent?.includes('n*****b'), true)
+    assert.equal(container.textContent?.includes('legacy-alice'), false)
+    assert.equal(container.textContent?.includes('new-bob'), false)
+    assert.equal(container.textContent?.includes('暂无已达标成员'), false)
 
     const retryButton = [...alert.querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === '重试'
@@ -576,7 +636,7 @@ describe('referral page layout', () => {
       textValues(
         container.querySelectorAll('[data-referral-members] thead th')
       ),
-      ['成員', '邀請類型', '累計線上儲值', '資格狀態', '邀請時間']
+      ['成員', '累計線上儲值', '資格狀態', '邀請時間']
     )
     assert.deepEqual(
       textValues(
@@ -585,7 +645,6 @@ describe('referral page layout', () => {
       ['成員', '來源', '儲值額度', '分成 · 比例', '時間', '狀態']
     )
     assert.equal(container.textContent?.includes('邀請成員'), true)
-    assert.equal(container.textContent?.includes('舊邀請'), true)
     assert.equal(container.textContent?.includes('已達標'), true)
     assert.equal(
       container.textContent?.includes(

@@ -63,15 +63,42 @@ import type {
 import { formatQuota, formatTimestamp } from '@/lib/format'
 import { getPageNumbers } from '@/lib/utils'
 
+import { DEFAULT_REFERRAL_MEMBER_FILTERS } from '../lib/member-filters'
+import { maskReferralMemberName } from '../lib/member-name'
+
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const LOADING_ROW_KEYS = ['loading-1', 'loading-2', 'loading-3']
-const LOADING_CELL_KEYS = [
-  'member',
-  'invitation-type',
-  'top-up',
-  'status',
-  'invited-at',
-]
+const LOADING_CELL_KEYS = ['member', 'top-up', 'status', 'invited-at']
+const DEFAULT_SORT_VALUE = 'created_at_desc'
+const REFERRAL_MEMBER_SORT_OPTIONS = [
+  {
+    labelKey: 'Invitation time: newest first',
+    sortBy: 'created_at',
+    sortOrder: 'desc',
+    value: DEFAULT_SORT_VALUE,
+  },
+  {
+    labelKey: 'Invitation time: oldest first',
+    sortBy: 'created_at',
+    sortOrder: 'asc',
+    value: 'created_at_asc',
+  },
+  {
+    labelKey: 'Cumulative online top-up: highest first',
+    sortBy: 'topup_quota',
+    sortOrder: 'desc',
+    value: 'topup_quota_desc',
+  },
+  {
+    labelKey: 'Cumulative online top-up: lowest first',
+    sortBy: 'topup_quota',
+    sortOrder: 'asc',
+    value: 'topup_quota_asc',
+  },
+] as const
+
+type ReferralMemberSortValue =
+  (typeof REFERRAL_MEMBER_SORT_OPTIONS)[number]['value']
 
 interface ReferralMembersProps {
   error: boolean
@@ -98,7 +125,9 @@ function referralMemberSearchPattern(keyword: string): string | undefined {
 export function ReferralMembers(props: ReferralMembersProps) {
   const { t } = useTranslation()
   const [keyword, setKeyword] = useState('')
-  const [status, setStatus] = useState('all')
+  const [status, setStatus] = useState('qualified')
+  const [sortValue, setSortValue] =
+    useState<ReferralMemberSortValue>(DEFAULT_SORT_VALUE)
   const [hasActiveFilters, setHasActiveFilters] = useState(false)
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize))
   const pageNumbers = getPageNumbers(props.page, totalPages)
@@ -114,20 +143,31 @@ export function ReferralMembers(props: ReferralMembersProps) {
     { label: t('Qualified members'), value: 'qualified' },
     { label: t('Pending qualification'), value: 'pending' },
   ]
+  const sortItems = REFERRAL_MEMBER_SORT_OPTIONS.map((item) => ({
+    label: t(item.labelKey),
+    value: item.value,
+  }))
   const emptyTitle = hasActiveFilters
     ? t('No members match the filters')
-    : t('No invited members yet')
+    : t('No qualified members yet')
   const emptyDescription = hasActiveFilters
     ? t('Adjust or reset the filters and try again.')
-    : t('Members who register through your referral link will appear here.')
+    : t(
+        'Members will appear here after their cumulative online top-ups reach the qualification threshold.'
+      )
 
   const handleSearch = () => {
     const keywordFilter = referralMemberSearchPattern(keyword)
-    setHasActiveFilters(Boolean(keywordFilter) || status !== 'all')
+    const sortOption = REFERRAL_MEMBER_SORT_OPTIONS.find(
+      (item) => item.value === sortValue
+    )
+    setHasActiveFilters(Boolean(keywordFilter) || status !== 'qualified')
     props.onSearch({
       keyword: keywordFilter,
       status:
         status === 'qualified' || status === 'pending' ? status : undefined,
+      sort_by: sortOption?.sortBy,
+      sort_order: sortOption?.sortOrder,
     })
   }
 
@@ -137,9 +177,28 @@ export function ReferralMembers(props: ReferralMembersProps) {
 
   const handleReset = () => {
     setKeyword('')
-    setStatus('all')
+    setStatus('qualified')
+    setSortValue(DEFAULT_SORT_VALUE)
     setHasActiveFilters(false)
-    props.onSearch({})
+    props.onSearch(DEFAULT_REFERRAL_MEMBER_FILTERS)
+  }
+
+  const handleSortChange = (value: string | null) => {
+    const sortOption = REFERRAL_MEMBER_SORT_OPTIONS.find(
+      (item) => item.value === value
+    )
+    if (!sortOption) return
+
+    const keywordFilter = referralMemberSearchPattern(keyword)
+    setSortValue(sortOption.value)
+    setHasActiveFilters(Boolean(keywordFilter) || status !== 'qualified')
+    props.onSearch({
+      keyword: keywordFilter,
+      status:
+        status === 'qualified' || status === 'pending' ? status : undefined,
+      sort_by: sortOption.sortBy,
+      sort_order: sortOption.sortOrder,
+    })
   }
 
   let mobileMembers: ReactNode
@@ -189,6 +248,8 @@ export function ReferralMembers(props: ReferralMembersProps) {
       <div className='divide-y'>
         {props.members.map((member) => {
           const qualified = member.referral_qualified_at > 0
+          const memberName =
+            maskReferralMemberName(member.username) || t('Member unavailable')
           const remainingQuota =
             props.qualifiedTopupQuota > 0
               ? Math.max(
@@ -200,18 +261,9 @@ export function ReferralMembers(props: ReferralMembersProps) {
             <article key={member.id} className='space-y-3 p-3'>
               <div className='flex min-w-0 items-start justify-between gap-3'>
                 <div className='min-w-0'>
-                  <p className='truncate font-medium'>{member.username}</p>
+                  <p className='truncate font-medium'>{memberName}</p>
                 </div>
-                <div className='flex shrink-0 flex-wrap justify-end gap-1'>
-                  <StatusBadge
-                    label={
-                      member.legacy
-                        ? t('Historical invitation')
-                        : t('New invitation')
-                    }
-                    variant={member.legacy ? 'neutral' : 'info'}
-                    copyable={false}
-                  />
+                <div className='shrink-0'>
                   <StatusBadge
                     label={
                       qualified
@@ -269,7 +321,7 @@ export function ReferralMembers(props: ReferralMembersProps) {
   } else if (props.error && props.members.length === 0) {
     tableRows = (
       <TableRow>
-        <TableCell colSpan={5} className='h-40 text-center'>
+        <TableCell colSpan={4} className='h-40 text-center'>
           <div className='text-muted-foreground flex flex-col items-center'>
             <CircleAlert className='mb-2 size-8 opacity-40' />
             <p className='text-sm font-medium'>{t('Failed to load')}</p>
@@ -289,7 +341,7 @@ export function ReferralMembers(props: ReferralMembersProps) {
   } else if (props.members.length === 0) {
     tableRows = (
       <TableRow>
-        <TableCell colSpan={5} className='h-40 text-center'>
+        <TableCell colSpan={4} className='h-40 text-center'>
           <div className='text-muted-foreground flex flex-col items-center'>
             <UserRoundSearch className='mb-2 size-8 opacity-40' />
             <p className='text-sm font-medium'>{emptyTitle}</p>
@@ -301,6 +353,8 @@ export function ReferralMembers(props: ReferralMembersProps) {
   } else {
     tableRows = props.members.map((member) => {
       const qualified = member.referral_qualified_at > 0
+      const memberName =
+        maskReferralMemberName(member.username) || t('Member unavailable')
       const remainingQuota =
         props.qualifiedTopupQuota > 0
           ? Math.max(0, props.qualifiedTopupQuota - member.referral_topup_quota)
@@ -308,18 +362,9 @@ export function ReferralMembers(props: ReferralMembersProps) {
       return (
         <TableRow key={member.id}>
           <TableCell className='max-w-52'>
-            <p className='truncate font-medium' title={member.username}>
-              {member.username}
+            <p className='truncate font-medium' title={memberName}>
+              {memberName}
             </p>
-          </TableCell>
-          <TableCell>
-            <StatusBadge
-              label={
-                member.legacy ? t('Historical invitation') : t('New invitation')
-              }
-              variant={member.legacy ? 'neutral' : 'info'}
-              copyable={false}
-            />
           </TableCell>
           <TableCell>
             <p className='font-mono font-semibold'>
@@ -381,12 +426,37 @@ export function ReferralMembers(props: ReferralMembersProps) {
             value={status}
             onValueChange={(value) => value !== null && setStatus(value)}
           >
-            <SelectTrigger className='w-full sm:w-48'>
+            <SelectTrigger
+              aria-label={t('Qualification status')}
+              className='w-full sm:w-48'
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent alignItemWithTrigger={false}>
               <SelectGroup>
                 {statusItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+
+          <Select
+            items={sortItems}
+            value={sortValue}
+            onValueChange={handleSortChange}
+          >
+            <SelectTrigger
+              aria-label={t('Sort invited members')}
+              className='w-full sm:w-64'
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {sortItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -440,11 +510,10 @@ export function ReferralMembers(props: ReferralMembersProps) {
         </div>
 
         <div className='hidden overflow-hidden rounded-lg border lg:block'>
-          <Table className='min-w-[760px]'>
+          <Table className='min-w-[640px]'>
             <TableHeader className='bg-muted/40'>
               <TableRow className='hover:bg-transparent'>
                 <TableHead>{t('Member')}</TableHead>
-                <TableHead>{t('Invitation type')}</TableHead>
                 <TableHead>{t('Cumulative online top-up')}</TableHead>
                 <TableHead>{t('Qualification status')}</TableHead>
                 <TableHead>{t('Invitation time')}</TableHead>

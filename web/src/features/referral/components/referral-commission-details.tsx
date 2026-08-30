@@ -71,6 +71,8 @@ import dayjs from '@/lib/dayjs'
 import { formatQuota, formatTimestamp } from '@/lib/format'
 import { cn, getPageNumbers } from '@/lib/utils'
 
+import { maskReferralMemberName } from '../lib/member-name'
+
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const LOADING_ROW_KEYS = ['loading-1', 'loading-2', 'loading-3', 'loading-4']
 const LOADING_CELL_KEYS = [
@@ -394,15 +396,16 @@ export function ReferralCommissionDetails(
             record.payment_method,
             t
           )
+          const memberName =
+            maskReferralMemberName(record.invitee_name) ||
+            t('Member unavailable')
           const isAvailable = record.status === 'available'
           return (
             <article key={record.id} className='space-y-3 p-3'>
               <div className='flex min-w-0 items-center justify-between gap-3'>
                 <div className='min-w-0'>
                   <p className='text-muted-foreground text-xs'>{t('Member')}</p>
-                  <p className='truncate font-medium'>
-                    {record.invitee_name || t('Member unavailable')}
-                  </p>
+                  <p className='truncate font-medium'>{memberName}</p>
                 </div>
                 <StatusBadge
                   label={
@@ -484,15 +487,14 @@ export function ReferralCommissionDetails(
   } else {
     tableRows = props.records.map((record) => {
       const paymentMethodLabel = getPaymentMethodName(record.payment_method, t)
+      const memberName =
+        maskReferralMemberName(record.invitee_name) || t('Member unavailable')
       const isAvailable = record.status === 'available'
       return (
         <TableRow key={record.id}>
           <TableCell className='max-w-48 font-medium'>
-            <span
-              className='block truncate'
-              title={record.invitee_name || t('Member unavailable')}
-            >
-              {record.invitee_name || t('Member unavailable')}
+            <span className='block truncate' title={memberName}>
+              {memberName}
             </span>
           </TableCell>
           <TableCell>

@@ -5,6 +5,7 @@ import (
 	"math"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -361,7 +362,7 @@ func TestGetReferralCommissionsFiltersAndPaginates(t *testing.T) {
 	assert.Equal(t, int64(1), total)
 	require.Len(t, results, 1)
 	assert.Equal(t, commissions[1].Id, results[0].Id)
-	assert.Equal(t, "alice_member", results[0].InviteeName)
+	assert.Equal(t, "a**********r", results[0].InviteeName)
 	assert.Equal(t, "wechat", results[0].PaymentMethod)
 
 	results, total, err = GetReferralCommissions(inviter.Id, &common.PageInfo{Page: 1, PageSize: 2}, ReferralCommissionFilter{})
@@ -417,7 +418,7 @@ func TestGetReferralMembersFiltersPaginatesAndIsolatesInviters(t *testing.T) {
 	assert.Equal(t, int64(1), total)
 	require.Len(t, members, 1)
 	assert.Equal(t, legacyQualified.Id, members[0].Id)
-	assert.Equal(t, "alice-legacy", members[0].Username)
+	assert.Equal(t, "a**********y", members[0].Username)
 	assert.Equal(t, int64(12*500000), members[0].ReferralTopUpQuota)
 	assert.Equal(t, int64(100), members[0].ReferralQualifiedAt)
 	assert.True(t, members[0].Legacy)
@@ -428,4 +429,241 @@ func TestGetReferralMembersFiltersPaginatesAndIsolatesInviters(t *testing.T) {
 	require.Len(t, members, 1)
 	assert.Equal(t, pending.Id, members[0].Id)
 	assert.False(t, members[0].Legacy)
+}
+
+func TestMaskReferralMemberUsernameUsesUnicodeCharacters(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		want     string
+	}{
+		{name: "empty", username: "", want: ""},
+		{name: "one character", username: "a", want: "*"},
+		{name: "two characters", username: "ab", want: "a*"},
+		{name: "three characters", username: "abc", want: "a*c"},
+		{name: "long username", username: "alice-legacy", want: "a**********y"},
+		{name: "unicode", username: "李小龙", want: "李*龙"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, maskReferralMemberUsername(test.username))
+		})
+	}
+}
+
+func TestGetReferralMembersSortsByCreatedAtAndTopUpQuotaDeterministically(t *testing.T) {
+	setupReferralTest(t)
+	inviter := createReferralUser(t, "member-sort-inviter", 0, false)
+	oldestHighestTopUp := createReferralUser(t, "member-sort-oldest", inviter.Id, true)
+	newerLowestTopUp := createReferralUser(t, "member-sort-newer-low", inviter.Id, true)
+	newerMiddleTopUp := createReferralUser(t, "member-sort-newer-middle", inviter.Id, true)
+	middleMiddleTopUp := createReferralUser(t, "member-sort-middle", inviter.Id, true)
+
+	updates := []struct {
+		id        int
+		createdAt int64
+		topUp     int64
+	}{
+		{id: oldestHighestTopUp.Id, createdAt: 100, topUp: 30},
+		{id: newerLowestTopUp.Id, createdAt: 300, topUp: 10},
+		{id: newerMiddleTopUp.Id, createdAt: 300, topUp: 20},
+		{id: middleMiddleTopUp.Id, createdAt: 200, topUp: 20},
+	}
+	for _, update := range updates {
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", update.id).Updates(map[string]interface{}{
+			"created_at": update.createdAt, "referral_topup_quota": update.topUp,
+		}).Error)
+	}
+
+	memberIDs := func(filter ReferralMemberFilter) []int {
+		members, total, err := GetReferralMembers(
+			inviter.Id,
+			&common.PageInfo{Page: 1, PageSize: 10},
+			filter,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, int64(4), total)
+		ids := make([]int, 0, len(members))
+		for _, member := range members {
+			ids = append(ids, member.Id)
+		}
+		return ids
+	}
+
+	assert.Equal(t, []int{
+		newerMiddleTopUp.Id,
+		newerLowestTopUp.Id,
+		middleMiddleTopUp.Id,
+		oldestHighestTopUp.Id,
+	}, memberIDs(ReferralMemberFilter{}))
+	assert.Equal(t, []int{
+		oldestHighestTopUp.Id,
+		middleMiddleTopUp.Id,
+		newerLowestTopUp.Id,
+		newerMiddleTopUp.Id,
+	}, memberIDs(ReferralMemberFilter{
+		SortBy: ReferralMemberSortCreatedAt, SortOrder: ReferralMemberSortAscending,
+	}))
+	assert.Equal(t, []int{
+		oldestHighestTopUp.Id,
+		middleMiddleTopUp.Id,
+		newerMiddleTopUp.Id,
+		newerLowestTopUp.Id,
+	}, memberIDs(ReferralMemberFilter{
+		SortBy: ReferralMemberSortTopUpQuota, SortOrder: ReferralMemberSortDescending,
+	}))
+	assert.Equal(t, []int{
+		newerLowestTopUp.Id,
+		newerMiddleTopUp.Id,
+		middleMiddleTopUp.Id,
+		oldestHighestTopUp.Id,
+	}, memberIDs(ReferralMemberFilter{
+		SortBy: ReferralMemberSortTopUpQuota, SortOrder: ReferralMemberSortAscending,
+	}))
+
+	// Unknown values never reach an SQL identifier and safely use the default.
+	assert.Equal(t, []int{
+		newerMiddleTopUp.Id,
+		newerLowestTopUp.Id,
+		middleMiddleTopUp.Id,
+		oldestHighestTopUp.Id,
+	}, memberIDs(ReferralMemberFilter{SortBy: "created_at; DROP TABLE users", SortOrder: "sideways"}))
+}
+
+func TestGetAdminReferralRankingsAggregatesAllAndTodayInvitationCohort(t *testing.T) {
+	setupReferralTest(t)
+	now := time.Now().Unix()
+	dayStart := now - 1_000
+	dayEnd := now + 1_000
+	inviterA := createReferralUser(t, "ranking-inviter-a", 0, false)
+	inviterA.DisplayName = "Inviter A"
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviterA.Id).Update("display_name", inviterA.DisplayName).Error)
+	inviterB := createReferralUser(t, "ranking-inviter-b", 0, false)
+
+	legacyQualified := createReferralUser(t, "ranking-legacy-qualified", inviterA.Id, true)
+	todayPending := createReferralUser(t, "ranking-today-pending", inviterA.Id, true)
+	todayQualified := createReferralUser(t, "ranking-today-qualified", inviterA.Id, true)
+	oldMemberB := createReferralUser(t, "ranking-old-member-b", inviterB.Id, true)
+	todayMemberB := createReferralUser(t, "ranking-today-member-b", inviterB.Id, true)
+	ineligible := createReferralUser(t, "ranking-ineligible", inviterA.Id, false)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", legacyQualified.Id).Updates(map[string]interface{}{
+		// A migration-time qualification inside today's range must not turn a
+		// historical invitation into a member of today's acquisition cohort.
+		"created_at": dayStart - 900, "referral_qualified_at": dayStart + 200, "referral_topup_quota": int64(12_000_000),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", todayPending.Id).Updates(map[string]interface{}{
+		"created_at": dayStart + 100, "referral_topup_quota": int64(2_000_000),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", todayQualified.Id).Updates(map[string]interface{}{
+		"created_at": dayStart + 150, "referral_qualified_at": dayStart + 300, "referral_topup_quota": int64(10_000_000),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", oldMemberB.Id).Updates(map[string]interface{}{
+		"created_at": dayStart - 700, "referral_topup_quota": int64(4_000_000),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", todayMemberB.Id).Updates(map[string]interface{}{
+		"created_at": dayStart + 250, "referral_topup_quota": int64(3_000_000),
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", ineligible.Id).Updates(map[string]interface{}{
+		"created_at": dayStart + 350, "referral_qualified_at": dayStart + 400, "referral_topup_quota": int64(99_000_000),
+	}).Error)
+
+	topUps := []TopUp{
+		{UserId: todayQualified.Id, TradeNo: "ranking-today-a", Status: common.TopUpStatusSuccess},
+		{UserId: todayMemberB.Id, TradeNo: "ranking-today-b", Status: common.TopUpStatusSuccess},
+		{UserId: legacyQualified.Id, TradeNo: "ranking-old-a", Status: common.TopUpStatusSuccess},
+		{UserId: oldMemberB.Id, TradeNo: "ranking-old-b", Status: common.TopUpStatusSuccess},
+	}
+	require.NoError(t, DB.Create(&topUps).Error)
+	commissions := []ReferralCommission{
+		{TopUpId: topUps[0].Id, InviterId: inviterA.Id, InviteeId: todayQualified.Id, RewardQuota: 100, Status: ReferralCommissionFrozen, CreateTime: dayStart + 400},
+		{TopUpId: topUps[1].Id, InviterId: inviterB.Id, InviteeId: todayMemberB.Id, RewardQuota: 200, Status: ReferralCommissionFrozen, CreateTime: dayStart + 450},
+		{TopUpId: topUps[2].Id, InviterId: inviterA.Id, InviteeId: legacyQualified.Id, RewardQuota: 50, Status: ReferralCommissionAvailable, CreateTime: dayStart - 500},
+		// A historical invitee earning commission today must remain outside
+		// today's new-invitation cohort.
+		{TopUpId: topUps[3].Id, InviterId: inviterB.Id, InviteeId: oldMemberB.Id, RewardQuota: 700, Status: ReferralCommissionFrozen, CreateTime: dayStart + 500},
+	}
+	require.NoError(t, DB.Create(&commissions).Error)
+
+	all, total, err := GetAdminReferralRankings(&common.PageInfo{Page: 1, PageSize: 10}, AdminReferralRankingFilter{Period: AdminReferralRankingPeriodAll})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, all, 2)
+	assert.Equal(t, inviterA.Id, all[0].UserId)
+	assert.Equal(t, "Inviter A", all[0].DisplayName)
+	assert.Equal(t, int64(3), all[0].InvitedCount)
+	assert.Equal(t, int64(2), all[0].QualifiedCount)
+	assert.Equal(t, int64(24_000_000), all[0].TopUpQuota)
+	assert.Equal(t, int64(150), all[0].CommissionQuota)
+	assert.Equal(t, int64(2), all[0].CommissionCount)
+
+	today, total, err := GetAdminReferralRankings(&common.PageInfo{Page: 1, PageSize: 1}, AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: dayStart, EndTime: dayEnd,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, today, 1)
+	assert.Equal(t, inviterA.Id, today[0].UserId)
+	assert.Equal(t, int64(2), today[0].InvitedCount)
+	assert.Equal(t, int64(1), today[0].QualifiedCount)
+	assert.Equal(t, int64(12_000_000), today[0].TopUpQuota)
+	assert.Equal(t, int64(100), today[0].CommissionQuota)
+	assert.Equal(t, int64(1), today[0].CommissionCount)
+
+	today, total, err = GetAdminReferralRankings(&common.PageInfo{Page: 2, PageSize: 1}, AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: dayStart, EndTime: dayEnd,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, today, 1)
+	assert.Equal(t, inviterB.Id, today[0].UserId)
+	assert.Equal(t, int64(1), today[0].InvitedCount)
+	assert.Zero(t, today[0].QualifiedCount)
+	assert.Equal(t, int64(3_000_000), today[0].TopUpQuota)
+	assert.Equal(t, int64(200), today[0].CommissionQuota)
+	assert.Equal(t, int64(1), today[0].CommissionCount)
+}
+
+func TestResolveAdminReferralRankingRangeUsesLocalCalendarDayAndValidatesOverrides(t *testing.T) {
+	location := time.FixedZone("UTC+8", 8*60*60)
+	now := time.Date(2026, time.August, 30, 18, 45, 0, 0, location)
+	start, end, err := resolveAdminReferralRankingRange(AdminReferralRankingFilter{Period: AdminReferralRankingPeriodToday}, now)
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, time.August, 30, 0, 0, 0, 0, location).Unix(), start)
+	assert.Equal(t, time.Date(2026, time.August, 31, 0, 0, 0, 0, location).Unix(), end)
+
+	explicitStart := now.Unix() - 60
+	explicitEnd := now.Unix() + 60
+	start, end, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: explicitStart, EndTime: explicitEnd,
+	}, now)
+	require.NoError(t, err)
+	assert.Equal(t, explicitStart, start)
+	assert.Equal(t, explicitEnd, end)
+
+	_, _, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodAll, StartTime: 1, EndTime: 2,
+	}, now)
+	require.Error(t, err)
+	_, _, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: 1,
+	}, now)
+	require.Error(t, err)
+	_, _, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: 1, EndTime: 1 + 27*60*60,
+	}, now)
+	require.Error(t, err)
+	_, _, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: now.Unix() - 120, EndTime: now.Unix() - 60,
+	}, now)
+	require.Error(t, err)
+	_, _, err = resolveAdminReferralRankingRange(AdminReferralRankingFilter{
+		Period: AdminReferralRankingPeriodToday, StartTime: now.Unix() + 60, EndTime: now.Unix() + 120,
+	}, now)
+	require.Error(t, err)
+
+	_, _, err = GetAdminReferralRankings(
+		&common.PageInfo{Page: 1, PageSize: -1},
+		AdminReferralRankingFilter{Period: AdminReferralRankingPeriodAll},
+	)
+	require.Error(t, err)
 }

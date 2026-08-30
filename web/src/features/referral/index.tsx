@@ -37,6 +37,7 @@ import type {
 import { ReferralCommissionDetails } from './components/referral-commission-details'
 import { ReferralMembers } from './components/referral-members'
 import { ReferralOverview } from './components/referral-overview'
+import { DEFAULT_REFERRAL_MEMBER_FILTERS } from './lib/member-filters'
 
 const DEFAULT_PAGE_SIZE = 10
 
@@ -55,7 +56,9 @@ export function ReferralPage() {
   const [memberTotal, setMemberTotal] = useState(0)
   const [memberPage, setMemberPage] = useState(1)
   const [memberPageSize, setMemberPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [memberFilters, setMemberFilters] = useState<ReferralMemberFilters>({})
+  const [memberFilters, setMemberFilters] = useState<ReferralMemberFilters>(
+    DEFAULT_REFERRAL_MEMBER_FILTERS
+  )
   const [membersLoading, setMembersLoading] = useState(true)
   const [membersError, setMembersError] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)

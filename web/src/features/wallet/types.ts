@@ -271,6 +271,8 @@ export interface ReferralCommissionFilters {
 export interface ReferralMemberFilters {
   keyword?: string
   status?: 'qualified' | 'pending'
+  sort_by?: 'created_at' | 'topup_quota'
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface ReferralMember {

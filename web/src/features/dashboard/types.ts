@@ -120,6 +120,26 @@ export interface UserPerformanceAnomaliesData {
   items: UserPerformanceAnomalyItem[]
 }
 
+export type ReferralRankingPeriod = 'all' | 'today'
+
+export interface ReferralRankingItem {
+  user_id: number
+  username: string
+  display_name?: string
+  invited_count: number
+  qualified_count: number
+  topup_quota: number
+  commission_quota: number
+  commission_count: number
+}
+
+export interface ReferralRankingPage {
+  page: number
+  page_size: number
+  total: number
+  items: ReferralRankingItem[]
+}
+
 export type FlowMetric = 'quota' | 'tokens' | 'requests'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'
