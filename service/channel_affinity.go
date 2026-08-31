@@ -713,6 +713,23 @@ func PrepareUserAgentRoutingMode(c *gin.Context, usingGroup string) bool {
 	return true
 }
 
+// IsUserAgentRoutingChannelConfigured confirms that a previously bound UA-only
+// channel still belongs to the administrator's active routing pool. Merely
+// retaining the channel's UA-only flag is insufficient after the pool changes.
+func IsUserAgentRoutingChannelConfigured(c *gin.Context, usingGroup string, channelID int) bool {
+	setting := operation_setting.GetUserAgentRoutingSetting()
+	if c == nil || channelID <= 0 || setting == nil || !setting.Enabled ||
+		!userAgentRoutingGroupMatches(c, setting.GroupNames, usingGroup) {
+		return false
+	}
+	for _, configuredChannelID := range setting.ChannelIDs {
+		if configuredChannelID == channelID {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPreferredChannelByUserAgentRouting applies the simple UA split policy.
 // It deliberately runs outside channel affinity: an allowlisted UA or user
 // returns no match so the normal scheduler and legacy affinity can proceed.
