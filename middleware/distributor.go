@@ -58,7 +58,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
-		if strictPassiveRoute && !codexRootChannelCrossedUABoundary(c) && (!rootBindingFound || rootChannel == nil) {
+		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
@@ -248,12 +248,31 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), types.ErrorCodeModelNotFound)
 				return
 			}
-			recordProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+			bindingChanged, bindingClaimed, bindingErr := claimProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+			if bindingErr != nil {
+				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, bindingErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			if bindingClaimed && bindingChanged {
+				winnerErr := errors.New("another request claimed a different Codex root channel binding")
+				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, winnerErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
+				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 			recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+			if promoteErr := promoteCodexPassiveRootAlias(c); promoteErr != nil {
+				logCodexPassiveRouteFailure(c, "promote", modelRequest.Model, rootSession, promoteErr)
+			}
 		}
 	}
 }

@@ -263,6 +263,8 @@ func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *test
 	require.NotEqual(t, meta.RootSessionFingerprint, meta.SessionFingerprint)
 	require.Equal(t, "system", meta.ThreadSource)
 	require.Equal(t, "turn", meta.RequestKind)
+	require.Equal(t, "system_passive", meta.PassiveFeature)
+	require.Empty(t, meta.SessionAccounting)
 }
 
 func TestClassifyUnlinkedCodexSystemRequestUsesOnlyStableMetadata(t *testing.T) {
