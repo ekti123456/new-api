@@ -232,6 +232,11 @@ describe('referral page layout', () => {
         `missing rule: ${title}`
       )
     }
+    assert.equal(
+      container.textContent?.includes('每笔历史成功在线充值计入真实用户资格。'),
+      true
+    )
+    assert.equal(container.textContent?.includes('可追溯的旧邀请'), false)
 
     assert.equal(
       /\b(?:Member|Reward)\b/.test(container.textContent ?? ''),
@@ -368,7 +373,7 @@ describe('referral page layout', () => {
     assert.equal(container.textContent?.includes('91827364'), false)
     assert.equal(
       container.textContent?.includes(
-        '旧邀请和新邀请都会显示。历史成功在线充值计入真实用户资格，但不补发历史分成；成员下一笔成功在线充值起正常返佣。'
+        '历史成功在线充值计入真实用户资格，成功在线充值起正常返佣。'
       ),
       true
     )
@@ -648,8 +653,12 @@ describe('referral page layout', () => {
     assert.equal(container.textContent?.includes('已達標'), true)
     assert.equal(
       container.textContent?.includes(
-        '舊邀請和新邀請都會顯示。歷史成功線上儲值計入真實用戶資格，但不補發歷史分成；成員下一筆成功線上儲值起正常返佣。'
+        '歷史成功線上儲值計入真實用戶資格，成功線上儲值起正常返佣。'
       ),
+      true
+    )
+    assert.equal(
+      container.textContent?.includes('每筆歷史成功線上儲值計入真實用戶資格。'),
       true
     )
     assert.equal(

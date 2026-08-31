@@ -135,7 +135,7 @@ export function ReferralOverview(props: ReferralOverviewProps) {
     },
     {
       description: t(
-        'Traceable historical invitations are included. Their past successful online top-ups count toward qualification, but past commissions are not backfilled.'
+        'Each historical successful online top-up counts toward qualification.'
       ),
       icon: CalendarDays,
       title: t('Counting scope'),

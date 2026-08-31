@@ -403,7 +403,7 @@ export function ReferralMembers(props: ReferralMembersProps) {
         </CardTitle>
         <CardDescription>
           {t(
-            "Old and new invitations are both shown here. Historical successful online top-ups count toward qualification, but past commissions are not backfilled; the member's next successful online top-up earns commission normally."
+            'Historical successful online top-ups count toward qualification. Successful online top-ups earn commission normally.'
           )}
         </CardDescription>
       </CardHeader>
