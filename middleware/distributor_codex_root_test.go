@@ -32,8 +32,11 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalDB := model.DB
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
+	originalLinkedWaitTimeout := codexLinkedThreadDescriptionRootWaitTimeout
 	originalWaitForRecentUpdate := waitForRecentCodexRootChannelUpdate
+	originalWaitForRootBindingUpdate := waitForCodexRootChannelBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
+	codexLinkedThreadDescriptionRootWaitTimeout = 25 * time.Millisecond
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
@@ -72,7 +75,9 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 
 	t.Cleanup(func() {
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
+		codexLinkedThreadDescriptionRootWaitTimeout = originalLinkedWaitTimeout
 		waitForRecentCodexRootChannelUpdate = originalWaitForRecentUpdate
+		waitForCodexRootChannelBindingUpdate = originalWaitForRootBindingUpdate
 		model.DB = originalDB
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
 		if originalMemoryCacheEnabled && originalDB != nil &&
@@ -1112,6 +1117,39 @@ func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T
 			require.False(t, service.RequiresConfiguredAffinityPool(titleContext), "linked thread descriptions must not establish a routing boundary from their own UA")
 		})
 	}
+}
+
+func TestLinkedThreadDescriptionWaitsForConcurrentRootBinding(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 78
+		tokenID = 735
+		rootID  = "01a03917-6f27-7f10-b723-886834460631"
+		leafID  = "01a03918-6f27-7f10-b723-886834460632"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	waitCalls := 0
+	waitForCodexRootChannelBindingUpdate = func(ctx context.Context, gotUserID int, gotRootID string, maxWait time.Duration) error {
+		waitCalls++
+		require.Equal(t, userID, gotUserID)
+		require.Equal(t, rootID, gotRootID)
+		require.Positive(t, maxWait)
+		require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
+		return nil
+	}
+
+	titleContext, titleRecorder := codexLinkedThreadDescriptionContext(userID, tokenID, rootID, leafID)
+	Distribute()(titleContext)
+
+	require.Equal(t, 1, waitCalls)
+	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
+	require.False(t, titleContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id), "the linked title must not require an independently schedulable Luna ability")
 }
 
 func TestUnlinkedThreadDescriptionCannotBypassUARoutingBoundary(t *testing.T) {

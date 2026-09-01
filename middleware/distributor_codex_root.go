@@ -26,8 +26,10 @@ const (
 )
 
 var (
-	codexUnlinkedPassiveRootWaitTimeout = 3 * time.Second
-	waitForRecentCodexRootChannelUpdate = service.WaitForRecentCodexRootChannelUpdate
+	codexUnlinkedPassiveRootWaitTimeout         = 3 * time.Second
+	codexLinkedThreadDescriptionRootWaitTimeout = 3 * time.Second
+	waitForRecentCodexRootChannelUpdate         = service.WaitForRecentCodexRootChannelUpdate
+	waitForCodexRootChannelBindingUpdate        = service.WaitForCodexRootChannelBindingUpdate
 )
 
 type codexRootChannelRoute struct {
@@ -90,6 +92,49 @@ func isLinkedCodexThreadDescription(resolution relaychannel.CodexRootSessionReso
 		strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "thread_description")
 }
 
+func loadLinkedCodexThreadDescriptionRootBinding(c *gin.Context, userID int, rootID string) (service.CodexRootChannelBinding, bool, error) {
+	rootID = strings.TrimSpace(rootID)
+	if c == nil || userID <= 0 || rootID == "" {
+		return service.CodexRootChannelBinding{}, false, nil
+	}
+	requestContext := context.Background()
+	if c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	binding, found, err := service.LoadCodexRootChannelBindingContext(requestContext, userID, rootID)
+	if err != nil || found || codexLinkedThreadDescriptionRootWaitTimeout <= 0 {
+		return binding, found, err
+	}
+
+	waitContext, cancelWait := context.WithTimeout(requestContext, codexLinkedThreadDescriptionRootWaitTimeout)
+	defer cancelWait()
+	for {
+		waitErr := waitForCodexRootChannelBindingUpdate(waitContext, userID, rootID, codexLinkedThreadDescriptionRootWaitTimeout)
+		if waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return service.CodexRootChannelBinding{}, false, nil
+			}
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked thread description root binding: %w", waitErr)
+		}
+		binding, found, err = service.LoadCodexRootChannelBindingContext(waitContext, userID, rootID)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return service.CodexRootChannelBinding{}, false, nil
+			}
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("load linked thread description root binding: %w", err)
+		}
+		if found {
+			return binding, true, nil
+		}
+		if err := waitContext.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return service.CodexRootChannelBinding{}, false, nil
+			}
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked thread description root binding: %w", err)
+		}
+	}
+}
+
 func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName, usingGroup string) (*model.Channel, string, bool, error) {
 	if c == nil {
 		return nil, "", false, nil
@@ -110,7 +155,7 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	var found bool
 	var err error
 	if isLinkedCodexThreadDescription(resolution) {
-		binding, found, err = service.LoadCodexRootChannelBinding(userID, resolution.RootID)
+		binding, found, err = loadLinkedCodexThreadDescriptionRootBinding(c, userID, resolution.RootID)
 		if found {
 			requestUARoutingOnly = binding.UARoutingOnly
 		}

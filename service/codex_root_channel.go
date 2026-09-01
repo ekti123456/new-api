@@ -27,6 +27,7 @@ const (
 	// revalidate the binding fingerprint and fail closed if this route expires.
 	codexProvisionalRootChannelCacheTTL = 3 * time.Minute
 	codexRootChannelRedisTimeout        = 500 * time.Millisecond
+	codexRootChannelPollInterval        = 200 * time.Millisecond
 )
 
 var ErrCodexRootChannelBindingConflict = errors.New("Codex root channel binding conflict")
@@ -71,7 +72,16 @@ var (
 	// same write lock so an idempotent provisional claim can extend a short
 	// binding without shortening an already durable one.
 	codexRootChannelMemoryExpiresAt = make(map[string]time.Time)
+	codexRootChannelWaiters         = struct {
+		sync.Mutex
+		items map[string]*codexRootChannelWaiter
+	}{items: make(map[string]*codexRootChannelWaiter)}
 )
+
+type codexRootChannelWaiter struct {
+	updates chan struct{}
+	count   int
+}
 
 var claimCodexRootChannelBindingScript = redis.NewScript(`
 local current = redis.call('GET', KEYS[1])
@@ -195,22 +205,27 @@ func storeCodexRootChannelBindingWithTTL(userID int, rootID string, binding Code
 		if stored != 1 {
 			return ErrCodexRootChannelBindingConflict
 		}
+		notifyCodexRootChannelBindingUpdate(userID, rootID)
 		return nil
 	}
 	codexRootChannelWriteMu.Lock()
-	defer codexRootChannelWriteMu.Unlock()
 	cache := getCodexRootChannelCache()
 	current, found, err := cache.Get(key)
 	if err != nil {
+		codexRootChannelWriteMu.Unlock()
 		return err
 	}
 	if found && current != binding {
+		codexRootChannelWriteMu.Unlock()
 		return ErrCodexRootChannelBindingConflict
 	}
 	if err := cache.SetWithTTL(key, binding, ttl); err != nil {
+		codexRootChannelWriteMu.Unlock()
 		return err
 	}
 	trackCodexRootChannelMemoryExpiry(key, time.Now().Add(ttl))
+	codexRootChannelWriteMu.Unlock()
+	notifyCodexRootChannelBindingUpdate(userID, rootID)
 	return nil
 }
 
@@ -240,31 +255,42 @@ func ClaimProvisionalCodexRootChannelBinding(userID int, rootID string, binding 
 		if len(winnerPayload) == 0 || common.Unmarshal(winnerPayload, &winner) != nil {
 			return CodexRootChannelBinding{}, false, fmt.Errorf("invalid claimed Codex root channel binding")
 		}
+		notifyCodexRootChannelBindingUpdate(userID, rootID)
 		return winner, winner == binding, nil
 	}
 	codexRootChannelWriteMu.Lock()
-	defer codexRootChannelWriteMu.Unlock()
 	cache := getCodexRootChannelCache()
 	current, found, err := cache.Get(key)
 	if err != nil {
+		codexRootChannelWriteMu.Unlock()
 		return CodexRootChannelBinding{}, false, err
 	}
 	if found {
+		updated := false
 		if current == binding {
 			minimumExpiry := time.Now().Add(codexProvisionalRootChannelCacheTTL)
 			if trackedExpiry, tracked := codexRootChannelMemoryExpiresAt[key]; tracked && trackedExpiry.Before(minimumExpiry) {
 				if err := cache.SetWithTTL(key, current, codexProvisionalRootChannelCacheTTL); err != nil {
+					codexRootChannelWriteMu.Unlock()
 					return CodexRootChannelBinding{}, false, err
 				}
 				trackCodexRootChannelMemoryExpiry(key, minimumExpiry)
+				updated = true
 			}
+		}
+		codexRootChannelWriteMu.Unlock()
+		if updated {
+			notifyCodexRootChannelBindingUpdate(userID, rootID)
 		}
 		return current, current == binding, nil
 	}
 	if err := cache.SetWithTTL(key, binding, codexProvisionalRootChannelCacheTTL); err != nil {
+		codexRootChannelWriteMu.Unlock()
 		return CodexRootChannelBinding{}, false, err
 	}
 	trackCodexRootChannelMemoryExpiry(key, time.Now().Add(codexProvisionalRootChannelCacheTTL))
+	codexRootChannelWriteMu.Unlock()
+	notifyCodexRootChannelBindingUpdate(userID, rootID)
 	return binding, true, nil
 }
 
@@ -297,6 +323,84 @@ func LoadCodexRootChannelBinding(userID int, rootID string) (CodexRootChannelBin
 		return binding, found, err
 	}
 	return LoadCodexRootChannelBindingForRoutingSide(userID, rootID, true)
+}
+
+// LoadCodexRootChannelBindingContext loads an exact root binding across the
+// normal and UA-only routing sides while preserving the legacy normal-first
+// lookup order.
+func LoadCodexRootChannelBindingContext(ctx context.Context, userID int, rootID string) (CodexRootChannelBinding, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if binding, found, err := LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, false); err != nil || found {
+		return binding, found, err
+	}
+	return LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, true)
+}
+
+// WaitForCodexRootChannelBindingUpdate waits for an exact user/root binding
+// publication. In-memory writers wake local waiters immediately; the bounded
+// poll interval lets Redis-backed callers observe writes from other instances.
+func WaitForCodexRootChannelBindingUpdate(ctx context.Context, userID int, rootID string, maxWait time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if maxWait <= 0 {
+		return nil
+	}
+	waiterKey := legacyCodexRootChannelCacheKey(userID, rootID)
+	if waiterKey == "" {
+		return nil
+	}
+	codexRootChannelWaiters.Lock()
+	waiter := codexRootChannelWaiters.items[waiterKey]
+	if waiter == nil {
+		waiter = &codexRootChannelWaiter{updates: make(chan struct{})}
+		codexRootChannelWaiters.items[waiterKey] = waiter
+	}
+	waiter.count++
+	codexRootChannelWaiters.Unlock()
+	defer func() {
+		codexRootChannelWaiters.Lock()
+		if current := codexRootChannelWaiters.items[waiterKey]; current == waiter {
+			current.count--
+			if current.count == 0 {
+				delete(codexRootChannelWaiters.items, waiterKey)
+			}
+		}
+		codexRootChannelWaiters.Unlock()
+	}()
+	waitDuration := maxWait
+	if waitDuration > codexRootChannelPollInterval {
+		waitDuration = codexRootChannelPollInterval
+	}
+	timer := time.NewTimer(waitDuration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waiter.updates:
+		return nil
+	case <-timer.C:
+		return nil
+	}
+}
+
+func notifyCodexRootChannelBindingUpdate(userID int, rootID string) {
+	waiterKey := legacyCodexRootChannelCacheKey(userID, rootID)
+	if waiterKey == "" {
+		return
+	}
+	codexRootChannelWaiters.Lock()
+	waiter := codexRootChannelWaiters.items[waiterKey]
+	if waiter != nil {
+		delete(codexRootChannelWaiters.items, waiterKey)
+		close(waiter.updates)
+	}
+	codexRootChannelWaiters.Unlock()
 }
 
 func LoadCodexRootChannelBindingForRoutingSide(userID int, rootID string, uaRoutingOnly bool) (CodexRootChannelBinding, bool, error) {

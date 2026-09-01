@@ -71,6 +71,71 @@ func TestCodexRootChannelBindingRoundtripIsScopedByUserAndRoot(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestCodexRootChannelBindingUpdateWakesExactRootAndLoadsAcrossRoutingSides(t *testing.T) {
+	originalEnabled := common.RedisEnabled
+	originalClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalEnabled
+		common.RDB = originalClient
+	})
+
+	const userID = 42101
+	targetRootID := "target:" + t.Name()
+	otherRootID := "other:" + t.Name()
+	binding := CodexRootChannelBinding{
+		ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "target-key", UARoutingOnly: true,
+	}
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- WaitForCodexRootChannelBindingUpdate(context.Background(), userID, targetRootID, time.Second)
+	}()
+
+	targetWaiterKey := legacyCodexRootChannelCacheKey(userID, targetRootID)
+	require.Eventually(t, func() bool {
+		codexRootChannelWaiters.Lock()
+		defer codexRootChannelWaiters.Unlock()
+		return codexRootChannelWaiters.items[targetWaiterKey] != nil
+	}, time.Second, time.Millisecond)
+
+	require.NoError(t, StoreProvisionalCodexRootChannelBinding(userID, otherRootID, binding))
+	codexRootChannelWaiters.Lock()
+	targetWaiter := codexRootChannelWaiters.items[targetWaiterKey]
+	codexRootChannelWaiters.Unlock()
+	require.NotNil(t, targetWaiter, "publishing another root must not wake the target waiter")
+
+	require.NoError(t, StoreProvisionalCodexRootChannelBinding(userID, targetRootID, binding))
+	require.NoError(t, <-waitResult)
+	got, found, err := LoadCodexRootChannelBindingContext(context.Background(), userID, targetRootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, binding, got)
+}
+
+func TestWaitForCodexRootChannelBindingUpdateHonorsCancellation(t *testing.T) {
+	const userID = 42102
+	rootID := "root:" + t.Name()
+	ctx, cancel := context.WithCancel(context.Background())
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- WaitForCodexRootChannelBindingUpdate(ctx, userID, rootID, time.Second)
+	}()
+
+	waiterKey := legacyCodexRootChannelCacheKey(userID, rootID)
+	require.Eventually(t, func() bool {
+		codexRootChannelWaiters.Lock()
+		defer codexRootChannelWaiters.Unlock()
+		return codexRootChannelWaiters.items[waiterKey] != nil
+	}, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-waitResult, context.Canceled)
+	codexRootChannelWaiters.Lock()
+	cleaned := codexRootChannelWaiters.items[waiterKey] == nil
+	codexRootChannelWaiters.Unlock()
+	require.True(t, cleaned)
+}
+
 func TestCodexRootChannelBindingRejectsIncompleteValues(t *testing.T) {
 	rootID := "root:" + t.Name()
 	require.NoError(t, StoreCodexRootChannelBinding(42, rootID, CodexRootChannelBinding{ChannelID: 731}))
