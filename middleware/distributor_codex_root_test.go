@@ -32,11 +32,11 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalDB := model.DB
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
-	originalLinkedWaitTimeout := codexLinkedThreadDescriptionRootWaitTimeout
+	originalLinkedWaitTimeout := codexLinkedNamingRootWaitTimeout
 	originalWaitForRecentUpdate := waitForRecentCodexRootChannelUpdate
 	originalWaitForRootBindingUpdate := waitForCodexRootChannelBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
-	codexLinkedThreadDescriptionRootWaitTimeout = 25 * time.Millisecond
+	codexLinkedNamingRootWaitTimeout = 25 * time.Millisecond
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 
 	t.Cleanup(func() {
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
-		codexLinkedThreadDescriptionRootWaitTimeout = originalLinkedWaitTimeout
+		codexLinkedNamingRootWaitTimeout = originalLinkedWaitTimeout
 		waitForRecentCodexRootChannelUpdate = originalWaitForRecentUpdate
 		waitForCodexRootChannelBindingUpdate = originalWaitForRootBindingUpdate
 		model.DB = originalDB
@@ -148,7 +148,7 @@ func codexUnlinkedTitleContext(userID, tokenID int, titleID string) (*gin.Contex
 	return c, recorder
 }
 
-func codexLinkedThreadDescriptionContext(userID, tokenID int, rootID, leafID string) (*gin.Context, *httptest.ResponseRecorder) {
+func codexLinkedNamingContext(userID, tokenID int, rootID, leafID, threadSource string) (*gin.Context, *httptest.ResponseRecorder) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(codexTitleRequestBody()))
@@ -158,7 +158,7 @@ func codexLinkedThreadDescriptionContext(userID, tokenID int, rootID, leafID str
 	c.Request.Header.Set("X-Client-Request-Id", leafID)
 	c.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
 	c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","window_id":"`+leafID+`:1","parent_thread_id":"`+rootID+`","thread_source":"thread_description","request_kind":"turn"}`)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","window_id":"`+leafID+`:1","parent_thread_id":"`+rootID+`","thread_source":"`+threadSource+`","request_kind":"turn"}`)
 	common.SetContextKey(c, constant.ContextKeyUserId, userID)
 	common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "pro")
@@ -1035,12 +1035,13 @@ func TestLinkedPassiveRequestDoesNotFallBackAcrossUARoutingBoundary(t *testing.T
 	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 }
 
-func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T) {
+func TestLinkedCodexNamingInheritsRootAcrossUARoutingBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		userID         int
 		rootID         string
 		leafID         string
+		threadSource   string
 		mainUserAgent  string
 		titleUserAgent string
 		rootUsesUASide bool
@@ -1050,6 +1051,7 @@ func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T
 			userID:         75,
 			rootID:         "01a03911-6f27-7f10-b723-88683446062b",
 			leafID:         "01a03912-6f27-7f10-b723-88683446062c",
+			threadSource:   "thread_title",
 			mainUserAgent:  "codex-tui/0.149.0",
 			titleUserAgent: "multica-agent-sdk/1.0",
 		},
@@ -1058,9 +1060,19 @@ func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T
 			userID:         77,
 			rootID:         "01a03915-6f27-7f10-b723-88683446062f",
 			leafID:         "01a03916-6f27-7f10-b723-886834460630",
+			threadSource:   "thread_description",
 			mainUserAgent:  "multica-agent-sdk/1.0",
 			titleUserAgent: "codex-tui/0.149.0",
 			rootUsesUASide: true,
+		},
+		{
+			name:           "normal root and UA-only title reconsideration",
+			userID:         79,
+			rootID:         "01a03919-6f27-7f10-b723-886834460633",
+			leafID:         "01a03920-6f27-7f10-b723-886834460634",
+			threadSource:   "thread_title_reconsideration",
+			mainUserAgent:  "codex-tui/0.149.0",
+			titleUserAgent: "multica-agent-sdk/1.0",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1102,10 +1114,10 @@ func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T
 			}
 			require.Equal(t, expectedChannel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
 
-			titleContext, titleRecorder := codexLinkedThreadDescriptionContext(tc.userID, tokenID, tc.rootID, tc.leafID)
+			titleContext, titleRecorder := codexLinkedNamingContext(tc.userID, tokenID, tc.rootID, tc.leafID, tc.threadSource)
 			titleContext.Request.Header.Set("User-Agent", tc.titleUserAgent)
 			resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
-			require.True(t, isLinkedCodexThreadDescription(resolution))
+			require.True(t, isLinkedCodexNamingRequest(resolution))
 			Distribute()(titleContext)
 
 			require.Less(t, titleRecorder.Code, http.StatusBadRequest)
@@ -1114,12 +1126,38 @@ func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T
 			require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
 			require.Equal(t, tc.rootUsesUASide, common.GetContextKeyBool(titleContext, constant.ContextKeyChannelAffinityUserAgentRouted))
 			require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
-			require.False(t, service.RequiresConfiguredAffinityPool(titleContext), "linked thread descriptions must not establish a routing boundary from their own UA")
+			require.False(t, service.RequiresConfiguredAffinityPool(titleContext), "linked Codex naming requests must not establish a routing boundary from their own UA")
 		})
 	}
 }
 
-func TestLinkedThreadDescriptionWaitsForConcurrentRootBinding(t *testing.T) {
+func TestLinkedCodexNamingClassificationKeepsNarrowProtocolBoundary(t *testing.T) {
+	valid := relaychannel.CodexRootSessionResolution{
+		RootID: "01a03921-6f27-7f10-b723-886834460635", Resolved: true, Related: true,
+	}
+	for _, source := range []string{"thread_title", "thread_description", "thread_title_reconsideration"} {
+		resolution := valid
+		resolution.ThreadSource = source
+		require.True(t, isLinkedCodexNamingRequest(resolution), source)
+	}
+	for _, source := range []string{"", "thread_summary", "subagent", "system", "user"} {
+		resolution := valid
+		resolution.ThreadSource = source
+		require.False(t, isLinkedCodexNamingRequest(resolution), source)
+	}
+	for _, mutate := range []func(*relaychannel.CodexRootSessionResolution){
+		func(resolution *relaychannel.CodexRootSessionResolution) { resolution.Resolved = false },
+		func(resolution *relaychannel.CodexRootSessionResolution) { resolution.Related = false },
+		func(resolution *relaychannel.CodexRootSessionResolution) { resolution.RootID = "" },
+	} {
+		resolution := valid
+		resolution.ThreadSource = "thread_title"
+		mutate(&resolution)
+		require.False(t, isLinkedCodexNamingRequest(resolution))
+	}
+}
+
+func TestLinkedCodexTitleWaitsForConcurrentRootBinding(t *testing.T) {
 	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
 	const (
 		userID  = 78
@@ -1140,7 +1178,7 @@ func TestLinkedThreadDescriptionWaitsForConcurrentRootBinding(t *testing.T) {
 		return nil
 	}
 
-	titleContext, titleRecorder := codexLinkedThreadDescriptionContext(userID, tokenID, rootID, leafID)
+	titleContext, titleRecorder := codexLinkedNamingContext(userID, tokenID, rootID, leafID, "thread_title")
 	Distribute()(titleContext)
 
 	require.Equal(t, 1, waitCalls)
@@ -1152,7 +1190,7 @@ func TestLinkedThreadDescriptionWaitsForConcurrentRootBinding(t *testing.T) {
 	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id), "the linked title must not require an independently schedulable Luna ability")
 }
 
-func TestUnlinkedThreadDescriptionCannotBypassUARoutingBoundary(t *testing.T) {
+func TestUnlinkedCodexTitleCannotBypassUARoutingBoundary(t *testing.T) {
 	normalChannel, key, _ := setupCodexRootDistributorTest(t)
 	baseURL := normalChannel.GetBaseURL()
 	priority := int64(1)
@@ -1190,10 +1228,10 @@ func TestUnlinkedThreadDescriptionCannotBypassUARoutingBoundary(t *testing.T) {
 
 	titleContext, titleRecorder := codexUnlinkedTitleContext(userID, tokenID, titleID)
 	titleContext.Request.Header.Set("User-Agent", "multica-agent-sdk/1.0")
-	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_description","request_kind":"turn"}`)
+	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_title","request_kind":"turn"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	require.False(t, resolution.Related)
-	require.False(t, isLinkedCodexThreadDescription(resolution))
+	require.False(t, isLinkedCodexNamingRequest(resolution))
 	Distribute()(titleContext)
 
 	require.Less(t, titleRecorder.Code, http.StatusBadRequest)

@@ -26,10 +26,10 @@ const (
 )
 
 var (
-	codexUnlinkedPassiveRootWaitTimeout         = 3 * time.Second
-	codexLinkedThreadDescriptionRootWaitTimeout = 3 * time.Second
-	waitForRecentCodexRootChannelUpdate         = service.WaitForRecentCodexRootChannelUpdate
-	waitForCodexRootChannelBindingUpdate        = service.WaitForCodexRootChannelBindingUpdate
+	codexUnlinkedPassiveRootWaitTimeout  = 3 * time.Second
+	codexLinkedNamingRootWaitTimeout     = 3 * time.Second
+	waitForRecentCodexRootChannelUpdate  = service.WaitForRecentCodexRootChannelUpdate
+	waitForCodexRootChannelBindingUpdate = service.WaitForCodexRootChannelBindingUpdate
 )
 
 type codexRootChannelRoute struct {
@@ -87,12 +87,19 @@ func requestCanUseStoredCodexGroup(c *gin.Context, usingGroup, storedGroup strin
 	return slices.Contains(service.GetRequestAutoGroups(c, userGroup), storedGroup)
 }
 
-func isLinkedCodexThreadDescription(resolution relaychannel.CodexRootSessionResolution) bool {
-	return resolution.Resolved && resolution.Related && strings.TrimSpace(resolution.RootID) != "" &&
-		strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "thread_description")
+func isLinkedCodexNamingRequest(resolution relaychannel.CodexRootSessionResolution) bool {
+	if !resolution.Resolved || !resolution.Related || strings.TrimSpace(resolution.RootID) == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(resolution.ThreadSource)) {
+	case "thread_title", "thread_description", "thread_title_reconsideration":
+		return true
+	default:
+		return false
+	}
 }
 
-func loadLinkedCodexThreadDescriptionRootBinding(c *gin.Context, userID int, rootID string) (service.CodexRootChannelBinding, bool, error) {
+func loadLinkedCodexNamingRootBinding(c *gin.Context, userID int, rootID string) (service.CodexRootChannelBinding, bool, error) {
 	rootID = strings.TrimSpace(rootID)
 	if c == nil || userID <= 0 || rootID == "" {
 		return service.CodexRootChannelBinding{}, false, nil
@@ -102,26 +109,26 @@ func loadLinkedCodexThreadDescriptionRootBinding(c *gin.Context, userID int, roo
 		requestContext = c.Request.Context()
 	}
 	binding, found, err := service.LoadCodexRootChannelBindingContext(requestContext, userID, rootID)
-	if err != nil || found || codexLinkedThreadDescriptionRootWaitTimeout <= 0 {
+	if err != nil || found || codexLinkedNamingRootWaitTimeout <= 0 {
 		return binding, found, err
 	}
 
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexLinkedThreadDescriptionRootWaitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, codexLinkedNamingRootWaitTimeout)
 	defer cancelWait()
 	for {
-		waitErr := waitForCodexRootChannelBindingUpdate(waitContext, userID, rootID, codexLinkedThreadDescriptionRootWaitTimeout)
+		waitErr := waitForCodexRootChannelBindingUpdate(waitContext, userID, rootID, codexLinkedNamingRootWaitTimeout)
 		if waitErr != nil {
 			if errors.Is(waitErr, context.DeadlineExceeded) && requestContext.Err() == nil {
 				return service.CodexRootChannelBinding{}, false, nil
 			}
-			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked thread description root binding: %w", waitErr)
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked Codex naming root binding: %w", waitErr)
 		}
 		binding, found, err = service.LoadCodexRootChannelBindingContext(waitContext, userID, rootID)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
 				return service.CodexRootChannelBinding{}, false, nil
 			}
-			return service.CodexRootChannelBinding{}, false, fmt.Errorf("load linked thread description root binding: %w", err)
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("load linked Codex naming root binding: %w", err)
 		}
 		if found {
 			return binding, true, nil
@@ -130,7 +137,7 @@ func loadLinkedCodexThreadDescriptionRootBinding(c *gin.Context, userID int, roo
 			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
 				return service.CodexRootChannelBinding{}, false, nil
 			}
-			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked thread description root binding: %w", err)
+			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked Codex naming root binding: %w", err)
 		}
 	}
 }
@@ -154,8 +161,8 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	var binding service.CodexRootChannelBinding
 	var found bool
 	var err error
-	if isLinkedCodexThreadDescription(resolution) {
-		binding, found, err = loadLinkedCodexThreadDescriptionRootBinding(c, userID, resolution.RootID)
+	if isLinkedCodexNamingRequest(resolution) {
+		binding, found, err = loadLinkedCodexNamingRootBinding(c, userID, resolution.RootID)
 		if found {
 			requestUARoutingOnly = binding.UARoutingOnly
 		}
