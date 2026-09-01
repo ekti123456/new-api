@@ -275,6 +275,132 @@ func TestCodexPassiveRootAliasIsImmutableAndScoped(t *testing.T) {
 	require.Equal(t, alias, got)
 }
 
+func TestCodexTitleRootCandidatesMergeRoutingSidesAndRequireFreshRecentIntersection(t *testing.T) {
+	useCodexPassiveRouteRedis(t)
+	const userID, tokenID = 42201, 10201
+	normalRoot := "normal:" + t.Name()
+	uaRoot := "ua:" + t.Name()
+	normal := CodexRootChannelBinding{ChannelID: 821, SelectedGroup: "pro", KeyFingerprint: "normal-key"}
+	ua := CodexRootChannelBinding{ChannelID: 822, SelectedGroup: "pro", KeyFingerprint: "ua-key", UARoutingOnly: true}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, normalRoot, normal))
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, uaRoot, ua))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, normalRoot, normal))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, uaRoot, ua))
+
+	candidates, err := LoadCodexTitleRootChannelCandidates(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
+	byRoot := map[string]CodexRootChannelBinding{}
+	for _, candidate := range candidates {
+		byRoot[candidate.RootID] = candidate.Binding
+	}
+	require.Equal(t, normal, byRoot[normalRoot])
+	require.Equal(t, ua, byRoot[uaRoot])
+
+	err = ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, "title:"+t.Name(), codexPassiveRootAliasForBinding(normalRoot, normal))
+	require.ErrorIs(t, err, ErrCodexPassiveRootCandidatesChanged, "two candidates across different sides must remain ambiguous")
+}
+
+func TestCodexTitleRootCandidateExpiresBeforeRecentCandidate(t *testing.T) {
+	server := useCodexPassiveRouteRedis(t)
+	const userID, tokenID = 42202, 10202
+	rootID := "root:" + t.Name()
+	binding := CodexRootChannelBinding{ChannelID: 823, SelectedGroup: "pro", KeyFingerprint: "title-key"}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+
+	candidates, err := LoadCodexTitleRootChannelCandidates(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	server.FastForward(codexTitleRootCandidateTTL + time.Second)
+	candidates, err = LoadCodexTitleRootChannelCandidates(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.Empty(t, candidates)
+	require.ErrorIs(t,
+		ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, "title:"+t.Name(), codexPassiveRootAliasForBinding(rootID, binding)),
+		ErrCodexPassiveRootCandidatesChanged,
+	)
+}
+
+func TestCodexTitleRootAliasClaimIsUniqueInRedis(t *testing.T) {
+	useCodexPassiveRouteRedis(t)
+	const userID, tokenID = 42203, 10203
+	rootID := "root:" + t.Name()
+	titleID := "title:" + t.Name()
+	binding := CodexRootChannelBinding{ChannelID: 824, SelectedGroup: "pro", KeyFingerprint: "winner-key", UARoutingOnly: true}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+	alias := codexPassiveRootAliasForBinding(rootID, binding)
+	require.NoError(t, ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, titleID, alias))
+	require.NoError(t, ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, titleID, alias))
+	conflicting := alias
+	conflicting.SelectedGroup = "other"
+	require.ErrorIs(t, ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, titleID, conflicting), ErrCodexPassiveRootCandidatesChanged)
+	got, found, err := LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, titleID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, alias, got)
+}
+
+func TestCodexTitleRootAliasMemoryClaimRejectsCrossSideAmbiguity(t *testing.T) {
+	originalEnabled := common.RedisEnabled
+	originalClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalEnabled
+		common.RDB = originalClient
+	})
+	const userID, tokenID = 42204, 10204
+	normalRoot := "normal:" + t.Name()
+	uaRoot := "ua:" + t.Name()
+	normal := CodexRootChannelBinding{ChannelID: 825, SelectedGroup: "pro", KeyFingerprint: "normal-memory"}
+	ua := CodexRootChannelBinding{ChannelID: 826, SelectedGroup: "pro", KeyFingerprint: "ua-memory", UARoutingOnly: true}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, normalRoot, normal))
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, uaRoot, ua))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, normalRoot, normal))
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, uaRoot, ua))
+	require.ErrorIs(t,
+		ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, "title:"+t.Name(), codexPassiveRootAliasForBinding(normalRoot, normal)),
+		ErrCodexPassiveRootCandidatesChanged,
+	)
+}
+
+func TestCodexTitleRootCandidateMemoryStoreNotifiesWaiterAndClaimsNormalSide(t *testing.T) {
+	originalEnabled := common.RedisEnabled
+	originalClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalEnabled
+		common.RDB = originalClient
+	})
+	const userID, tokenID = 42205, 10205
+	rootID := "root:" + t.Name()
+	titleID := "title:" + t.Name()
+	binding := CodexRootChannelBinding{ChannelID: 827, SelectedGroup: "pro", KeyFingerprint: "normal-notify"}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- WaitForCodexTitleRootChannelUpdate(context.Background(), userID, tokenID, time.Second)
+	}()
+	waiterScope := codexPassiveRootRedisScopeKey(userID, tokenID)
+	require.Eventually(t, func() bool {
+		codexTitleRootWaiters.Lock()
+		defer codexTitleRootWaiters.Unlock()
+		return codexTitleRootWaiters.items[waiterScope] != nil
+	}, time.Second, time.Millisecond)
+
+	require.NoError(t, StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+	require.NoError(t, <-waitResult)
+	alias := codexPassiveRootAliasForBinding(rootID, binding)
+	require.NoError(t, ClaimCodexTitleRootAlias(context.Background(), userID, tokenID, titleID, alias))
+	got, found, err := LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, titleID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, alias, got)
+}
+
 func TestCodexPassiveRootAliasClaimRejectsAmbiguousCandidates(t *testing.T) {
 	const userID, tokenID = 42005, 10105
 	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "abcdef0123456789"}

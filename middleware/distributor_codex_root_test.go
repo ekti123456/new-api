@@ -34,6 +34,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
 	originalLinkedWaitTimeout := codexLinkedNamingRootWaitTimeout
 	originalWaitForRecentUpdate := waitForRecentCodexRootChannelUpdate
+	originalWaitForTitleUpdate := waitForRecentCodexTitleRootUpdate
 	originalWaitForRootBindingUpdate := waitForCodexRootChannelBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
 	codexLinkedNamingRootWaitTimeout = 25 * time.Millisecond
@@ -77,6 +78,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
 		codexLinkedNamingRootWaitTimeout = originalLinkedWaitTimeout
 		waitForRecentCodexRootChannelUpdate = originalWaitForRecentUpdate
+		waitForRecentCodexTitleRootUpdate = originalWaitForTitleUpdate
 		waitForCodexRootChannelBindingUpdate = originalWaitForRootBindingUpdate
 		model.DB = originalDB
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
@@ -145,6 +147,12 @@ func codexUnlinkedTitleContext(userID, tokenID int, titleID string) (*gin.Contex
 	common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "pro")
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, "pro")
+	return c, recorder
+}
+
+func codexUnlinkedNativeTitleContext(userID, tokenID int, titleID string) (*gin.Context, *httptest.ResponseRecorder) {
+	c, recorder := codexUnlinkedTitleContext(userID, tokenID, titleID)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_title","request_kind":"turn"}`)
 	return c, recorder
 }
 
@@ -1190,7 +1198,7 @@ func TestLinkedCodexTitleWaitsForConcurrentRootBinding(t *testing.T) {
 	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id), "the linked title must not require an independently schedulable Luna ability")
 }
 
-func TestUnlinkedCodexTitleCannotBypassUARoutingBoundary(t *testing.T) {
+func TestUnlinkedCodexTitleInheritsRootAcrossUARoutingBoundary(t *testing.T) {
 	normalChannel, key, _ := setupCodexRootDistributorTest(t)
 	baseURL := normalChannel.GetBaseURL()
 	priority := int64(1)
@@ -1226,19 +1234,104 @@ func TestUnlinkedCodexTitleCannotBypassUARoutingBoundary(t *testing.T) {
 	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
 	require.Equal(t, normalChannel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
 
-	titleContext, titleRecorder := codexUnlinkedTitleContext(userID, tokenID, titleID)
+	titleContext, titleRecorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
 	titleContext.Request.Header.Set("User-Agent", "multica-agent-sdk/1.0")
-	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_title","request_kind":"turn"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	require.False(t, resolution.Related)
 	require.False(t, isLinkedCodexNamingRequest(resolution))
+	require.True(t, isCodexNamingRequest(resolution))
 	Distribute()(titleContext)
 
 	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
 	require.False(t, titleContext.IsAborted())
-	require.Equal(t, routedChannel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
-	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyChannelAffinityUserAgentRouted))
-	require.False(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+	require.Equal(t, normalChannel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
+	require.False(t, common.GetContextKeyBool(titleContext, constant.ContextKeyChannelAffinityUserAgentRouted))
+	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+	resolved := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+	require.True(t, resolved.Related)
+	require.Equal(t, rootID, resolved.RootID)
+	require.Equal(t, "related_internal", relaychannel.CodexPassiveRootSessionOverrideFeature(titleContext))
+}
+
+func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 177
+		tokenID = 1735
+		rootID  = "01a04913-6f27-7f10-b723-88683446062d"
+		titleID = "01a04914-6f27-7f10-b723-88683446062e"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	waitCalls := 0
+	waitForRecentCodexTitleRootUpdate = func(ctx context.Context, gotUserID, gotTokenID int, maxWait time.Duration) error {
+		waitCalls++
+		require.Equal(t, userID, gotUserID)
+		require.Equal(t, tokenID, gotTokenID)
+		require.Positive(t, maxWait)
+		if waitCalls == 1 {
+			require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
+			require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
+			require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+			return nil
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	titleContext, titleRecorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
+	Distribute()(titleContext)
+
+	require.Equal(t, 2, waitCalls)
+	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
+	require.False(t, titleContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestUnlinkedCodexTitleFailsClosedWithoutFreshRoot(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
+	priority := int64(1)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "pro", Model: "gpt-5.6-luna", ChannelId: channel.Id, Enabled: true, Priority: &priority,
+	}).Error)
+	model.InitChannelCache()
+
+	titleContext, recorder := codexUnlinkedNativeTitleContext(178, 1736, "01a04915-6f27-7f10-b723-88683446062f")
+	Distribute()(titleContext)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.True(t, titleContext.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+}
+
+func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 179
+		tokenID = 1737
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	for _, rootID := range []string{
+		"01a04916-6f27-7f10-b723-886834460630",
+		"01a04917-6f27-7f10-b723-886834460631",
+	} {
+		require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
+		require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
+		require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+	}
+
+	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a04918-6f27-7f10-b723-886834460632")
+	Distribute()(titleContext)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.True(t, titleContext.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
 
 func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testing.T) {

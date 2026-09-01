@@ -275,6 +275,18 @@ func ClassifyUnlinkedCodexSystemRequest(resolution CodexRootSessionResolution) (
 	return "system_passive", true
 }
 
+// ClassifyUnlinkedCodexThreadTitleRequest recognizes the fresh, independent
+// native thread used for title generation. Its root is intentionally resolved
+// by the temporal bridge in the distributor; only the stable protocol fields
+// below may opt a request into that path.
+func ClassifyUnlinkedCodexThreadTitleRequest(resolution CodexRootSessionResolution) (string, bool) {
+	if !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
+		!strings.EqualFold(resolution.ThreadSource, "thread_title") {
+		return "", false
+	}
+	return "related_internal", true
+}
+
 // ClassifyLinkedCodexPassiveInternalRequest recognizes any non-user Codex child
 // from the stable native root/leaf graph. Unknown future source labels and model
 // names follow the same path; only the protocol fields decide classification.

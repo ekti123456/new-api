@@ -237,8 +237,8 @@ func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *test
 	c.Request.Header.Set("Thread-Id", titleID)
 	c.Request.Header.Set("X-Client-Request-Id", titleID)
 	c.Request.Header.Set("X-Codex-Window-Id", titleID+":0")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"system","request_kind":"turn"}`)
-	require.True(t, SetCodexPassiveRootSessionOverride(c, rootID, "system_passive"))
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_title","request_kind":"turn"}`)
+	require.True(t, SetCodexPassiveRootSessionOverride(c, rootID, "related_internal"))
 
 	body := []byte(`{"model":"gpt-5.6-luna","input":"title"}`)
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18095/v1/responses", bytes.NewReader(body))
@@ -261,9 +261,9 @@ func TestApplyNewAPIPolicyHeadersUsesPassiveRootOverrideForUnlinkedTitle(t *test
 	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID), meta.RootSessionFingerprint)
 	require.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", titleID), meta.SessionFingerprint)
 	require.NotEqual(t, meta.RootSessionFingerprint, meta.SessionFingerprint)
-	require.Equal(t, "system", meta.ThreadSource)
+	require.Equal(t, "thread_title", meta.ThreadSource)
 	require.Equal(t, "turn", meta.RequestKind)
-	require.Equal(t, "system_passive", meta.PassiveFeature)
+	require.Equal(t, "related_internal", meta.PassiveFeature)
 	require.Empty(t, meta.SessionAccounting)
 }
 
@@ -307,6 +307,64 @@ func TestClassifyUnlinkedCodexSystemRequestUsesOnlyStableMetadata(t *testing.T) 
 	require.False(t, ok, "already-related requests must use their explicit lineage instead of the temporal bridge")
 	_, ok = ClassifyUnlinkedCodexSystemRequest(CodexRootSessionResolution{ThreadSource: "user"})
 	require.False(t, ok, "ordinary user turns must stay on normal model authorization")
+}
+
+func TestClassifyUnlinkedCodexThreadTitleRequestUsesExactStableMetadata(t *testing.T) {
+	const rootID = "01a03787-1743-7151-a307-c1c0f1615bb6"
+	cases := []struct {
+		name       string
+		resolution CodexRootSessionResolution
+		feature    string
+		classified bool
+	}{
+		{
+			name:       "native source",
+			resolution: CodexRootSessionResolution{RootID: rootID, Resolved: true, ThreadSource: "thread_title"},
+			feature:    "related_internal", classified: true,
+		},
+		{
+			name:       "source is case insensitive",
+			resolution: CodexRootSessionResolution{RootID: rootID, Resolved: true, ThreadSource: "THREAD_TITLE"},
+			feature:    "related_internal", classified: true,
+		},
+		{
+			name:       "unresolved",
+			resolution: CodexRootSessionResolution{RootID: rootID, ThreadSource: "thread_title"},
+		},
+		{
+			name:       "already related",
+			resolution: CodexRootSessionResolution{RootID: rootID, Resolved: true, Related: true, ThreadSource: "thread_title"},
+		},
+		{
+			name:       "missing root",
+			resolution: CodexRootSessionResolution{Resolved: true, ThreadSource: "thread_title"},
+		},
+		{
+			name:       "blank root",
+			resolution: CodexRootSessionResolution{RootID: "  ", Resolved: true, ThreadSource: "thread_title"},
+		},
+		{
+			name:       "surrounding whitespace is not exact",
+			resolution: CodexRootSessionResolution{RootID: rootID, Resolved: true, ThreadSource: " thread_title"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			feature, classified := ClassifyUnlinkedCodexThreadTitleRequest(tc.resolution)
+			require.Equal(t, tc.classified, classified)
+			require.Equal(t, tc.feature, feature)
+		})
+	}
+
+	for _, source := range []string{"thread_description", "thread_title_reconsideration", "system", "user", "subagent", ""} {
+		t.Run("reject "+source, func(t *testing.T) {
+			feature, classified := ClassifyUnlinkedCodexThreadTitleRequest(CodexRootSessionResolution{
+				RootID: rootID, Resolved: true, ThreadSource: source,
+			})
+			require.False(t, classified, source)
+			require.Empty(t, feature)
+		})
+	}
 }
 
 func TestClassifyCodexSessionAccountingBypassUsesStableSystemMetadata(t *testing.T) {

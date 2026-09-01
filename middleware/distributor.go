@@ -42,10 +42,10 @@ func Distribute() func(c *gin.Context) {
 		}
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
-		// A coherently linked Codex naming request belongs to the root task and
-		// must inherit that task's routing side. All other requests establish their
-		// own UA boundary before any durable root binding is restored.
-		if !isLinkedCodexNamingRequest(rootSession) {
+		// A Codex naming request belongs to the user root and must inherit that
+		// root's routing side. The initial thread_title is a fresh ephemeral thread,
+		// while description/reconsideration requests carry an explicit parent graph.
+		if !isCodexNamingRequest(rootSession) {
 			service.PrepareUserAgentRoutingMode(c, usingGroup)
 		}
 		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)

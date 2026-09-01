@@ -22,6 +22,7 @@ import (
 const (
 	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v2"
 	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v1"
+	codexTitleRootCandidateNamespace         = "new-api:codex_title_root_candidate:v1"
 	codexRecentRootChannelCandidateTTL       = 10 * time.Minute
 	codexProvisionalRootCandidateTTL         = 2 * time.Minute
 	codexPassiveRootAliasProvisionalTTL      = 2 * time.Minute
@@ -29,6 +30,7 @@ const (
 	codexRecentRootChannelCandidateLimit     = 32
 	codexPassiveRootRedisTimeout             = 500 * time.Millisecond
 	codexRecentRootPollInterval              = 200 * time.Millisecond
+	codexTitleRootCandidateTTL               = 5 * time.Second
 )
 
 var (
@@ -64,8 +66,14 @@ var (
 
 	codexPassiveRootAliasMemoryOnce sync.Once
 	codexPassiveRootAliasMemory     *hot.HotCache[string, CodexPassiveRootAlias]
+	codexTitleRootMemoryOnce        sync.Once
+	codexTitleRootMemory            *hot.HotCache[string, map[string]int64]
 
 	codexRecentRootWaiters = struct {
+		sync.Mutex
+		items map[string]*codexRecentRootWaiter
+	}{items: make(map[string]*codexRecentRootWaiter)}
+	codexTitleRootWaiters = struct {
 		sync.Mutex
 		items map[string]*codexRecentRootWaiter
 	}{items: make(map[string]*codexRecentRootWaiter)}
@@ -144,6 +152,35 @@ redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
 return 1
 `)
 
+var claimCodexTitleRootAliasScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current then
+  if current == ARGV[1] then return 1 end
+  return -1
+end
+local redis_time = redis.call('TIME')
+local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+local count = 0
+local candidate = nil
+for index = 2, 3 do
+  redis.call('ZREMRANGEBYSCORE', KEYS[index], '-inf', now_ms)
+  redis.call('ZREMRANGEBYSCORE', KEYS[index + 2], '-inf', now_ms)
+  local fresh = redis.call('ZRANGEBYSCORE', KEYS[index], '(' .. now_ms, '+inf')
+  for _, member in ipairs(fresh) do
+    if redis.call('ZSCORE', KEYS[index + 2], member) then
+      count = count + 1
+      candidate = member
+    end
+  end
+end
+if count ~= 1 or candidate ~= ARGV[2] then return 0 end
+if redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3], 'NX') then return 1 end
+local claimed = redis.call('GET', KEYS[1])
+if claimed == ARGV[1] then return 1 end
+if claimed then return -1 end
+return 0
+`)
+
 func getCodexRecentRootMemory() *hot.HotCache[string, map[string]int64] {
 	codexRecentRootMemoryOnce.Do(func() {
 		codexRecentRootMemory = hot.NewHotCache[string, map[string]int64](hot.LRU, 100_000).
@@ -164,6 +201,16 @@ func getCodexPassiveRootAliasMemory() *hot.HotCache[string, CodexPassiveRootAlia
 	return codexPassiveRootAliasMemory
 }
 
+func getCodexTitleRootMemory() *hot.HotCache[string, map[string]int64] {
+	codexTitleRootMemoryOnce.Do(func() {
+		codexTitleRootMemory = hot.NewHotCache[string, map[string]int64](hot.LRU, 100_000).
+			WithTTL(codexTitleRootCandidateTTL).
+			WithJanitor().
+			Build()
+	})
+	return codexTitleRootMemory
+}
+
 func codexRecentRootChannelScopeKey(userID, tokenID int, uaRoutingOnly bool) string {
 	baseScope := codexPassiveRootRedisScopeKey(userID, tokenID)
 	if baseScope == "" {
@@ -182,6 +229,14 @@ func codexRecentRootChannelRedisKey(scopeKey string) string {
 		return ""
 	}
 	return cachex.Namespace(codexRecentRootChannelCandidateNamespace).FullKey("{" + baseScope + "}:" + scopeKey)
+}
+
+func codexTitleRootCandidateRedisKey(scopeKey string) string {
+	baseScope, _, _ := strings.Cut(scopeKey, ":")
+	if baseScope == "" {
+		return ""
+	}
+	return cachex.Namespace(codexTitleRootCandidateNamespace).FullKey("{" + baseScope + "}:" + scopeKey)
 }
 
 func codexPassiveRootRedisScopeKey(userID, tokenID int) string {
@@ -246,6 +301,66 @@ func StoreRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, bi
 // in-flight root binding without extending either provisional lifetime.
 func StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
 	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexProvisionalRootCandidateTTL)
+}
+
+// StoreProvisionalCodexTitleRootChannelCandidate marks one already-published
+// recent root as eligible for a title request arriving in the next few seconds.
+func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
+	rootID = strings.TrimSpace(rootID)
+	fingerprint := CodexRootChannelBindingFingerprint(binding)
+	member := codexRecentRootCandidateMember(rootID, fingerprint)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly)
+	if scopeKey == "" || member == "" {
+		return nil
+	}
+	candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, binding.UARoutingOnly)
+	if err != nil {
+		return err
+	}
+	eligible := false
+	for _, candidate := range candidates {
+		if candidate.RootID == rootID && candidate.BindingFingerprint == fingerprint {
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
+		return ErrCodexRecentRootBindingUnavailable
+	}
+	expiresAt := time.Now().UTC().Add(codexTitleRootCandidateTTL)
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), codexPassiveRootRedisTimeout)
+		defer cancel()
+		_, err = storeCodexRecentRootCandidateScript.Run(ctx, common.RDB,
+			[]string{codexTitleRootCandidateRedisKey(scopeKey)}, int64(codexTitleRootCandidateTTL/time.Millisecond),
+			member, codexRecentRootChannelCandidateLimit, int64(codexTitleRootCandidateTTL/time.Second)).Result()
+		if err != nil {
+			return err
+		}
+	} else {
+		codexRecentRootMemoryMu.Lock()
+		storeCodexCandidateMemory(getCodexTitleRootMemory(), scopeKey, member, expiresAt, codexTitleRootCandidateTTL)
+		codexRecentRootMemoryMu.Unlock()
+	}
+	notifyCodexTitleRootChannelUpdate(codexPassiveRootRedisScopeKey(userID, tokenID))
+	return nil
+}
+
+func storeCodexCandidateMemory(cache *hot.HotCache[string, map[string]int64], scopeKey, member string, expiresAt time.Time, ttl time.Duration) {
+	current, found, _ := cache.Get(scopeKey)
+	updated := make(map[string]int64, len(current)+1)
+	nowMillis := time.Now().UTC().UnixMilli()
+	if found {
+		for candidate, candidateExpiresAt := range current {
+			if candidateExpiresAt > nowMillis {
+				updated[candidate] = candidateExpiresAt
+			}
+		}
+	}
+	if previous := updated[member]; previous < expiresAt.UnixMilli() {
+		updated[member] = expiresAt.UnixMilli()
+	}
+	cache.SetWithTTL(scopeKey, updated, ttl)
 }
 
 func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, activeTTL time.Duration) error {
@@ -454,6 +569,75 @@ func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID i
 	return candidates, nil
 }
 
+// LoadCodexTitleRootChannelCandidates returns only roots present in both the
+// normal recent-candidate set and the five-second title marker, across both
+// routing sides.
+func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID int) ([]CodexRecentRootChannelCandidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]CodexRecentRootChannelCandidate, 0, 2)
+	for _, uaRoutingOnly := range []bool{false, true} {
+		recent, err := LoadRecentCodexRootChannelCandidates(ctx, userID, tokenID, uaRoutingOnly)
+		if err != nil {
+			return nil, err
+		}
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+		fresh, err := loadCodexCandidateTimes(ctx, scopeKey, codexTitleRootCandidateRedisKey(scopeKey), getCodexTitleRootMemory(), time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range recent {
+			member := codexRecentRootCandidateMember(candidate.RootID, candidate.BindingFingerprint)
+			if expiresAt, found := fresh[member]; found {
+				candidate.ExpiresAt = time.UnixMilli(expiresAt).UTC()
+				result = append(result, candidate)
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].ExpiresAt.Equal(result[j].ExpiresAt) {
+			return result[i].RootID < result[j].RootID
+		}
+		return result[i].ExpiresAt.After(result[j].ExpiresAt)
+	})
+	return result, nil
+}
+
+func loadCodexCandidateTimes(ctx context.Context, scopeKey, redisKey string, memory *hot.HotCache[string, map[string]int64], now time.Time) (map[string]int64, error) {
+	if scopeKey == "" {
+		return map[string]int64{}, nil
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		loadContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+		defer cancel()
+		raw, err := loadCodexRecentRootCandidatesScript.Run(loadContext, common.RDB, []string{redisKey}).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return nil, err
+		}
+		return decodeCodexRecentRootCandidateScores(raw)
+	}
+	codexRecentRootMemoryMu.Lock()
+	defer codexRecentRootMemoryMu.Unlock()
+	current, found, err := memory.Get(scopeKey)
+	if err != nil || !found {
+		return nil, err
+	}
+	active := make(map[string]int64, len(current))
+	for member, expiresAt := range current {
+		if expiresAt > now.UnixMilli() {
+			active[member] = expiresAt
+		}
+	}
+	if len(active) == 0 {
+		memory.Delete(scopeKey)
+	}
+	return active, nil
+}
+
 func removeStaleCodexRecentRootCandidates(ctx context.Context, scopeKey string, staleMembers map[string]int64) error {
 	if len(staleMembers) == 0 {
 		return nil
@@ -614,6 +798,168 @@ func notifyCodexRecentRootChannelUpdate(scopeKey string) {
 		close(waiter.updates)
 	}
 	codexRecentRootWaiters.Unlock()
+}
+
+func WaitForCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int, maxWait time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if maxWait <= 0 {
+		return nil
+	}
+	scopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+	if scopeKey == "" {
+		return nil
+	}
+	codexTitleRootWaiters.Lock()
+	waiter := codexTitleRootWaiters.items[scopeKey]
+	if waiter == nil {
+		waiter = &codexRecentRootWaiter{updates: make(chan struct{})}
+		codexTitleRootWaiters.items[scopeKey] = waiter
+	}
+	waiter.count++
+	codexTitleRootWaiters.Unlock()
+	defer func() {
+		codexTitleRootWaiters.Lock()
+		if current := codexTitleRootWaiters.items[scopeKey]; current == waiter {
+			current.count--
+			if current.count == 0 {
+				delete(codexTitleRootWaiters.items, scopeKey)
+			}
+		}
+		codexTitleRootWaiters.Unlock()
+	}()
+	waitDuration := maxWait
+	if waitDuration > codexRecentRootPollInterval {
+		waitDuration = codexRecentRootPollInterval
+	}
+	timer := time.NewTimer(waitDuration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waiter.updates:
+		return nil
+	case <-timer.C:
+		return nil
+	}
+}
+
+func notifyCodexTitleRootChannelUpdate(scopeKey string) {
+	codexTitleRootWaiters.Lock()
+	waiter := codexTitleRootWaiters.items[scopeKey]
+	if waiter != nil {
+		delete(codexTitleRootWaiters.items, scopeKey)
+		close(waiter.updates)
+	}
+	codexTitleRootWaiters.Unlock()
+}
+
+// ClaimCodexTitleRootAlias atomically binds an unlinked title session only
+// when the fresh-title/recent-candidate intersection contains exactly the
+// requested root across both routing sides.
+func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, titleRootID)
+	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
+	if cacheKey == "" || !validAlias {
+		return ErrCodexPassiveRootAliasInvalid
+	}
+	bindingContext, cancelBinding := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+	binding, found, err := LoadCodexRootChannelBindingForRoutingSideContext(bindingContext, userID, alias.RootID, alias.UARoutingOnly)
+	cancelBinding()
+	if err != nil {
+		return err
+	}
+	if !found || binding.SelectedGroup != alias.SelectedGroup || CodexRootChannelBindingFingerprint(binding) != alias.BindingFingerprint {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	winner, selectedWon, err := ClaimProvisionalCodexRootChannelBinding(userID, alias.RootID, binding)
+	if err != nil {
+		return err
+	}
+	if !selectedWon || CodexRootChannelBindingFingerprint(winner) != alias.BindingFingerprint {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	member := codexRecentRootCandidateMember(alias.RootID, alias.BindingFingerprint)
+	if common.RedisEnabled && common.RDB != nil {
+		payload, err := common.Marshal(alias)
+		if err != nil {
+			return err
+		}
+		claimContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+		defer cancel()
+		baseScope := codexPassiveRootRedisScopeKey(userID, tokenID)
+		normalScope := codexRecentRootChannelScopeKey(userID, tokenID, false)
+		uaScope := codexRecentRootChannelScopeKey(userID, tokenID, true)
+		stored, err := claimCodexTitleRootAliasScript.Run(claimContext, common.RDB, []string{
+			codexPassiveRootAliasRedisKey(baseScope, cacheKey),
+			codexTitleRootCandidateRedisKey(normalScope), codexTitleRootCandidateRedisKey(uaScope),
+			codexRecentRootChannelRedisKey(normalScope), codexRecentRootChannelRedisKey(uaScope),
+		}, string(payload), member, int64(codexPassiveRootAliasProvisionalTTL/time.Second)).Int()
+		if err != nil {
+			return err
+		}
+		if stored < 0 {
+			return ErrCodexPassiveRootAliasConflict
+		}
+		if stored == 0 {
+			return ErrCodexPassiveRootCandidatesChanged
+		}
+		return nil
+	}
+	codexRecentRootMemoryMu.Lock()
+	defer codexRecentRootMemoryMu.Unlock()
+	aliasCache := getCodexPassiveRootAliasMemory()
+	current, aliasFound, err := aliasCache.Get(cacheKey)
+	if err != nil {
+		return err
+	}
+	if aliasFound {
+		if current != alias {
+			return ErrCodexPassiveRootAliasConflict
+		}
+		return nil
+	}
+	nowMillis := time.Now().UTC().UnixMilli()
+	activeMember := ""
+	activeCount := 0
+	for _, side := range []bool{false, true} {
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, side)
+		fresh, freshFound, freshErr := getCodexTitleRootMemory().Get(scopeKey)
+		if freshErr != nil {
+			return freshErr
+		}
+		recent, recentFound, recentErr := getCodexRecentRootMemory().Get(scopeKey)
+		if recentErr != nil {
+			return recentErr
+		}
+		if !freshFound || !recentFound {
+			continue
+		}
+		for candidate, freshExpiresAt := range fresh {
+			if freshExpiresAt > nowMillis && recent[candidate] > nowMillis {
+				activeMember = candidate
+				activeCount++
+			}
+		}
+	}
+	if activeCount != 1 || activeMember != member {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	aliasCache.SetWithTTL(cacheKey, alias, codexPassiveRootAliasProvisionalTTL)
+	return nil
 }
 
 func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias) error {
