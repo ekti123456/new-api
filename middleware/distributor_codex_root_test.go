@@ -143,6 +143,24 @@ func codexUnlinkedTitleContext(userID, tokenID int, titleID string) (*gin.Contex
 	return c, recorder
 }
 
+func codexLinkedThreadDescriptionContext(userID, tokenID int, rootID, leafID string) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(codexTitleRequestBody()))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Session-Id", rootID)
+	c.Request.Header.Set("Thread-Id", leafID)
+	c.Request.Header.Set("X-Client-Request-Id", leafID)
+	c.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","window_id":"`+leafID+`:1","parent_thread_id":"`+rootID+`","thread_source":"thread_description","request_kind":"turn"}`)
+	common.SetContextKey(c, constant.ContextKeyUserId, userID)
+	common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "pro")
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "pro")
+	return c, recorder
+}
+
 func codexMainRootContext(userID, tokenID, channelID int, rootID string) (*gin.Context, *httptest.ResponseRecorder) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -1010,6 +1028,141 @@ func TestLinkedPassiveRequestDoesNotFallBackAcrossUARoutingBoundary(t *testing.T
 	require.Equal(t, http.StatusServiceUnavailable, guardianRecorder.Code)
 	require.True(t, guardianContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+}
+
+func TestLinkedThreadDescriptionInheritsRootAcrossUARoutingBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		userID         int
+		rootID         string
+		leafID         string
+		mainUserAgent  string
+		titleUserAgent string
+		rootUsesUASide bool
+	}{
+		{
+			name:           "normal root and UA-only title",
+			userID:         75,
+			rootID:         "01a03911-6f27-7f10-b723-88683446062b",
+			leafID:         "01a03912-6f27-7f10-b723-88683446062c",
+			mainUserAgent:  "codex-tui/0.149.0",
+			titleUserAgent: "multica-agent-sdk/1.0",
+		},
+		{
+			name:           "UA-only root and normal title",
+			userID:         77,
+			rootID:         "01a03915-6f27-7f10-b723-88683446062f",
+			leafID:         "01a03916-6f27-7f10-b723-886834460630",
+			mainUserAgent:  "multica-agent-sdk/1.0",
+			titleUserAgent: "codex-tui/0.149.0",
+			rootUsesUASide: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			normalChannel, key, _ := setupCodexRootDistributorTest(t)
+			baseURL := normalChannel.GetBaseURL()
+			priority := int64(1)
+			routedChannel := &model.Channel{
+				Id: normalChannel.Id + 1, Type: constant.ChannelTypeOpenAI, Key: key,
+				Status: common.ChannelStatusEnabled, Name: "ua-routed-title-channel",
+				BaseURL: &baseURL, Models: "gpt-5.6-sol,gpt-5.6-luna", Group: "pro", Priority: &priority,
+				UARoutingOnly: true,
+			}
+			require.NoError(t, model.DB.Create(routedChannel).Error)
+			for _, modelName := range []string{"gpt-5.6-sol", "gpt-5.6-luna"} {
+				require.NoError(t, model.DB.Create(&model.Ability{
+					Group: "pro", Model: modelName, ChannelId: routedChannel.Id, Enabled: true, Priority: &priority,
+				}).Error)
+			}
+			model.InitChannelCache()
+
+			setting := operation_setting.GetUserAgentRoutingSetting()
+			originalSetting := *setting
+			setting.Enabled = true
+			setting.UserAgentWhitelist = []string{"codex-tui"}
+			setting.ChannelIDs = []int{routedChannel.Id}
+			setting.GroupNames = []string{"pro"}
+			t.Cleanup(func() { *setting = originalSetting })
+
+			const tokenID = 733
+			mainContext, mainRecorder := codexMainRootContext(tc.userID, tokenID, 0, tc.rootID)
+			mainContext.Request.Header.Set("User-Agent", tc.mainUserAgent)
+			Distribute()(mainContext)
+			require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+			require.False(t, mainContext.IsAborted())
+
+			expectedChannel := normalChannel
+			if tc.rootUsesUASide {
+				expectedChannel = routedChannel
+			}
+			require.Equal(t, expectedChannel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
+
+			titleContext, titleRecorder := codexLinkedThreadDescriptionContext(tc.userID, tokenID, tc.rootID, tc.leafID)
+			titleContext.Request.Header.Set("User-Agent", tc.titleUserAgent)
+			resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+			require.True(t, isLinkedCodexThreadDescription(resolution))
+			Distribute()(titleContext)
+
+			require.Less(t, titleRecorder.Code, http.StatusBadRequest)
+			require.False(t, titleContext.IsAborted())
+			require.Equal(t, expectedChannel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+			require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
+			require.Equal(t, tc.rootUsesUASide, common.GetContextKeyBool(titleContext, constant.ContextKeyChannelAffinityUserAgentRouted))
+			require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+			require.False(t, service.RequiresConfiguredAffinityPool(titleContext), "linked thread descriptions must not establish a routing boundary from their own UA")
+		})
+	}
+}
+
+func TestUnlinkedThreadDescriptionCannotBypassUARoutingBoundary(t *testing.T) {
+	normalChannel, key, _ := setupCodexRootDistributorTest(t)
+	baseURL := normalChannel.GetBaseURL()
+	priority := int64(1)
+	routedChannel := &model.Channel{
+		Id: normalChannel.Id + 1, Type: constant.ChannelTypeOpenAI, Key: key,
+		Status: common.ChannelStatusEnabled, Name: "ua-routed-unlinked-title-channel",
+		BaseURL: &baseURL, Models: "gpt-5.6-luna", Group: "pro", Priority: &priority,
+		UARoutingOnly: true,
+	}
+	require.NoError(t, model.DB.Create(routedChannel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "pro", Model: "gpt-5.6-luna", ChannelId: routedChannel.Id, Enabled: true, Priority: &priority,
+	}).Error)
+	model.InitChannelCache()
+
+	setting := operation_setting.GetUserAgentRoutingSetting()
+	originalSetting := *setting
+	setting.Enabled = true
+	setting.UserAgentWhitelist = []string{"codex-tui"}
+	setting.ChannelIDs = []int{routedChannel.Id}
+	setting.GroupNames = []string{"pro"}
+	t.Cleanup(func() { *setting = originalSetting })
+
+	const (
+		userID  = 76
+		tokenID = 734
+		rootID  = "01a03913-6f27-7f10-b723-88683446062d"
+		titleID = "01a03914-6f27-7f10-b723-88683446062e"
+	)
+	mainContext, mainRecorder := codexMainRootContext(userID, tokenID, 0, rootID)
+	mainContext.Request.Header.Set("User-Agent", "codex-tui/0.149.0")
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.Equal(t, normalChannel.Id, common.GetContextKeyInt(mainContext, constant.ContextKeyChannelId))
+
+	titleContext, titleRecorder := codexUnlinkedTitleContext(userID, tokenID, titleID)
+	titleContext.Request.Header.Set("User-Agent", "multica-agent-sdk/1.0")
+	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","thread_source":"thread_description","request_kind":"turn"}`)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+	require.False(t, resolution.Related)
+	require.False(t, isLinkedCodexThreadDescription(resolution))
+	Distribute()(titleContext)
+
+	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
+	require.False(t, titleContext.IsAborted())
+	require.Equal(t, routedChannel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyChannelAffinityUserAgentRouted))
+	require.False(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
 }
 
 func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testing.T) {

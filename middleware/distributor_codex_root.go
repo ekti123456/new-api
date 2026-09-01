@@ -85,6 +85,11 @@ func requestCanUseStoredCodexGroup(c *gin.Context, usingGroup, storedGroup strin
 	return slices.Contains(service.GetRequestAutoGroups(c, userGroup), storedGroup)
 }
 
+func isLinkedCodexThreadDescription(resolution relaychannel.CodexRootSessionResolution) bool {
+	return resolution.Resolved && resolution.Related && strings.TrimSpace(resolution.RootID) != "" &&
+		strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "thread_description")
+}
+
 func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName, usingGroup string) (*model.Channel, string, bool, error) {
 	if c == nil {
 		return nil, "", false, nil
@@ -100,7 +105,18 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	}
 	passiveInternal := codexPassiveRouteAuthorized(c, resolution)
 	requestUARoutingOnly := common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted)
-	binding, found, err := service.LoadCodexRootChannelBindingForRoutingSide(c.GetInt(string(constant.ContextKeyUserId)), resolution.RootID, requestUARoutingOnly)
+	userID := c.GetInt(string(constant.ContextKeyUserId))
+	var binding service.CodexRootChannelBinding
+	var found bool
+	var err error
+	if isLinkedCodexThreadDescription(resolution) {
+		binding, found, err = service.LoadCodexRootChannelBinding(userID, resolution.RootID)
+		if found {
+			requestUARoutingOnly = binding.UARoutingOnly
+		}
+	} else {
+		binding, found, err = service.LoadCodexRootChannelBindingForRoutingSide(userID, resolution.RootID, requestUARoutingOnly)
+	}
 	if err != nil {
 		return nil, "", false, fmt.Errorf("load root channel binding: %w", err)
 	}

@@ -41,11 +41,13 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		// Establish the UA routing side before resolving any durable Codex root
-		// binding. Otherwise a client can forge a valid-looking session graph and
-		// recover a normal channel before UA routing gets a chance to run.
-		service.PrepareUserAgentRoutingMode(c, usingGroup)
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
+		// A coherently linked thread-description request belongs to the root task
+		// and must inherit that task's routing side. All other requests establish
+		// their own UA boundary before any durable root binding is restored.
+		if !isLinkedCodexThreadDescription(rootSession) {
+			service.PrepareUserAgentRoutingMode(c, usingGroup)
+		}
 		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
