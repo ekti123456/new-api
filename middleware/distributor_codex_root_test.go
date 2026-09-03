@@ -2202,6 +2202,318 @@ func TestUserForkCannotReusePassiveTurnToReplaceItsRoot(t *testing.T) {
 	require.Equal(t, forkRoot, resolved.RootID)
 }
 
+func TestCodexUserCompactionMayReuseComposerTurnID(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID = 62116
+		rootID = "01a06021-0000-7000-8000-0000000000f1"
+		turnID = "01a06021-0000-7000-8000-0000000000f2"
+	)
+
+	mainContext, mainRecorder := codexMainRootTurnContext(userID, 82150, channel.Id, rootID, turnID)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+
+	compactionContext, compactionRecorder := codexMainRootTurnContext(userID, 82151, 0, rootID, turnID)
+	compactionContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+rootID+`","window_id":"`+rootID+`:0","turn_id":"`+turnID+`","turn_trigger":"composer","thread_source":"user","request_kind":"compaction"}`)
+	before := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+	require.True(t, before.Resolved)
+	require.False(t, before.Related)
+	require.Equal(t, "user", before.ThreadSource)
+	require.Equal(t, "compaction", before.RequestKind)
+
+	Distribute()(compactionContext)
+	require.Less(t, compactionRecorder.Code, http.StatusBadRequest)
+	require.False(t, compactionContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(compactionContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(compactionContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(compactionContext, constant.ContextKeyCodexRootChannelPinned))
+	after := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+	require.True(t, after.Resolved)
+	require.False(t, after.Related)
+	require.Equal(t, rootID, after.RootID)
+	require.Equal(t, "user", after.ThreadSource)
+	require.Equal(t, "compaction", after.RequestKind)
+	require.Empty(t, after.SubagentKind)
+
+	mapping, _, found, err := service.ResolveCodexTurnRootBinding(context.Background(), userID, turnID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, mapping.RootOwner)
+	require.False(t, mapping.Related)
+	require.Equal(t, "user", mapping.ThreadSource)
+	require.Equal(t, "turn", mapping.RequestKind, "a request phase must not rewrite the durable Turn identity")
+	require.Empty(t, mapping.SubagentKind)
+}
+
+func TestCodexUserCompactionWithParentGraphMayReuseComposerTurnID(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID = 62119
+		rootID = "01a06021-0000-7000-8000-000000000301"
+		leafID = "01a06021-0000-7000-8000-000000000302"
+		turnID = "01a06021-0000-7000-8000-000000000303"
+	)
+
+	mainContext, mainRecorder := codexMainRootTurnContext(userID, 82180, channel.Id, rootID, turnID)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+
+	compactionContext, compactionRecorder := codexMainRootTurnContext(userID, 82181, 0, rootID, turnID)
+	compactionContext.Request.Header.Set("Thread-Id", leafID)
+	compactionContext.Request.Header.Set("X-Client-Request-Id", leafID)
+	compactionContext.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+	compactionContext.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	compactionContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","window_id":"`+leafID+`:1","parent_thread_id":"`+rootID+`","turn_id":"`+turnID+`","turn_trigger":"composer","thread_source":"user","request_kind":"compaction"}`)
+	before := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+	require.True(t, before.Resolved)
+	require.True(t, before.Related)
+	require.Equal(t, rootID, before.RootID)
+	require.Equal(t, "user", before.ThreadSource)
+	require.Equal(t, "compaction", before.RequestKind)
+
+	Distribute()(compactionContext)
+	require.Less(t, compactionRecorder.Code, http.StatusBadRequest)
+	require.False(t, compactionContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(compactionContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(compactionContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(compactionContext, constant.ContextKeyCodexRootChannelPinned))
+	after := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+	require.True(t, after.Resolved)
+	require.True(t, after.Related)
+	require.Equal(t, rootID, after.RootID)
+	require.Equal(t, "user", after.ThreadSource)
+	require.Equal(t, "compaction", after.RequestKind)
+	require.Empty(t, after.SubagentKind)
+
+	mapping, _, found, err := service.ResolveCodexTurnRootBinding(context.Background(), userID, turnID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, mapping.RootOwner)
+	require.False(t, mapping.Related)
+	require.Equal(t, "user", mapping.ThreadSource)
+	require.Equal(t, "turn", mapping.RequestKind)
+}
+
+func TestCodexInternalCompactionMayReuseBoundTurnID(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID     = 62118
+		rootID     = "01a06021-0000-7000-8000-000000000201"
+		rootTurnID = "01a06021-0000-7000-8000-000000000202"
+	)
+	mainContext, mainRecorder := codexMainRootTurnContext(userID, 82170, channel.Id, rootID, rootTurnID)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+
+	tests := []struct {
+		name           string
+		threadID       string
+		turnID         string
+		threadSource   string
+		subagentKind   string
+		passiveFeature string
+		explicitParent bool
+	}{
+		{
+			name: "system", threadID: "01a06021-0000-7000-8000-000000000211",
+			turnID: "01a06021-0000-7000-8000-000000000212", threadSource: "system",
+			passiveFeature: "system_passive",
+		},
+		{
+			name: "guardian", threadID: "01a06021-0000-7000-8000-000000000221",
+			turnID: "01a06021-0000-7000-8000-000000000222", threadSource: "subagent",
+			subagentKind: "guardian", passiveFeature: "related_internal", explicitParent: true,
+		},
+		{
+			name: "thread spawn", threadID: "01a06021-0000-7000-8000-000000000231",
+			turnID: "01a06021-0000-7000-8000-000000000232", threadSource: "subagent",
+			subagentKind: "thread_spawn", passiveFeature: "related_internal",
+		},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			newRequest := func(tokenID int, requestKind string) (*gin.Context, *httptest.ResponseRecorder) {
+				var c *gin.Context
+				var recorder *httptest.ResponseRecorder
+				metadataRootID := test.threadID
+				windowSuffix := ":0"
+				parentField := ""
+				if test.explicitParent {
+					c, recorder = codexRootDistributorRequestContext(userID, 0, rootID, test.threadID)
+					metadataRootID = rootID
+					windowSuffix = ":1"
+					parentField = `,"parent_thread_id":"` + rootID + `"`
+				} else {
+					c, recorder = codexUnlinkedTitleContext(userID, tokenID, test.threadID)
+				}
+				common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
+				metadata := `{"session_id":"` + metadataRootID + `","thread_id":"` + test.threadID + `","window_id":"` + test.threadID + windowSuffix + `"` + parentField + `,"turn_id":"` + test.turnID + `","root_turn_id":"` + rootTurnID + `","thread_source":"` + test.threadSource + `","request_kind":"` + requestKind + `"`
+				if test.subagentKind != "" {
+					metadata += `,"subagent_kind":"` + test.subagentKind + `"`
+					c.Request.Header.Set("X-OpenAI-Subagent", test.subagentKind)
+				}
+				c.Request.Header.Set("X-Codex-Turn-Metadata", metadata+`}`)
+				return c, recorder
+			}
+
+			turnContext, turnRecorder := newRequest(82171+index*2, "turn")
+			beforeTurn := relaychannel.ResolveCodexRootSessionForDistribution(turnContext)
+			if test.explicitParent {
+				require.Equal(t, rootID, beforeTurn.RootID)
+			} else {
+				require.Equal(t, test.threadID, beforeTurn.RootID)
+				require.NotEqual(t, rootID, beforeTurn.RootID)
+			}
+			require.Equal(t, rootTurnID, beforeTurn.RootTurnID)
+			Distribute()(turnContext)
+			require.Less(t, turnRecorder.Code, http.StatusBadRequest)
+			require.False(t, turnContext.IsAborted())
+			require.Equal(t, channel.Id, common.GetContextKeyInt(turnContext, constant.ContextKeyChannelId))
+			require.Equal(t, key, common.GetContextKeyString(turnContext, constant.ContextKeyChannelKey))
+
+			compactionContext, compactionRecorder := newRequest(82172+index*2, "compaction")
+			beforeCompaction := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+			if test.explicitParent {
+				require.Equal(t, rootID, beforeCompaction.RootID)
+			} else {
+				require.Equal(t, test.threadID, beforeCompaction.RootID)
+				require.NotEqual(t, rootID, beforeCompaction.RootID)
+			}
+			Distribute()(compactionContext)
+			require.Less(t, compactionRecorder.Code, http.StatusBadRequest)
+			require.False(t, compactionContext.IsAborted())
+			require.Equal(t, channel.Id, common.GetContextKeyInt(compactionContext, constant.ContextKeyChannelId))
+			require.Equal(t, key, common.GetContextKeyString(compactionContext, constant.ContextKeyChannelKey))
+			require.True(t, common.GetContextKeyBool(compactionContext, constant.ContextKeyCodexRootChannelPinned))
+
+			after := relaychannel.ResolveCodexRootSessionForDistribution(compactionContext)
+			require.True(t, after.Resolved)
+			require.True(t, after.Related)
+			require.Equal(t, rootID, after.RootID)
+			require.Equal(t, test.threadSource, after.ThreadSource)
+			require.Equal(t, "compaction", after.RequestKind)
+			require.Equal(t, test.subagentKind, after.SubagentKind)
+
+			mapping, _, found, err := service.ResolveCodexTurnRootBinding(context.Background(), userID, test.turnID)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.False(t, mapping.RootOwner)
+			require.True(t, mapping.Related)
+			require.Equal(t, test.passiveFeature, mapping.PassiveFeature)
+			require.Equal(t, test.threadSource, mapping.ThreadSource)
+			require.Equal(t, "turn", mapping.RequestKind, "a request phase must not rewrite the durable Turn identity")
+			require.Equal(t, test.subagentKind, mapping.SubagentKind)
+		})
+	}
+}
+
+func TestCodexCompactionOnlyTurnRetryRestoresInternalRole(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID     = 62120
+		rootID     = "01a06021-0000-7000-8000-000000000401"
+		rootTurnID = "01a06021-0000-7000-8000-000000000402"
+		childID    = "01a06021-0000-7000-8000-000000000403"
+		childTurn  = "01a06021-0000-7000-8000-000000000404"
+	)
+
+	mainContext, mainRecorder := codexMainRootTurnContext(userID, 82190, channel.Id, rootID, rootTurnID)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+
+	childContext, childRecorder := codexUnlinkedTitleContext(userID, 82191, childID)
+	childContext.Request.Header.Set("X-OpenAI-Subagent", "thread_spawn")
+	childContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+childID+`","thread_id":"`+childID+`","window_id":"`+childID+`:0","turn_id":"`+childTurn+`","root_turn_id":"`+rootTurnID+`","thread_source":"subagent","request_kind":"turn","subagent_kind":"thread_spawn"}`)
+	Distribute()(childContext)
+	require.Less(t, childRecorder.Code, http.StatusBadRequest)
+	require.False(t, childContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(childContext, constant.ContextKeyChannelId))
+
+	retry, retryRecorder := codexUnlinkedTitleContext(userID, 82192, childID)
+	for _, name := range []string{
+		"Session-Id", "Session_id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Window-Id",
+		"X-Codex-Parent-Thread-Id", "X-OpenAI-Subagent",
+	} {
+		retry.Request.Header.Del(name)
+	}
+	retry.Request.Header.Set("X-Codex-Turn-Metadata", `{"turn_id":"`+childTurn+`","request_kind":"compaction"}`)
+	before := relaychannel.ResolveCodexRootSessionForDistribution(retry)
+	require.False(t, before.Resolved)
+	require.False(t, before.Related)
+	require.Empty(t, before.RootID)
+	require.Empty(t, before.ThreadID)
+	require.Empty(t, before.ThreadSource)
+	require.Empty(t, before.SubagentKind)
+	require.Equal(t, "compaction", before.RequestKind)
+
+	Distribute()(retry)
+	require.Less(t, retryRecorder.Code, http.StatusBadRequest)
+	require.False(t, retry.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(retry, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(retry, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(retry, constant.ContextKeyCodexRootChannelPinned))
+	after := relaychannel.ResolveCodexRootSessionForDistribution(retry)
+	require.True(t, after.Resolved)
+	require.True(t, after.Related)
+	require.Equal(t, rootID, after.RootID)
+	require.Equal(t, "subagent", after.ThreadSource)
+	require.Equal(t, "compaction", after.RequestKind)
+	require.Equal(t, "thread_spawn", after.SubagentKind)
+	require.Equal(t, "related_internal", relaychannel.CodexPassiveRootSessionOverrideFeature(retry))
+
+	mapping, _, found, err := service.ResolveCodexTurnRootBinding(context.Background(), userID, childTurn)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, mapping.RootOwner)
+	require.True(t, mapping.Related)
+	require.Equal(t, "subagent", mapping.ThreadSource)
+	require.Equal(t, "turn", mapping.RequestKind)
+	require.Equal(t, "thread_spawn", mapping.SubagentKind)
+}
+
+func TestCodexUserRootTurnCannotChangeItsRecordedSourceRole(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
+	const (
+		userID = 62117
+		rootID = "01a06021-0000-7000-8000-000000000101"
+		turnID = "01a06021-0000-7000-8000-000000000102"
+	)
+
+	mainContext, mainRecorder := codexMainRootTurnContext(userID, 82160, channel.Id, rootID, turnID)
+	Distribute()(mainContext)
+	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
+	require.False(t, mainContext.IsAborted())
+
+	tests := []struct {
+		name         string
+		threadSource string
+		subagentKind string
+	}{
+		{name: "system", threadSource: "system"},
+		{name: "subagent", threadSource: "subagent", subagentKind: "thread_spawn"},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, recorder := codexMainRootTurnContext(userID, 82161+index, 0, rootID, turnID)
+			metadata := `{"session_id":"` + rootID + `","thread_id":"` + rootID + `","window_id":"` + rootID + `:0","turn_id":"` + turnID + `","thread_source":"` + test.threadSource + `","request_kind":"turn"`
+			if test.subagentKind != "" {
+				metadata += `,"subagent_kind":"` + test.subagentKind + `"`
+			}
+			c.Request.Header.Set("X-Codex-Turn-Metadata", metadata+`}`)
+			Distribute()(c)
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			require.True(t, c.IsAborted())
+			require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+		})
+	}
+}
+
 func TestCodexUserCompactionOnlyTurnRetryStaysRootOwned(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 	const (

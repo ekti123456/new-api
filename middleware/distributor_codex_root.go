@@ -281,6 +281,74 @@ func codexTurnRouteLabelConflict(current, stored string) bool {
 	return current != "" && !strings.EqualFold(current, strings.TrimSpace(stored))
 }
 
+func isCodexTurnPhaseRequestKind(requestKind string) bool {
+	switch strings.ToLower(strings.TrimSpace(requestKind)) {
+	case "turn", "compact", "compaction":
+		return true
+	default:
+		return false
+	}
+}
+
+// Codex uses turn_id for one logical Turn, not for one HTTP request. A user,
+// Guardian, or subagent Turn and the compaction request it triggers can
+// therefore carry the same turn_id while request_kind changes. Permit only
+// that narrow phase transition: the root, ownership class, thread source and
+// subagent role remain the stored values, so a known Turn ID cannot acquire a
+// different routing privilege.
+func codexCompatibleTurnPhaseRole(resolution relaychannel.CodexRootSessionResolution, mappedRootID string, stored codexTurnRouteRole) (codexTurnRouteRole, bool) {
+	if !isCodexTurnPhaseRequestKind(stored.RequestKind) {
+		return codexTurnRouteRole{}, false
+	}
+	if resolution.IdentityConflict || !isCodexTurnPhaseRequestKind(resolution.RequestKind) {
+		return codexTurnRouteRole{}, false
+	}
+	currentRootID := strings.TrimSpace(resolution.RootID)
+	mappedRootID = strings.TrimSpace(mappedRootID)
+	if currentRootID != "" && !resolution.Resolved {
+		return codexTurnRouteRole{}, false
+	}
+	if currentRootID != "" && !strings.EqualFold(currentRootID, mappedRootID) {
+		// Internal children can present their own leaf Thread as a temporary
+		// root and then recover the real root through their recorded Turn. This
+		// mirrors the replacement rule below without allowing a user fork to
+		// collapse back into its source task.
+		temporaryRoot := strings.TrimSpace(resolution.ThreadID) == "" ||
+			strings.EqualFold(currentRootID, strings.TrimSpace(resolution.ThreadID))
+		_, forkedNaming := relaychannel.ClassifyForkedCodexNamingRequest(resolution)
+		independentFork := strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "user") ||
+			(strings.TrimSpace(resolution.ForkedFromID) != "" && !forkedNaming)
+		if stored.RootOwner || !temporaryRoot || independentFork {
+			return codexTurnRouteRole{}, false
+		}
+	}
+	currentSource := strings.TrimSpace(resolution.ThreadSource)
+	if currentSource != "" && !strings.EqualFold(currentSource, stored.ThreadSource) {
+		return codexTurnRouteRole{}, false
+	}
+	currentSubagent := strings.TrimSpace(resolution.SubagentKind)
+	if currentSubagent != "" && !strings.EqualFold(currentSubagent, stored.SubagentKind) {
+		return codexTurnRouteRole{}, false
+	}
+	if stored.RootOwner {
+		if strings.TrimSpace(stored.PassiveFeature) != "" ||
+			!strings.EqualFold(strings.TrimSpace(stored.ThreadSource), "user") ||
+			strings.TrimSpace(stored.SubagentKind) != "" {
+			return codexTurnRouteRole{}, false
+		}
+	} else if !stored.Related || strings.TrimSpace(stored.ThreadSource) == "" ||
+		strings.EqualFold(strings.TrimSpace(stored.ThreadSource), "user") ||
+		strings.TrimSpace(stored.PassiveFeature) == "" {
+		return codexTurnRouteRole{}, false
+	}
+	effective := stored
+	effective.RequestKind = strings.ToLower(strings.TrimSpace(resolution.RequestKind))
+	if stored.RootOwner && resolution.Resolved {
+		effective.Related = resolution.Related
+	}
+	return effective, true
+}
+
 func isKnownCodexInternalThreadSource(source string) bool {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "system", "subagent", "memory_consolidation", "thread_summary",
@@ -434,10 +502,16 @@ func applyCodexTurnRootRoute(c *gin.Context, resolution relaychannel.CodexRootSe
 	if mappedRootID == "" {
 		return resolution, "", true, service.ErrCodexTurnRootBindingInvalid
 	}
+	storedRole := route.mapping.RouteIdentity()
+	effectiveRole := storedRole
 	if route.matchedOwn && (codexTurnRouteLabelConflict(resolution.ThreadSource, route.mapping.ThreadSource) ||
 		codexTurnRouteLabelConflict(resolution.RequestKind, route.mapping.RequestKind) ||
 		codexTurnRouteLabelConflict(resolution.SubagentKind, route.mapping.SubagentKind)) {
-		return resolution, "", true, errors.New("Codex turn retry conflicts with its recorded request role")
+		var phaseCompatible bool
+		effectiveRole, phaseCompatible = codexCompatibleTurnPhaseRole(resolution, mappedRootID, storedRole)
+		if !phaseCompatible {
+			return resolution, "", true, errors.New("Codex turn retry conflicts with its recorded request role")
+		}
 	}
 	if resolution.Resolved && strings.TrimSpace(resolution.RootID) != "" &&
 		!strings.EqualFold(strings.TrimSpace(resolution.RootID), mappedRootID) {
@@ -462,7 +536,11 @@ func applyCodexTurnRootRoute(c *gin.Context, resolution relaychannel.CodexRootSe
 		SubagentKind: strings.TrimSpace(resolution.SubagentKind),
 	}
 	if route.matchedOwn {
-		role = route.mapping.RouteIdentity()
+		// The stored identity remains the claim/promotion value for this Turn.
+		// effectiveRole may describe a later compaction phase of the same Turn
+		// and is used only for this request's signed policy metadata.
+		c.Set(codexTurnRouteRoleContextKey, storedRole)
+		role = effectiveRole
 	} else if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
 		role.PassiveFeature = "system_passive"
 	}
@@ -471,7 +549,9 @@ func applyCodexTurnRootRoute(c *gin.Context, resolution relaychannel.CodexRootSe
 	} else if role.PassiveFeature == "" && !role.RootOwner {
 		role.PassiveFeature = "related_internal"
 	}
-	c.Set(codexTurnRouteRoleContextKey, role)
+	if !route.matchedOwn {
+		c.Set(codexTurnRouteRoleContextKey, role)
+	}
 	if !relaychannel.SetCodexTurnRootSessionOverride(c, mappedRootID, role.Related, role.PassiveFeature, role.ThreadSource, role.RequestKind, role.SubagentKind) {
 		return resolution, role.PassiveFeature, true, errors.New("invalid Codex turn root session override")
 	}
