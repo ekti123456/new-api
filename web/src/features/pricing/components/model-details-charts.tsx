@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 import type { LatencyTimePoint, UptimeDayPoint } from '../lib/mock-stats'
+import { UPTIME_AXIS_RANGE } from './uptime-chart-axis'
 
 function formatHourLabel(iso: string): string {
   const date = new Date(iso)
@@ -63,26 +64,9 @@ function getChartThemeTokens(resolvedTheme: string) {
   }
 }
 
-const UPTIME_AXIS_MAX = 100
-const UPTIME_FOCUSED_AXIS_MIN = 95
-const UPTIME_MINOR_OUTAGE_AXIS_MIN = 90
-
 function toUptimeChartValue(value: number): number {
   if (!Number.isFinite(value)) return 0
-  return Math.min(UPTIME_AXIS_MAX, Math.max(0, value))
-}
-
-function getUptimeAxisMin(values: number[]): number {
-  const finiteValues = values.filter((value) => Number.isFinite(value))
-  if (finiteValues.length === 0) return UPTIME_FOCUSED_AXIS_MIN
-
-  const minValue = Math.max(0, Math.min(...finiteValues))
-  if (minValue >= UPTIME_FOCUSED_AXIS_MIN) return UPTIME_FOCUSED_AXIS_MIN
-  if (minValue >= UPTIME_MINOR_OUTAGE_AXIS_MIN) {
-    return UPTIME_MINOR_OUTAGE_AXIS_MIN
-  }
-
-  return Math.max(0, Math.floor((minValue - 5) / 10) * 10)
+  return Math.min(UPTIME_AXIS_RANGE.max, Math.max(UPTIME_AXIS_RANGE.min, value))
 }
 
 function stripUptimePointSuffix(value: string): string {
@@ -215,8 +199,6 @@ export function UptimeTrendChart(props: {
             { ...rawData[0], date: `${rawData[0].date}__end` },
           ]
         : rawData
-    const axisMin = getUptimeAxisMin(rawData.map((point) => point.uptime))
-
     return {
       type: 'line' as const,
       data: [{ id: 'uptime', values: data }],
@@ -270,8 +252,7 @@ export function UptimeTrendChart(props: {
         },
         {
           orient: 'left',
-          min: axisMin,
-          max: UPTIME_AXIS_MAX,
+          ...UPTIME_AXIS_RANGE,
           label: {
             formatMethod: (val: number | string) => `${val}%`,
             style: { fill: textColor, fontSize: 10 },

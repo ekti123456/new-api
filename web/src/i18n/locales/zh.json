@@ -2307,6 +2307,7 @@
     "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "如果启用默认 auto 分组，新建令牌会默认使用 auto，而不是空分组。",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "如果亲和到的渠道失败，重试到其他渠道成功后，将亲和更新到成功的渠道。",
     "If this keeps happening, please report it on GitHub Issues.": "如果问题持续出现，请到 GitHub Issues 反馈。",
+    "If you have not received the email, please check your spam folder.": "如果没有收到邮件，请检查垃圾邮件箱。",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "如果你在中国大陆向公众提供生成式人工智能服务，你将履行备案、安全评估、内容安全、投诉处理、生成内容标识、日志留存和个人信息保护等法律义务。",
     "Ignore": "忽略",
     "Ignored upstream models": "已忽略上游模型",

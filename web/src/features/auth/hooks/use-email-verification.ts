@@ -60,14 +60,18 @@ export function useEmailVerification(options?: UseEmailVerificationOptions) {
       const res = await sendEmailVerification(email, options?.turnstileToken)
       if (res?.success) {
         startCountdown()
-        toast.success(i18next.t('Verification email sent'))
+        toast.success(i18next.t('Verification email sent'), {
+          description: i18next.t(
+            'If you have not received the email, please check your spam folder.'
+          ),
+        })
         return true
       }
       toast.error(
         res?.message || i18next.t('Failed to send verification email')
       )
       return false
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
       return false
     } finally {

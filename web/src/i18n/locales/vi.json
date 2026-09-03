@@ -2307,6 +2307,7 @@
     "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "Nếu bật nhóm auto mặc định, token mới sẽ bắt đầu với auto thay vì nhóm trống.",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "Nếu kênh ưu tiên thất bại và thử lại thành công trên kênh khác, cập nhật ưu tiên sang kênh thành công.",
     "If this keeps happening, please report it on GitHub Issues.": "Nếu sự cố tiếp tục xảy ra, vui lòng báo cáo trên GitHub Issues.",
+    "If you have not received the email, please check your spam folder.": "Nếu bạn không nhận được email, vui lòng kiểm tra thư mục thư rác.",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "Nếu bạn cung cấp dịch vụ AI tạo sinh cho công chúng tại Trung Quốc đại lục, bạn sẽ thực hiện các nghĩa vụ pháp lý bao gồm đăng ký, đánh giá an toàn, an toàn nội dung, xử lý khiếu nại, gắn nhãn nội dung được tạo, lưu giữ nhật ký và bảo vệ thông tin cá nhân.",
     "Ignore": "Bỏ qua",
     "Ignored upstream models": "Mô hình upstream bị bỏ qua",

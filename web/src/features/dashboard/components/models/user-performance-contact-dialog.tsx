@@ -109,7 +109,15 @@ export function UserPerformanceContactDialog({
       if (!response.success) {
         throw new Error(response.message || t('Failed to send message'))
       }
-      toast.success(t('Message sent successfully'))
+      if (channel === 'email') {
+        toast.success(t('Message sent successfully'), {
+          description: t(
+            'If you have not received the email, please check your spam folder.'
+          ),
+        })
+      } else {
+        toast.success(t('Message sent successfully'))
+      }
       setConfirmOpen(false)
       onOpenChange(false)
     } catch (error) {

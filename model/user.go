@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -117,6 +118,7 @@ type User struct {
 	StripeCustomer      string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt           int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at;index"`
 	LastLoginAt         int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	LastQuotaNotifyAt   int64                      `json:"-" gorm:"type:bigint;not null;default:0;column:last_quota_notify_at"`
 	AuthVersion         int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
 	AdminPermissions    map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
@@ -777,7 +779,7 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 			return err
 		}
 	}
-	if err = tx.Model(&current).Omit("quota", "used_quota", "request_count", "auth_version").Updates(newUser).Error; err != nil {
+	if err = tx.Model(&current).Omit("quota", "used_quota", "request_count", "last_quota_notify_at", "auth_version").Updates(newUser).Error; err != nil {
 		return err
 	}
 	return tx.First(user, user.Id).Error
@@ -1193,6 +1195,24 @@ func GetUserUsedQuota(id int) (quota int, err error) {
 func GetUserEmail(id int) (email string, err error) {
 	err = DB.Model(&User{}).Where("id = ?", id).Select("email").Find(&email).Error
 	return email, err
+}
+
+// ClaimDailyQuotaNotification atomically claims the right to send a user's
+// quota warning for the natural day containing now. The database is the source
+// of truth so concurrent requests and separate application instances share the
+// same once-per-day limit.
+func ClaimDailyQuotaNotification(id int, now time.Time) (bool, error) {
+	if id <= 0 || now.IsZero() {
+		return false, errors.New("invalid quota notification claim")
+	}
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	result := DB.Model(&User{}).
+		Where("id = ? AND (last_quota_notify_at IS NULL OR last_quota_notify_at < ?)", id, dayStart).
+		Update("last_quota_notify_at", now.Unix())
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // GetUserGroup gets group from Redis first, falls back to DB if needed

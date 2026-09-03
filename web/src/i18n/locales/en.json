@@ -2307,6 +2307,7 @@
     "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "If default auto group is enabled, newly created tokens start with auto instead of an empty group.",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.",
     "If this keeps happening, please report it on GitHub Issues.": "If this keeps happening, please report it on GitHub Issues.",
+    "If you have not received the email, please check your spam folder.": "If you have not received the email, please check your spam folder.",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.",
     "Ignore": "Ignore",
     "Ignored upstream models": "Ignored upstream models",

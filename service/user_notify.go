@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -53,14 +54,25 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 		notifyType = dto.NotifyTypeEmail
 	}
 
-	// Check notification limit
-	canSend, err := CheckNotificationLimit(userId, data.Type)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to check notification limit: %s", err.Error()))
-		return err
-	}
-	if !canSend {
-		return fmt.Errorf("notification limit exceeded for user %d with type %s", userId, notifyType)
+	if data.Type == dto.NotifyTypeQuotaExceed {
+		claimed, err := model.ClaimDailyQuotaNotification(userId, time.Now())
+		if err != nil {
+			common.SysLog(fmt.Sprintf("failed to claim daily quota notification: %s", err.Error()))
+			return err
+		}
+		if !claimed {
+			return nil
+		}
+	} else {
+		// Other notification types retain the existing short-window limit.
+		canSend, err := CheckNotificationLimit(userId, data.Type)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("failed to check notification limit: %s", err.Error()))
+			return err
+		}
+		if !canSend {
+			return fmt.Errorf("notification limit exceeded for user %d with type %s", userId, notifyType)
+		}
 	}
 
 	switch notifyType {

@@ -79,11 +79,15 @@ export function ForgotPasswordForm({
       if (res?.success) {
         form.reset()
         startCountdown()
-        toast.success(t('Reset email sent, please check your inbox'))
+        toast.success(t('Reset email sent, please check your inbox'), {
+          description: t(
+            'If you have not received the email, please check your spam folder.'
+          ),
+        })
       } else {
         toast.error(res?.message || t('Failed to send reset email'))
       }
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
