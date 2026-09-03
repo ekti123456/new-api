@@ -85,12 +85,20 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
+	if c == nil || c.Writer == nil {
+		return errors.New("context or writer is nil")
+	}
 	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	SetEventStreamHeaders(c)
+	if _, err := c.Writer.WriteString(fmt.Sprintf("event: %s\n", resp.Type)); err != nil {
+		return fmt.Errorf("write response event: %w", err)
+	}
+	if _, err := c.Writer.WriteString(fmt.Sprintf("data: %s\n\n", data)); err != nil {
+		return fmt.Errorf("write response data: %w", err)
+	}
 	return FlushWriter(c)
 }
 

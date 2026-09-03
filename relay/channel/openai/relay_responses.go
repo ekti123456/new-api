@@ -94,9 +94,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		terminal := false
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
+			terminal = true
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
 					if streamResponse.Response.Usage.InputTokens != 0 {
@@ -180,6 +181,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					}
 				}
 			}
+		}
+
+		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
+			sr.Stop(fmt.Errorf("failed to write responses stream event %s: %w", streamResponse.Type, err))
+			return
+		}
+		if terminal {
+			// response.completed/response.done is the protocol-level terminal
+			// event. Do not wait for an optional trailing [DONE] or EOF: clients
+			// may close immediately after receiving this event.
+			sr.Done()
 		}
 	})
 
