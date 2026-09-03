@@ -33,6 +33,9 @@ type ModelRequest struct {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// Reserve the request's predecessor cutoff before body parsing, waiting,
+		// or channel selection. This is intentionally not the relay/FRT timer.
+		captureCodexRequestArrival(c)
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
@@ -54,13 +57,40 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
+		recognizedRootFallbackEligible := canPassThroughRecognizedCodexRoot(c, rootSession)
+		recognizedRootPassThrough := false
 		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+		if recognizedRootFallbackEligible && rootErr == nil && !rootBindingFound && rootChannel == nil {
+			fallbackChannel, fallbackGroup, fallbackKey, fallbackKeyIndex, fallbackFound, fallbackErr := loadUniqueRecognizedCodexPassThroughChannel(c, usingGroup, modelRequest.Model)
+			if fallbackErr != nil {
+				logCodexPassiveRouteFailure(c, "fallback", modelRequest.Model, rootSession, fallbackErr)
+			} else if fallbackFound {
+				rootChannel = fallbackChannel
+				rootSelectedGroup = fallbackGroup
+				// Treat the unique-channel fallback as authoritative for this
+				// request. It is not a persisted root binding (and therefore does
+				// not publish/claim one), but token-specific routing must not replace
+				// it with another channel.
+				rootBindingFound = true
+				rootErr = nil
+				recognizedRootPassThrough = true
+				c.Set(codexFallbackChannelKeyContextKey, codexFallbackChannelKey{
+					channelID:   fallbackChannel.Id,
+					key:         fallbackKey,
+					index:       fallbackKeyIndex,
+					fingerprint: codexRootChannelKeyFingerprint(fallbackKey),
+				})
+				if usingGroup == "auto" {
+					common.SetContextKey(c, constant.ContextKeyAutoGroup, fallbackGroup)
+				}
+			}
+		}
 		if rootErr != nil {
 			logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
-		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) {
+		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) && !recognizedRootPassThrough {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
@@ -88,7 +118,8 @@ func Distribute() func(c *gin.Context) {
 				channel = rootChannel
 			}
 		} else {
-			passiveInternalAuthorized := strictPassiveRoute && strings.TrimSpace(passiveFeature) != "" && rootBindingFound && rootChannel != nil
+			passiveInternalAuthorized := strictPassiveRoute && strings.TrimSpace(passiveFeature) != "" &&
+				((rootBindingFound && rootChannel != nil) || recognizedRootPassThrough)
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
@@ -606,7 +637,20 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	var newAPIError *types.NewAPIError
 	if !pinned {
-		key, index, newAPIError = channel.GetNextEnabledKey()
+		if rawFallback, found := c.Get(codexFallbackChannelKeyContextKey); found {
+			if fallback, ok := rawFallback.(codexFallbackChannelKey); ok && fallback.channelID == channel.Id && fallback.key != "" {
+				currentKey, keyErr := channel.GetEnabledKeyAt(fallback.index)
+				if keyErr == nil && currentKey == fallback.key && codexRootChannelKeyFingerprint(currentKey) == fallback.fingerprint {
+					key, index = currentKey, fallback.index
+				} else {
+					key, index, newAPIError = channel.GetNextEnabledKey()
+				}
+			} else {
+				key, index, newAPIError = channel.GetNextEnabledKey()
+			}
+		} else {
+			key, index, newAPIError = channel.GetNextEnabledKey()
+		}
 	}
 	if newAPIError != nil {
 		return newAPIError

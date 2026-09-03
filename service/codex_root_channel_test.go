@@ -430,6 +430,69 @@ func TestCodexPassiveRootAliasClaimRejectsAmbiguousCandidates(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestCodexRootObservationCutoffPreservesSameRootRequestHistory(t *testing.T) {
+	for _, backend := range []string{"memory", "redis"} {
+		t.Run(backend, func(t *testing.T) {
+			var server *miniredis.Miniredis
+			if backend == "redis" {
+				server = useCodexPassiveRouteRedis(t)
+				server.SetTime(time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC))
+			} else {
+				originalEnabled := common.RedisEnabled
+				originalClient := common.RDB
+				common.RedisEnabled = false
+				common.RDB = nil
+				t.Cleanup(func() {
+					common.RedisEnabled = originalEnabled
+					common.RDB = originalClient
+				})
+			}
+
+			const userID, tokenID = 42015, 10115
+			rootID := "root:" + t.Name()
+			systemRootID := "system:" + t.Name()
+			binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
+			require.NoError(t, StoreCodexRootChannelBinding(userID, rootID, binding))
+
+			arrivalA, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+			require.NoError(t, err)
+			require.NoError(t, StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrivalA))
+			// Provisional and success publication for A reuse one exact event.
+			require.NoError(t, StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrivalA))
+
+			if server != nil {
+				server.SetTime(arrivalA.ArrivedAt.Add(time.Second))
+			}
+			cutoffB, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+			require.NoError(t, err)
+			if server != nil {
+				server.SetTime(cutoffB.ArrivedAt.Add(time.Second))
+			}
+			arrivalC, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+			require.NoError(t, err)
+			require.NoError(t, StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrivalC))
+
+			candidate, found, err := LoadLatestCodexRootChannelObservationBefore(
+				context.Background(), userID, tokenID, false, cutoffB,
+			)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, arrivalA.Order, candidate.ArrivalOrder)
+			require.Equal(t, rootID, candidate.RootID)
+			require.NotEqual(t, arrivalC.Order, candidate.ArrivalOrder)
+
+			alias := codexPassiveRootAliasForBinding(rootID, binding)
+			require.NoError(t, ClaimCodexObservedPassiveRootAlias(
+				context.Background(), userID, tokenID, systemRootID, alias, candidate, cutoffB,
+			))
+			stored, aliasFound, err := LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
+			require.NoError(t, err)
+			require.True(t, aliasFound)
+			require.Equal(t, alias, stored)
+		})
+	}
+}
+
 func TestCodexPassiveRootAliasClaimRequiresExactCandidateFingerprint(t *testing.T) {
 	const userID, tokenID = 42012, 10112
 	rootID := "root:" + t.Name()

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,19 +23,53 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type blockFirstCodexCandidateLoadHook struct {
+	blocked atomic.Bool
+	started chan struct{}
+	release chan struct{}
+}
+
+func (hook *blockFirstCodexCandidateLoadHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	name := strings.ToLower(cmd.Name())
+	if name != "evalsha" && name != "eval" || !hook.blocked.CompareAndSwap(false, true) {
+		return ctx, nil
+	}
+	close(hook.started)
+	select {
+	case <-hook.release:
+		return ctx, nil
+	case <-ctx.Done():
+		return ctx, ctx.Err()
+	}
+}
+
+func (*blockFirstCodexCandidateLoadHook) AfterProcess(context.Context, redis.Cmder) error {
+	return nil
+}
+
+func (*blockFirstCodexCandidateLoadHook) BeforeProcessPipeline(ctx context.Context, _ []redis.Cmder) (context.Context, error) {
+	return ctx, nil
+}
+
+func (*blockFirstCodexCandidateLoadHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
+	return nil
+}
 
 func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string) {
 	t.Helper()
 	originalDB := model.DB
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
-	originalLinkedWaitTimeout := codexLinkedNamingRootWaitTimeout
+	originalLinkedWaitTimeout := codexLinkedRootWaitTimeout
 	originalTurnWaitTimeout := codexTurnRootWaitTimeout
 	originalThreadWaitTimeout := codexThreadRootWaitTimeout
 	originalWaitForRecentUpdate := waitForRecentCodexRootChannelUpdate
@@ -43,7 +78,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalWaitForTurnRootBindingUpdate := waitForCodexTurnRootBindingUpdate
 	originalWaitForThreadRootBindingUpdate := waitForCodexThreadRootBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
-	codexLinkedNamingRootWaitTimeout = 25 * time.Millisecond
+	codexLinkedRootWaitTimeout = 25 * time.Millisecond
 	codexTurnRootWaitTimeout = 25 * time.Millisecond
 	codexThreadRootWaitTimeout = 25 * time.Millisecond
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
@@ -84,7 +119,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 
 	t.Cleanup(func() {
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
-		codexLinkedNamingRootWaitTimeout = originalLinkedWaitTimeout
+		codexLinkedRootWaitTimeout = originalLinkedWaitTimeout
 		codexTurnRootWaitTimeout = originalTurnWaitTimeout
 		codexThreadRootWaitTimeout = originalThreadWaitTimeout
 		waitForRecentCodexRootChannelUpdate = originalWaitForRecentUpdate
@@ -104,6 +139,39 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 		}
 	})
 	return channel, key, keyFingerprint
+}
+
+func useCodexRecentRootRedisFixture(t *testing.T, now time.Time) (*miniredis.Miniredis, *redis.Client) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	server.SetTime(now)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	originalRedisEnabled := common.RedisEnabled
+	originalRedisClient := common.RDB
+	common.RedisEnabled = true
+	common.RDB = client
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+		common.RDB = originalRedisClient
+		require.NoError(t, client.Close())
+	})
+	return server, client
+}
+
+func storeCodexRecentRootCandidateAt(
+	t *testing.T,
+	server *miniredis.Miniredis,
+	userID, tokenID int,
+	rootID string,
+	binding service.CodexRootChannelBinding,
+	observedAt time.Time,
+) {
+	t.Helper()
+	server.SetTime(observedAt)
+	arrival, err := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.NoError(t, service.StoreCodexRootChannelBinding(userID, rootID, binding))
+	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrival))
 }
 
 func codexRootDistributorContext(userID int) *gin.Context {
@@ -284,6 +352,9 @@ func storeRecentCodexTitleBindingForPrompt(t *testing.T, userID, tokenID int, ro
 	_ = prompt
 	require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	arrival, err := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrival))
 }
 
 func TestConcurrentNewCodexTitlesUseMatchingRootInsteadOfLatestRoot(t *testing.T) {
@@ -313,7 +384,7 @@ func TestConcurrentNewCodexTitlesUseMatchingRootInsteadOfLatestRoot(t *testing.T
 	require.NotEqual(t, newerOtherRoot, resolved.RootID)
 }
 
-func TestDetectedIdenticalCodexTitleCorrelationFailsClosed(t *testing.T) {
+func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndUsesLatestRoot(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const (
 		userID  = 42
@@ -323,7 +394,9 @@ func TestDetectedIdenticalCodexTitleCorrelationFailsClosed(t *testing.T) {
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
 	}
 	storeRecentCodexTitleBindingForPrompt(t, userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb5", binding, "Same prompt")
-	storeRecentCodexTitleBindingForPrompt(t, userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb7", binding, "Same prompt")
+	time.Sleep(2 * time.Millisecond)
+	latestRootID := "01a03786-1743-7151-a307-c1c0f1615bb7"
+	storeRecentCodexTitleBindingForPrompt(t, userID, tokenID, latestRootID, binding, "Same prompt")
 
 	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	body := `{
@@ -337,13 +410,15 @@ func TestDetectedIdenticalCodexTitleCorrelationFailsClosed(t *testing.T) {
 	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 
-	_, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
-	require.ErrorContains(t, err, "ambiguous")
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
+	require.NoError(t, err)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
+	require.True(t, resolved.Related)
+	require.Equal(t, latestRootID, resolved.RootID)
 }
 
-func TestUnlinkedCodexSystemTreatsDifferentGroupRootsAsAmbiguous(t *testing.T) {
+func TestUnlinkedCodexSystemRejectsLatestCandidateOutsideRequestGroup(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const userID, tokenID = 42, 734
 	proBinding := service.CodexRootChannelBinding{
@@ -351,25 +426,303 @@ func TestUnlinkedCodexSystemTreatsDifferentGroupRootsAsAmbiguous(t *testing.T) {
 	}
 	otherBinding := proBinding
 	otherBinding.SelectedGroup = "other"
-	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, "01a04000-0000-7000-8000-000000000731", proBinding))
-	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, "01a04000-0000-7000-8000-000000000732", otherBinding))
+	storeRecentCodexTitleBinding(t, userID, tokenID, "01a04000-0000-7000-8000-000000000731", proBinding)
+	time.Sleep(2 * time.Millisecond)
+	storeRecentCodexTitleBinding(t, userID, tokenID, "01a04000-0000-7000-8000-000000000732", otherBinding)
 
 	c, _ := codexUnlinkedTitleContext(userID, tokenID, "01a04000-0000-7000-8000-000000000734")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
 	_, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-	require.ErrorContains(t, err, "ambiguous")
+	require.ErrorContains(t, err, "outside the current group")
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
 	_, pending := c.Get(codexPendingPassiveRootAliasContextKey)
 	require.False(t, pending)
 }
 
+func TestUnlinkedCodexSystemIgnoresCandidateObservedAfterRequestArrival(t *testing.T) {
+	const (
+		userID        = 181
+		tokenID       = 1739
+		precedingRoot = "01a04000-0000-7000-8000-000000000737"
+		laterRoot     = "01a04000-0000-7000-8000-000000000738"
+		systemRootID  = "01a04000-0000-7000-8000-000000000739"
+	)
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	server, client := useCodexRecentRootRedisFixture(t, now)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: 98101, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "abcdef0123456789",
+	}
+	requestArrival := now
+	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, precedingRoot, binding, requestArrival.Add(-time.Second))
+
+	systemContext, recorder := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
+	server.SetTime(requestArrival)
+	captureCodexRequestArrival(systemContext)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
+	require.False(t, resolution.Related)
+	require.Empty(t, systemContext.Request.Header.Get("X-Codex-Parent-Thread-Id"))
+	require.Empty(t, resolution.ForkedFromID)
+	require.Empty(t, resolution.ParentTurnID)
+	require.Empty(t, resolution.RootTurnID)
+
+	hook := &blockFirstCodexCandidateLoadHook{started: make(chan struct{}), release: make(chan struct{})}
+	client.AddHook(hook)
+	type routeResult struct {
+		resolution relaychannel.CodexRootSessionResolution
+		feature    string
+		strict     bool
+		err        error
+	}
+	resultChannel := make(chan routeResult, 1)
+	go func() {
+		resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
+		resultChannel <- routeResult{resolution: resolved, feature: feature, strict: strict, err: err}
+	}()
+	select {
+	case <-hook.started:
+		storeCodexRecentRootCandidateAt(t, server, userID, tokenID, laterRoot, binding, requestArrival.Add(time.Second))
+		close(hook.release)
+	case got := <-resultChannel:
+		require.FailNow(t, "candidate load did not start", "route returned early: %v", got.err)
+	case <-time.After(time.Second):
+		require.FailNow(t, "candidate load did not start")
+	}
+	got := <-resultChannel
+
+	require.NoError(t, got.err)
+	require.True(t, got.strict)
+	require.Equal(t, "system_passive", got.feature)
+	require.True(t, got.resolution.Related)
+	require.Equal(t, precedingRoot, got.resolution.RootID)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NoError(t, commitCodexPassiveRootAlias(systemContext))
+	alias, found, aliasErr := service.LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
+	require.NoError(t, aliasErr)
+	require.True(t, found)
+	require.Equal(t, precedingRoot, alias.RootID)
+}
+
+func TestUnlinkedCodexSystemUsesLatestArrivalOrderBeforeRequest(t *testing.T) {
+	const (
+		userID        = 182
+		tokenID       = 1740
+		olderRootID   = "01a04000-0000-7000-8000-000000000740"
+		closestRootID = "01a04000-0000-7000-8000-000000000741"
+		systemRootID  = "01a04000-0000-7000-8000-000000000742"
+	)
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	server, _ := useCodexRecentRootRedisFixture(t, now)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: 98101, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "abcdef0123456789",
+	}
+	requestArrival := now.Add(3 * time.Second)
+	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, olderRootID, binding, requestArrival.Add(-time.Second))
+	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, closestRootID, binding, requestArrival.Add(-time.Second))
+
+	systemContext, _ := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
+	server.SetTime(requestArrival)
+	captureCodexRequestArrival(systemContext)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
+
+	require.NoError(t, err)
+	require.True(t, strict)
+	require.Equal(t, "system_passive", feature)
+	require.True(t, resolved.Related)
+	require.Equal(t, closestRootID, resolved.RootID)
+}
+
+func TestUnlinkedCodexSystemRequiresPredecessorWithinThirtySeconds(t *testing.T) {
+	tests := []struct {
+		name    string
+		age     time.Duration
+		allowed bool
+	}{
+		{name: "exact boundary", age: 30 * time.Second, allowed: true},
+		{name: "one millisecond too old", age: 30*time.Second + time.Millisecond, allowed: false},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+			userID := 183 + index
+			tokenID := 1741 + index
+			rootID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 743+index*2)
+			systemRootID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 744+index*2)
+			rootArrival := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+			server, _ := useCodexRecentRootRedisFixture(t, rootArrival)
+			binding := service.CodexRootChannelBinding{
+				ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+			}
+			storeCodexRecentRootCandidateAt(t, server, userID, tokenID, rootID, binding, rootArrival)
+
+			c, _ := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
+			server.SetTime(rootArrival.Add(test.age))
+			captureCodexRequestArrival(c)
+			resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+			resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
+
+			require.True(t, strict)
+			require.Equal(t, "system_passive", feature)
+			if test.allowed {
+				require.NoError(t, err)
+				require.Equal(t, rootID, resolved.RootID)
+				return
+			}
+			require.ErrorContains(t, err, "unavailable")
+			require.Equal(t, systemRootID, resolved.RootID)
+		})
+	}
+}
+
+func TestUnlinkedCodexTitleNeverUsesThirtySecondPredecessorBridge(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 185
+		tokenID = 1743
+		rootID  = "01a04000-0000-7000-8000-000000000747"
+		titleID = "01a04000-0000-7000-8000-000000000748"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	arrival, err := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.NoError(t, service.StoreCodexRootChannelBinding(userID, rootID, binding))
+	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrival))
+
+	titleContext, _ := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+	resolved, feature, strict, resolveErr := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
+
+	require.ErrorContains(t, resolveErr, "unavailable")
+	require.True(t, strict)
+	require.Equal(t, "related_internal", feature)
+	require.Equal(t, titleID, resolved.RootID)
+	_, pending := titleContext.Get(codexPendingPassiveRootAliasContextKey)
+	require.False(t, pending)
+}
+
+func TestRecognizedCodexChildrenPassThroughWithoutRootBindingOrRecentOverride(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id))
+	tests := []struct {
+		name         string
+		threadSource string
+		subagentKind string
+	}{
+		{name: "thread spawn", threadSource: "subagent", subagentKind: "thread_spawn"},
+		{name: "guardian", threadSource: "subagent", subagentKind: "guardian"},
+		{name: "memory consolidation", threadSource: "memory_consolidation", subagentKind: "memory_consolidation"},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			userID := 186 + index
+			tokenID := 1744 + index
+			distractorRoot := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 749+index*3)
+			rootID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 750+index*3)
+			leafID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 751+index*3)
+			storeRecentCodexTitleBinding(t, userID, tokenID, distractorRoot, service.CodexRootChannelBinding{
+				ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+			})
+
+			c, recorder := codexMainRootContext(userID, tokenID, 0, rootID)
+			body := `{"model":"gpt-5.6-luna","input":"run internal task"}`
+			c.Request.Body = io.NopCloser(strings.NewReader(body))
+			c.Request.ContentLength = int64(len(body))
+			c.Request.Header.Set("Thread-Id", leafID)
+			c.Request.Header.Set("X-Client-Request-Id", leafID)
+			c.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+			c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+			metadata := `{"session_id":"` + rootID + `","thread_id":"` + leafID + `","window_id":"` + leafID + `:1","parent_thread_id":"` + rootID + `","thread_source":"` + test.threadSource + `","request_kind":"turn"`
+			if test.subagentKind != "" {
+				metadata += `,"subagent_kind":"` + test.subagentKind + `"`
+			}
+			c.Request.Header.Set("X-Codex-Turn-Metadata", metadata+`}`)
+
+			Distribute()(c)
+
+			require.Less(t, recorder.Code, http.StatusBadRequest)
+			require.False(t, c.IsAborted())
+			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+			require.Equal(t, key, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+			resolved := relaychannel.ResolveCodexRootSessionForDistribution(c)
+			require.True(t, resolved.Related)
+			require.Equal(t, rootID, resolved.RootID)
+			require.NotEqual(t, distractorRoot, resolved.RootID)
+			_, pending := c.Get(codexPendingPassiveRootAliasContextKey)
+			require.False(t, pending)
+		})
+	}
+}
+
+func TestRecognizedCodexChildWaitsForRunningRootBindingBeforePassThrough(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID  = 189
+		tokenID = 1747
+		rootID  = "01a04000-0000-7000-8000-000000000758"
+		leafID  = "01a04000-0000-7000-8000-000000000759"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	waitCalls := 0
+	waitForCodexRootChannelBindingUpdate = func(ctx context.Context, gotUserID int, gotRootID string, maxWait time.Duration) error {
+		waitCalls++
+		require.Equal(t, userID, gotUserID)
+		require.Equal(t, rootID, gotRootID)
+		require.Positive(t, maxWait)
+		require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
+		return nil
+	}
+
+	c, recorder := codexMainRootContext(userID, tokenID, 0, rootID)
+	body := `{"model":"gpt-5.6-luna","input":"spawn child"}`
+	c.Request.Body = io.NopCloser(strings.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	c.Request.Header.Set("Thread-Id", leafID)
+	c.Request.Header.Set("X-Client-Request-Id", leafID)
+	c.Request.Header.Set("X-Codex-Window-Id", leafID+":1")
+	c.Request.Header.Set("X-Codex-Parent-Thread-Id", rootID)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootID+`","thread_id":"`+leafID+`","window_id":"`+leafID+`:1","parent_thread_id":"`+rootID+`","thread_source":"subagent","request_kind":"turn","subagent_kind":"thread_spawn"}`)
+
+	Distribute()(c)
+
+	require.Equal(t, 1, waitCalls)
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, c.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
+}
+
+func TestRecognizedCodexChildDoesNotGuessAcrossMultipleNormalChannels(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
+	priority := int64(1)
+	second := &model.Channel{
+		Id: 98102, Type: constant.ChannelTypeOpenAI, Key: key,
+		Status: common.ChannelStatusEnabled, Name: "second-codex-root-channel",
+		BaseURL: channel.BaseURL, Models: "gpt-5.6-sol", Group: "pro", Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(second).Error)
+	model.InitChannelCache()
+
+	c, recorder := codexGuardianApprovalContext(190, 1748, "01a04000-0000-7000-8000-000000000760")
+	Distribute()(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.True(t, c.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+}
+
 func TestUnlinkedCodexSystemRejectsSoleCandidateOutsideRequestGroup(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const userID, tokenID = 42, 735
-	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, "01a04000-0000-7000-8000-000000000733", service.CodexRootChannelBinding{
+	storeRecentCodexTitleBinding(t, userID, tokenID, "01a04000-0000-7000-8000-000000000733", service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "other", KeyFingerprint: keyFingerprint,
-	}))
+	})
 
 	c, _ := codexUnlinkedTitleContext(userID, tokenID, "01a04000-0000-7000-8000-000000000735")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
@@ -696,6 +1049,8 @@ func TestUnlinkedSystemWaitsForRecentRootSelection(t *testing.T) {
 	binding := service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
 	}
+	rootArrival, arrivalErr := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, arrivalErr)
 	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	type result struct {
@@ -726,6 +1081,7 @@ func TestUnlinkedSystemWaitsForRecentRootSelection(t *testing.T) {
 	}()
 	<-waiting
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, rootArrival))
 	close(continueWait)
 	got := <-resultChannel
 	require.NoError(t, got.err)
@@ -749,48 +1105,35 @@ func TestUnlinkedSystemWaitStopsWhenRequestIsCanceled(t *testing.T) {
 	require.Equal(t, "system_passive", feature)
 }
 
-func TestUnlinkedSystemDoesNotClaimObservedCandidateAfterParentCancellation(t *testing.T) {
+func TestUnlinkedSystemStagesObservedCandidateWithoutWaiting(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
-	codexUnlinkedPassiveRootWaitTimeout = time.Second
 	const userID, tokenID = 42, 736
-	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, "01a04000-0000-7000-8000-000000000730", service.CodexRootChannelBinding{
+	const rootID = "01a04000-0000-7000-8000-000000000730"
+	storeRecentCodexTitleBinding(t, userID, tokenID, rootID, service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyFingerprint: keyFingerprint,
-	}))
+	})
 
 	c, _ := codexUnlinkedTitleContext(userID, tokenID, "01a04000-0000-7000-8000-000000000736")
-	parentContext, cancel := context.WithCancel(c.Request.Context())
-	c.Request = c.Request.WithContext(parentContext)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	waiting := make(chan struct{})
+	waitCalls := 0
 	waitForRecentCodexRootChannelUpdate = func(ctx context.Context, _ int, _ int, _ bool, _ time.Duration) error {
-		select {
-		case <-waiting:
-		default:
-			close(waiting)
-		}
-		<-ctx.Done()
-		return ctx.Err()
+		waitCalls++
+		return context.Canceled
 	}
-	type result struct {
-		resolution relaychannel.CodexRootSessionResolution
-		feature    string
-		strict     bool
-		err        error
-	}
-	resultChannel := make(chan result, 1)
-	go func() {
-		resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-		resultChannel <- result{resolution: resolved, feature: feature, strict: strict, err: err}
-	}()
-	<-waiting
-	cancel()
-	got := <-resultChannel
-	require.ErrorIs(t, got.err, context.Canceled)
-	require.True(t, got.strict)
-	require.Equal(t, "system_passive", got.feature)
-	require.Equal(t, resolution.RootID, got.resolution.RootID)
-	_, pending := c.Get(codexPendingPassiveRootAliasContextKey)
-	require.False(t, pending)
+
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
+	require.NoError(t, err)
+	require.True(t, strict)
+	require.Equal(t, "system_passive", feature)
+	require.Equal(t, rootID, resolved.RootID)
+	require.Zero(t, waitCalls)
+	rawPending, found := c.Get(codexPendingPassiveRootAliasContextKey)
+	require.True(t, found)
+	pending, ok := rawPending.(codexPendingPassiveRootAlias)
+	require.True(t, ok)
+	require.True(t, pending.claimRequired)
+	require.False(t, pending.titleCandidate)
+	require.Equal(t, rootID, pending.alias.RootID)
 }
 
 func TestCommitCodexPassiveAliasRefusesCancellationAfterCandidateIsStaged(t *testing.T) {
@@ -801,7 +1144,7 @@ func TestCommitCodexPassiveAliasRefusesCancellationAfterCandidateIsStaged(t *tes
 	binding := service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyFingerprint: keyFingerprint,
 	}
-	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	storeRecentCodexTitleBinding(t, userID, tokenID, rootID, binding)
 
 	c, _ := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
 	requestContext, cancel := context.WithCancel(c.Request.Context())
@@ -1402,6 +1745,42 @@ func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
 	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
 }
 
+func TestUnlinkedCodexTitleWithUnknownTurnLineageFallsBackToFreshRoot(t *testing.T) {
+	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID       = 180
+		tokenID      = 1738
+		rootID       = "01a04919-6f27-7f10-b723-886834460633"
+		titleID      = "01a04920-6f27-7f10-b723-886834460634"
+		titleTurnID  = "01a04921-6f27-7f10-b723-886834460635"
+		parentTurnID = "01a04922-6f27-7f10-b723-886834460636"
+		rootTurnID   = "01a04923-6f27-7f10-b723-886834460637"
+	)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
+	require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
+	require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+
+	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
+	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","turn_id":"`+titleTurnID+`","parent_turn_id":"`+parentTurnID+`","root_turn_id":"`+rootTurnID+`","turn_trigger":"thread_title","thread_source":"thread_title","request_kind":"turn"}`)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+	require.True(t, isCodexNamingRequest(resolution))
+	require.False(t, resolution.Related)
+
+	Distribute()(titleContext)
+
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, titleContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(titleContext, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(titleContext, constant.ContextKeyCodexRootChannelPinned))
+	resolved := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
+	require.True(t, resolved.Related)
+	require.Equal(t, rootID, resolved.RootID)
+}
+
 func TestUnlinkedCodexTitleFailsClosedWithoutFreshRoot(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 	priority := int64(1)
@@ -1444,8 +1823,8 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
 
-func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testing.T) {
-	channel, _, _ := setupCodexRootDistributorTest(t)
+func TestDistributorGuardianUsesUniqueNormalChannelForRootlessMainAndDifferentToken(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
 	const (
 		userID         = 64
 		mainTokenID    = 720
@@ -1467,9 +1846,11 @@ func TestDistributorGuardianFailsClosedForRootlessMainAndDifferentToken(t *testi
 	guardianContext, recorder := codexGuardianApprovalContext(userID, reviewerToken, reviewedRootID)
 	Distribute()(guardianContext)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.True(t, guardianContext.IsAborted())
-	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, guardianContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
 
 	// Knowing the reviewed root must not turn an ordinary user-authored Luna
 	// request into a passive internal request.
@@ -1553,15 +1934,17 @@ func TestInspectSelectedCodexChannelBindingReportsPolicyKeyMismatch(t *testing.T
 	require.Equal(t, "channel_key_not_bound", reason)
 }
 
-func TestDistributorGuardianShapeFailsClosedWithoutReviewedRootBinding(t *testing.T) {
-	setupCodexRootDistributorTest(t)
+func TestDistributorGuardianShapeUsesUniqueNormalChannelWithoutReviewedRootBinding(t *testing.T) {
+	channel, key, _ := setupCodexRootDistributorTest(t)
 	guardianContext, recorder := codexGuardianApprovalContext(43, 711, "01a03816-3b42-78d1-a818-65fdcb9e8a74")
 
 	Distribute()(guardianContext)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.True(t, guardianContext.IsAborted())
-	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, guardianContext.IsAborted())
+	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
+	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
 }
 
 func TestDistributorMainThenTitleEndToEndKeepsChannelAndKey(t *testing.T) {

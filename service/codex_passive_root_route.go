@@ -21,7 +21,9 @@ import (
 
 const (
 	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v3"
-	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v1"
+	codexRootObservationNamespace            = "new-api:codex_root_observation:v1"
+	codexRequestArrivalSequenceNamespace     = "new-api:codex_request_arrival:v1"
+	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v2"
 	codexTitleRootCandidateNamespace         = "new-api:codex_title_root_candidate:v1"
 	codexRecentRootChannelCandidateTTL       = 30 * time.Second
 	codexProvisionalRootCandidateTTL         = 2 * time.Minute
@@ -34,6 +36,9 @@ const (
 	codexPassiveRootRedisTimeout         = 500 * time.Millisecond
 	codexRecentRootPollInterval          = 200 * time.Millisecond
 	codexTitleRootCandidateTTL           = 5 * time.Second
+	codexRootObservationWindow           = 30 * time.Second
+	codexRootObservationContainerTTL     = 2 * time.Minute
+	codexRequestArrivalSequenceTTL       = 10 * time.Minute
 )
 
 var (
@@ -48,6 +53,19 @@ type CodexRecentRootChannelCandidate struct {
 	Binding            CodexRootChannelBinding
 	BindingFingerprint string
 	ExpiresAt          time.Time
+	ObservationID      string
+	ArrivalOrder       int64
+	ArrivedAt          time.Time
+}
+
+// CodexRequestArrival is a server-issued ordering ticket for one downstream
+// request. Order is monotonic within one NewAPI user/token scope; ArrivedAt is
+// taken from the same backing store so the 30-second predecessor window is
+// consistent across instances.
+type CodexRequestArrival struct {
+	Order     int64
+	ArrivedAt time.Time
+	scopeKey  string
 }
 
 type CodexPassiveRootAlias struct {
@@ -63,9 +81,13 @@ type codexRecentRootWaiter struct {
 }
 
 var (
-	codexRecentRootMemoryOnce sync.Once
-	codexRecentRootMemory     *hot.HotCache[string, map[string]int64]
-	codexRecentRootMemoryMu   sync.Mutex
+	codexRecentRootMemoryOnce      sync.Once
+	codexRecentRootMemory          *hot.HotCache[string, map[string]int64]
+	codexRecentRootMemoryMu        sync.Mutex
+	codexRootObservationMemoryOnce sync.Once
+	codexRootObservationMemory     *hot.HotCache[string, map[string]int64]
+	codexRequestArrivalMemoryOnce  sync.Once
+	codexRequestArrivalMemory      *hot.HotCache[string, int64]
 
 	codexPassiveRootAliasMemoryOnce sync.Once
 	codexPassiveRootAliasMemory     *hot.HotCache[string, CodexPassiveRootAlias]
@@ -81,6 +103,37 @@ var (
 		items map[string]*codexRecentRootWaiter
 	}{items: make(map[string]*codexRecentRootWaiter)}
 )
+
+var beginCodexRequestArrivalScript = redis.NewScript(`
+local order = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[1])
+local redis_time = redis.call('TIME')
+local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+return { order, now_ms }
+`)
+
+var storeCodexRootObservationScript = redis.NewScript(`
+local existing = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[2], ARGV[2])
+for _, member in ipairs(existing) do
+  if member == ARGV[1] then
+    redis.call('EXPIRE', KEYS[1], ARGV[4])
+    return 1
+  end
+end
+if #existing > 0 then return -1 end
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+local count = redis.call('ZCARD', KEYS[1])
+local max_observations = tonumber(ARGV[3])
+if count > max_observations then
+  redis.call('ZREMRANGEBYRANK', KEYS[1], 0, count - max_observations - 1)
+end
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return 1
+`)
+
+var loadLatestCodexRootObservationScript = redis.NewScript(`
+return redis.call('ZREVRANGEBYSCORE', KEYS[1], '(' .. ARGV[1], '-inf', 'WITHSCORES', 'LIMIT', 0, 1)
+`)
 
 var storeCodexRecentRootCandidateScript = redis.NewScript(`
 local redis_time = redis.call('TIME')
@@ -147,6 +200,31 @@ end
 return 0
 `)
 
+var claimCodexObservedPassiveRootAliasScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current then
+  if current == ARGV[1] then return 1 end
+  return -1
+end
+local latest = redis.call('ZREVRANGEBYSCORE', KEYS[2], '(' .. ARGV[4], '-inf')
+local selected = nil
+local minimum_arrived_ms = tonumber(ARGV[6]) - tonumber(ARGV[7])
+for _, member in ipairs(latest) do
+  local _, _, arrived_ms = string.find(member, '^[^.]+%.([^.]+)%.')
+  if arrived_ms and tonumber(arrived_ms) >= minimum_arrived_ms then
+    selected = member
+    break
+  end
+end
+local score = redis.call('ZSCORE', KEYS[2], ARGV[2])
+if selected ~= ARGV[2] or not score or tonumber(score) ~= tonumber(ARGV[5]) then return 0 end
+if redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3], 'NX') then return 1 end
+local claimed = redis.call('GET', KEYS[1])
+if claimed == ARGV[1] then return 1 end
+if claimed then return -1 end
+return 0
+`)
+
 var promoteCodexPassiveRootAliasScript = redis.NewScript(`
 local current = redis.call('GET', KEYS[1])
 if not current or current ~= ARGV[1] then
@@ -195,6 +273,26 @@ func getCodexRecentRootMemory() *hot.HotCache[string, map[string]int64] {
 	return codexRecentRootMemory
 }
 
+func getCodexRootObservationMemory() *hot.HotCache[string, map[string]int64] {
+	codexRootObservationMemoryOnce.Do(func() {
+		codexRootObservationMemory = hot.NewHotCache[string, map[string]int64](hot.LRU, 100_000).
+			WithTTL(codexRootObservationContainerTTL).
+			WithJanitor().
+			Build()
+	})
+	return codexRootObservationMemory
+}
+
+func getCodexRequestArrivalMemory() *hot.HotCache[string, int64] {
+	codexRequestArrivalMemoryOnce.Do(func() {
+		codexRequestArrivalMemory = hot.NewHotCache[string, int64](hot.LRU, 100_000).
+			WithTTL(codexRequestArrivalSequenceTTL).
+			WithJanitor().
+			Build()
+	})
+	return codexRequestArrivalMemory
+}
+
 func getCodexPassiveRootAliasMemory() *hot.HotCache[string, CodexPassiveRootAlias] {
 	codexPassiveRootAliasMemoryOnce.Do(func() {
 		codexPassiveRootAliasMemory = hot.NewHotCache[string, CodexPassiveRootAlias](hot.LRU, 200_000).
@@ -235,6 +333,21 @@ func codexRecentRootChannelRedisKey(scopeKey string) string {
 	return cachex.Namespace(codexRecentRootChannelCandidateNamespace).FullKey("{" + baseScope + "}:" + scopeKey)
 }
 
+func codexRequestArrivalSequenceRedisKey(scopeKey string) string {
+	if scopeKey == "" {
+		return ""
+	}
+	return cachex.Namespace(codexRequestArrivalSequenceNamespace).FullKey("{" + scopeKey + "}:sequence")
+}
+
+func codexRootObservationRedisKey(scopeKey string) string {
+	baseScope, _, _ := strings.Cut(scopeKey, ":")
+	if baseScope == "" {
+		return ""
+	}
+	return cachex.Namespace(codexRootObservationNamespace).FullKey("{" + baseScope + "}:" + scopeKey)
+}
+
 func codexTitleRootCandidateRedisKey(scopeKey string) string {
 	baseScope, _, _ := strings.Cut(scopeKey, ":")
 	if baseScope == "" {
@@ -265,6 +378,248 @@ func codexPassiveRootAliasRedisKey(scopeKey, cacheKey string) string {
 		return ""
 	}
 	return cachex.Namespace(codexPassiveRootAliasNamespace).FullKey("{" + scopeKey + "}:" + cacheKey)
+}
+
+// BeginCodexRequestArrival reserves the request's position before distributor
+// parsing, waiting, or channel selection. The ticket is intentionally separate
+// from ContextKeyRequestStartTime, which measures relay/FRT timing later.
+func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int) (CodexRequestArrival, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return CodexRequestArrival{}, err
+	}
+	scopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+	if scopeKey == "" {
+		return CodexRequestArrival{}, nil
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		arrivalContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+		defer cancel()
+		raw, err := beginCodexRequestArrivalScript.Run(arrivalContext, common.RDB,
+			[]string{codexRequestArrivalSequenceRedisKey(scopeKey)},
+			int64(codexRequestArrivalSequenceTTL/time.Millisecond)).Result()
+		if err != nil {
+			return CodexRequestArrival{}, err
+		}
+		values, ok := raw.([]interface{})
+		if !ok || len(values) != 2 {
+			return CodexRequestArrival{}, errors.New("invalid Codex request arrival response")
+		}
+		order, orderErr := strconv.ParseInt(redisResultString(values[0]), 10, 64)
+		arrivedAtMillis, timeErr := strconv.ParseInt(redisResultString(values[1]), 10, 64)
+		if orderErr != nil || timeErr != nil || order <= 0 || arrivedAtMillis <= 0 {
+			return CodexRequestArrival{}, errors.New("invalid Codex request arrival values")
+		}
+		return CodexRequestArrival{
+			Order: order, ArrivedAt: time.UnixMilli(arrivedAtMillis).UTC(), scopeKey: scopeKey,
+		}, nil
+	}
+	codexRecentRootMemoryMu.Lock()
+	defer codexRecentRootMemoryMu.Unlock()
+	sequenceCache := getCodexRequestArrivalMemory()
+	current, found, err := sequenceCache.Get(scopeKey)
+	if err != nil {
+		return CodexRequestArrival{}, err
+	}
+	if !found || current < 0 {
+		current = 0
+	}
+	current++
+	sequenceCache.SetWithTTL(scopeKey, current, codexRequestArrivalSequenceTTL)
+	return CodexRequestArrival{Order: current, ArrivedAt: time.Now().UTC(), scopeKey: scopeKey}, nil
+}
+
+func (arrival CodexRequestArrival) validFor(userID, tokenID int) bool {
+	return arrival.Order > 0 && !arrival.ArrivedAt.IsZero() &&
+		arrival.scopeKey != "" && arrival.scopeKey == codexPassiveRootRedisScopeKey(userID, tokenID)
+}
+
+func codexRootObservationMember(arrival CodexRequestArrival, rootID, bindingFingerprint string) string {
+	rootID = strings.TrimSpace(rootID)
+	bindingFingerprint = strings.TrimSpace(bindingFingerprint)
+	if arrival.Order <= 0 || arrival.ArrivedAt.IsZero() || rootID == "" || bindingFingerprint == "" {
+		return ""
+	}
+	return strconv.FormatInt(arrival.Order, 10) + "." +
+		strconv.FormatInt(arrival.ArrivedAt.UTC().UnixMilli(), 10) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(rootID)) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(bindingFingerprint))
+}
+
+func parseCodexRootObservationMember(member string) (CodexRequestArrival, string, string, bool) {
+	parts := strings.Split(member, ".")
+	if len(parts) != 4 {
+		return CodexRequestArrival{}, "", "", false
+	}
+	order, orderErr := strconv.ParseInt(parts[0], 10, 64)
+	arrivedAtMillis, timeErr := strconv.ParseInt(parts[1], 10, 64)
+	rootIDBytes, rootErr := base64.RawURLEncoding.DecodeString(parts[2])
+	fingerprintBytes, fingerprintErr := base64.RawURLEncoding.DecodeString(parts[3])
+	arrival := CodexRequestArrival{Order: order, ArrivedAt: time.UnixMilli(arrivedAtMillis).UTC()}
+	rootID := strings.TrimSpace(string(rootIDBytes))
+	bindingFingerprint := strings.TrimSpace(string(fingerprintBytes))
+	if orderErr != nil || timeErr != nil || rootErr != nil || fingerprintErr != nil ||
+		order <= 0 || arrivedAtMillis <= 0 || rootID == "" || bindingFingerprint == "" ||
+		codexRootObservationMember(arrival, rootID, bindingFingerprint) != member {
+		return CodexRequestArrival{}, "", "", false
+	}
+	return arrival, rootID, bindingFingerprint, true
+}
+
+// StoreCodexRootChannelObservation publishes one root request using the ticket
+// reserved at HTTP arrival. Provisional and successful publication of the same
+// request therefore update the same event, while a later request on the same
+// root gets a distinct order and cannot overwrite its predecessor.
+func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, binding CodexRootChannelBinding, arrival CodexRequestArrival) error {
+	rootID = strings.TrimSpace(rootID)
+	bindingFingerprint := CodexRootChannelBindingFingerprint(binding)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly)
+	member := codexRootObservationMember(arrival, rootID, bindingFingerprint)
+	if scopeKey == "" || member == "" || !arrival.validFor(userID, tokenID) {
+		return ErrCodexRecentRootBindingUnavailable
+	}
+	currentBinding, found, err := LoadCodexRootChannelBindingForRoutingSide(userID, rootID, binding.UARoutingOnly)
+	if err != nil {
+		return err
+	}
+	if !found || currentBinding.UARoutingOnly != binding.UARoutingOnly ||
+		CodexRootChannelBindingFingerprint(currentBinding) != bindingFingerprint {
+		return ErrCodexRecentRootBindingUnavailable
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		storeContext, cancel := context.WithTimeout(context.Background(), codexPassiveRootRedisTimeout)
+		defer cancel()
+		stored, err := storeCodexRootObservationScript.Run(storeContext, common.RDB,
+			[]string{codexRootObservationRedisKey(scopeKey)}, member, arrival.Order,
+			codexRecentRootChannelCandidateLimit, int64(codexRootObservationContainerTTL/time.Second)).Int()
+		if err != nil {
+			return err
+		}
+		if stored < 0 {
+			return ErrCodexPassiveRootCandidatesChanged
+		}
+	} else {
+		codexRecentRootMemoryMu.Lock()
+		cache := getCodexRootObservationMemory()
+		current, currentFound, cacheErr := cache.Get(scopeKey)
+		if cacheErr != nil {
+			codexRecentRootMemoryMu.Unlock()
+			return cacheErr
+		}
+		updated := make(map[string]int64, len(current)+1)
+		if currentFound {
+			for eventID, order := range current {
+				if order == arrival.Order && eventID != member {
+					codexRecentRootMemoryMu.Unlock()
+					return ErrCodexPassiveRootCandidatesChanged
+				}
+				updated[eventID] = order
+			}
+		}
+		updated[member] = arrival.Order
+		for len(updated) > codexRecentRootChannelCandidateLimit {
+			oldestEvent := ""
+			oldestOrder := int64(0)
+			for eventID, order := range updated {
+				if oldestEvent == "" || order < oldestOrder || (order == oldestOrder && eventID < oldestEvent) {
+					oldestEvent = eventID
+					oldestOrder = order
+				}
+			}
+			delete(updated, oldestEvent)
+		}
+		cache.SetWithTTL(scopeKey, updated, codexRootObservationContainerTTL)
+		codexRecentRootMemoryMu.Unlock()
+	}
+	notifyCodexRecentRootChannelUpdate(scopeKey)
+	return nil
+}
+
+// LoadLatestCodexRootChannelObservationBefore returns the immediate published
+// predecessor on one routing side, provided it arrived no more than 30 seconds
+// before cutoff. Events at or after cutoff are invisible even if they publish
+// while this request is waiting.
+func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival) (CodexRecentRootChannelCandidate, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return CodexRecentRootChannelCandidate{}, false, err
+	}
+	if !cutoff.validFor(userID, tokenID) {
+		return CodexRecentRootChannelCandidate{}, false, ErrCodexRecentRootBindingUnavailable
+	}
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+	if scopeKey == "" {
+		return CodexRecentRootChannelCandidate{}, false, nil
+	}
+	eventID := ""
+	eventOrder := int64(0)
+	if common.RedisEnabled && common.RDB != nil {
+		loadContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+		defer cancel()
+		raw, err := loadLatestCodexRootObservationScript.Run(loadContext, common.RDB,
+			[]string{codexRootObservationRedisKey(scopeKey)}, cutoff.Order).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return CodexRecentRootChannelCandidate{}, false, err
+		}
+		values, ok := raw.([]interface{})
+		if !ok || len(values) == 0 {
+			return CodexRecentRootChannelCandidate{}, false, nil
+		}
+		if len(values) != 2 {
+			return CodexRecentRootChannelCandidate{}, false, errors.New("invalid Codex root observation response")
+		}
+		eventID = redisResultString(values[0])
+		parsedOrder, parseErr := strconv.ParseFloat(redisResultString(values[1]), 64)
+		if parseErr != nil {
+			return CodexRecentRootChannelCandidate{}, false, errors.New("invalid Codex root observation score")
+		}
+		eventOrder = int64(parsedOrder)
+	} else {
+		codexRecentRootMemoryMu.Lock()
+		current, found, err := getCodexRootObservationMemory().Get(scopeKey)
+		if err != nil {
+			codexRecentRootMemoryMu.Unlock()
+			return CodexRecentRootChannelCandidate{}, false, err
+		}
+		if found {
+			for candidateEvent, order := range current {
+				if order >= cutoff.Order {
+					continue
+				}
+				if eventID == "" || order > eventOrder || (order == eventOrder && candidateEvent < eventID) {
+					eventID = candidateEvent
+					eventOrder = order
+				}
+			}
+		}
+		codexRecentRootMemoryMu.Unlock()
+		if eventID == "" {
+			return CodexRecentRootChannelCandidate{}, false, nil
+		}
+	}
+	arrival, rootID, bindingFingerprint, validEvent := parseCodexRootObservationMember(eventID)
+	if !validEvent || arrival.Order != eventOrder || arrival.Order >= cutoff.Order || arrival.ArrivedAt.After(cutoff.ArrivedAt) {
+		return CodexRecentRootChannelCandidate{}, false, ErrCodexPassiveRootCandidatesChanged
+	}
+	if arrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+		return CodexRecentRootChannelCandidate{}, false, nil
+	}
+	binding, found, err := LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, uaRoutingOnly)
+	if err != nil {
+		return CodexRecentRootChannelCandidate{}, false, err
+	}
+	if !found || binding.UARoutingOnly != uaRoutingOnly || CodexRootChannelBindingFingerprint(binding) != bindingFingerprint {
+		return CodexRecentRootChannelCandidate{}, false, ErrCodexRecentRootBindingUnavailable
+	}
+	return CodexRecentRootChannelCandidate{
+		RootID: rootID, Binding: binding, BindingFingerprint: bindingFingerprint,
+		ExpiresAt: arrival.ArrivedAt.Add(codexRootObservationWindow), ObservationID: eventID,
+		ArrivalOrder: arrival.Order, ArrivedAt: arrival.ArrivedAt,
+	}, true, nil
 }
 
 func StoreRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
@@ -971,6 +1326,8 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 	return nil
 }
 
+// ClaimCodexPassiveRootAlias preserves the legacy single-candidate claim used
+// by callers that do not carry an arrival-event proof.
 func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1077,6 +1434,131 @@ func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, system
 		return err
 	}
 	cache.SetWithTTL(cacheKey, alias, codexPassiveRootAliasProvisionalTTL)
+	return nil
+}
+
+// ClaimCodexObservedPassiveRootAlias atomically freezes the exact predecessor
+// event selected for an otherwise-unlinked system/summary request. A request
+// that arrived after cutoff is excluded by its order, even if it publishes
+// before this claim executes.
+func ClaimCodexObservedPassiveRootAlias(
+	ctx context.Context,
+	userID, tokenID int,
+	systemRootID string,
+	alias CodexPassiveRootAlias,
+	candidate CodexRecentRootChannelCandidate,
+	cutoff CodexRequestArrival,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
+	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
+	eventArrival, eventRootID, eventFingerprint, validEvent := parseCodexRootObservationMember(candidate.ObservationID)
+	if cacheKey == "" || !validAlias || !cutoff.validFor(userID, tokenID) || !validEvent ||
+		eventRootID != alias.RootID || eventFingerprint != alias.BindingFingerprint ||
+		eventArrival.Order != candidate.ArrivalOrder || !eventArrival.ArrivedAt.Equal(candidate.ArrivedAt) ||
+		eventArrival.Order >= cutoff.Order || eventArrival.ArrivedAt.After(cutoff.ArrivedAt) ||
+		eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+		return ErrCodexPassiveRootAliasInvalid
+	}
+	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID)
+	if err != nil {
+		return err
+	}
+	if aliasFound {
+		if currentAlias != alias {
+			return ErrCodexPassiveRootAliasConflict
+		}
+		return nil
+	}
+	bindingContext, cancelBinding := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+	binding, bindingFound, bindingErr := LoadCodexRootChannelBindingForRoutingSideContext(bindingContext, userID, alias.RootID, alias.UARoutingOnly)
+	cancelBinding()
+	if bindingErr != nil {
+		return bindingErr
+	}
+	if !bindingFound || binding.SelectedGroup != alias.SelectedGroup || binding.UARoutingOnly != alias.UARoutingOnly ||
+		CodexRootChannelBindingFingerprint(binding) != alias.BindingFingerprint {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	winner, selectedWon, claimErr := ClaimProvisionalCodexRootChannelBinding(userID, alias.RootID, binding)
+	if claimErr != nil {
+		return claimErr
+	}
+	if !selectedWon || winner.SelectedGroup != alias.SelectedGroup || winner.UARoutingOnly != alias.UARoutingOnly ||
+		CodexRootChannelBindingFingerprint(winner) != alias.BindingFingerprint {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		payload, marshalErr := common.Marshal(alias)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		claimContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
+		defer cancel()
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
+		redisScopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+		stored, claimErr := claimCodexObservedPassiveRootAliasScript.Run(claimContext, common.RDB,
+			[]string{codexPassiveRootAliasRedisKey(redisScopeKey, cacheKey), codexRootObservationRedisKey(scopeKey)},
+			string(payload), candidate.ObservationID, int64(codexPassiveRootAliasProvisionalTTL/time.Second), cutoff.Order,
+			candidate.ArrivalOrder, cutoff.ArrivedAt.UnixMilli(), codexRootObservationWindow/time.Millisecond).Int()
+		if claimErr != nil {
+			return claimErr
+		}
+		if stored < 0 {
+			return ErrCodexPassiveRootAliasConflict
+		}
+		if stored == 0 {
+			return ErrCodexPassiveRootCandidatesChanged
+		}
+		return nil
+	}
+	codexRecentRootMemoryMu.Lock()
+	defer codexRecentRootMemoryMu.Unlock()
+	aliasCache := getCodexPassiveRootAliasMemory()
+	current, found, cacheErr := aliasCache.Get(cacheKey)
+	if cacheErr != nil {
+		return cacheErr
+	}
+	if found {
+		if current != alias {
+			return ErrCodexPassiveRootAliasConflict
+		}
+		return nil
+	}
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
+	events, eventsFound, eventsErr := getCodexRootObservationMemory().Get(scopeKey)
+	if eventsErr != nil {
+		return eventsErr
+	}
+	latestEvent := ""
+	latestOrder := int64(0)
+	if eventsFound {
+		for eventID, order := range events {
+			if order >= cutoff.Order {
+				continue
+			}
+			eventArrival, _, _, valid := parseCodexRootObservationMember(eventID)
+			if !valid || eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+				continue
+			}
+			if latestEvent == "" || order > latestOrder || (order == latestOrder && eventID < latestEvent) {
+				latestEvent = eventID
+				latestOrder = order
+			}
+		}
+	}
+	if latestEvent != candidate.ObservationID || latestOrder != candidate.ArrivalOrder {
+		return ErrCodexPassiveRootCandidatesChanged
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	aliasCache.SetWithTTL(cacheKey, alias, codexPassiveRootAliasProvisionalTTL)
 	return nil
 }
 
