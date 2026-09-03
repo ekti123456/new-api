@@ -24,6 +24,13 @@ func useCodexPassiveRouteRedis(t *testing.T) *miniredis.Miniredis {
 	codexRootChannelCache = nil
 	codexLegacyRootChannelCacheOnce = sync.Once{}
 	codexLegacyRootChannelCache = nil
+	codexTurnRootCacheOnce = sync.Once{}
+	codexTurnRootCache = nil
+	codexTurnRootMemoryExpiresAt = make(map[string]time.Time)
+	codexTurnRootRollbackOwners = make(map[string]codexLineageRollbackOwner)
+	codexTurnRootWaiters.Lock()
+	codexTurnRootWaiters.items = make(map[string]*codexRootChannelWaiter)
+	codexTurnRootWaiters.Unlock()
 	common.RedisEnabled = true
 	common.RDB = client
 	t.Cleanup(func() {
@@ -33,6 +40,13 @@ func useCodexPassiveRouteRedis(t *testing.T) *miniredis.Miniredis {
 		codexRootChannelCache = nil
 		codexLegacyRootChannelCacheOnce = sync.Once{}
 		codexLegacyRootChannelCache = nil
+		codexTurnRootCacheOnce = sync.Once{}
+		codexTurnRootCache = nil
+		codexTurnRootMemoryExpiresAt = make(map[string]time.Time)
+		codexTurnRootRollbackOwners = make(map[string]codexLineageRollbackOwner)
+		codexTurnRootWaiters.Lock()
+		codexTurnRootWaiters.items = make(map[string]*codexRootChannelWaiter)
+		codexTurnRootWaiters.Unlock()
 		require.NoError(t, client.Close())
 	})
 	return server
@@ -442,9 +456,11 @@ func TestCodexPassiveRootAliasClaimRequiresExactCandidateFingerprint(t *testing.
 	require.False(t, found)
 }
 
-func TestCodexRecentRootCandidateRedisUsesProvisionalAndDurableLifetimes(t *testing.T) {
-	t.Run("provisional", func(t *testing.T) {
-		useCodexPassiveRouteRedis(t)
+func TestCodexRecentRootCandidateRedisUsesProvisionalAndSuccessfulLifetimes(t *testing.T) {
+	t.Run("provisional outlives successful window", func(t *testing.T) {
+		server := useCodexPassiveRouteRedis(t)
+		redisNow := time.Now().UTC()
+		server.SetTime(redisNow)
 		const userID, tokenID = 42013, 10113
 		rootID := "root:" + t.Name()
 		binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
@@ -454,19 +470,33 @@ func TestCodexRecentRootCandidateRedisUsesProvisionalAndDurableLifetimes(t *test
 		require.NoError(t, err)
 		require.Len(t, candidates, 1)
 		require.WithinDuration(t, time.Now().Add(codexProvisionalRootCandidateTTL), candidates[0].ExpiresAt, 2*time.Second)
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, false)
-		candidateKey := codexRecentRootChannelRedisKey(scopeKey)
-		member := codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding))
-		require.NoError(t, common.RDB.ZAdd(context.Background(), candidateKey, &redis.Z{
-			Score: float64(time.Now().Add(-time.Second).UnixMilli()), Member: member,
-		}).Err())
+		candidateKey := codexRecentRootChannelRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, false))
+		require.Greater(t, server.TTL(candidateKey), codexRecentRootChannelCandidateTTL)
+
+		advance := codexRecentRootChannelCandidateTTL + time.Second
+		server.FastForward(advance)
+		redisNow = redisNow.Add(advance)
+		server.SetTime(redisNow)
+		exists, err := common.RDB.Exists(context.Background(), candidateKey).Result()
+		require.NoError(t, err)
+		require.Equal(t, int64(1), exists, "the shared container must not expire with the 30-second successful window")
+		candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+		require.NoError(t, err)
+		require.Len(t, candidates, 1)
+
+		advance = codexProvisionalRootCandidateTTL - codexRecentRootChannelCandidateTTL
+		server.FastForward(advance)
+		redisNow = redisNow.Add(advance)
+		server.SetTime(redisNow)
 		candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
 		require.NoError(t, err)
 		require.Empty(t, candidates)
 	})
 
-	t.Run("durable", func(t *testing.T) {
+	t.Run("successful expires while shared container remains", func(t *testing.T) {
 		server := useCodexPassiveRouteRedis(t)
+		redisNow := time.Now().UTC()
+		server.SetTime(redisNow)
 		const userID, tokenID = 42014, 10114
 		rootID := "root:" + t.Name()
 		binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
@@ -476,38 +506,110 @@ func TestCodexRecentRootCandidateRedisUsesProvisionalAndDurableLifetimes(t *test
 		require.Len(t, candidates, 1)
 		require.WithinDuration(t, time.Now().Add(codexRecentRootChannelCandidateTTL), candidates[0].ExpiresAt, 2*time.Second)
 
-		server.FastForward(codexProvisionalRootCandidateTTL + time.Second)
-		candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+		candidateKey := codexRecentRootChannelRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, false))
+		require.Greater(t, server.TTL(candidateKey), codexRecentRootChannelCandidateTTL)
+		advance := codexRecentRootChannelCandidateTTL + time.Second
+		server.FastForward(advance)
+		server.SetTime(redisNow.Add(advance))
+		exists, err := common.RDB.Exists(context.Background(), candidateKey).Result()
 		require.NoError(t, err)
-		require.Len(t, candidates, 1, "a successful root remains eligible beyond the provisional window")
-		server.FastForward(codexRecentRootChannelCandidateTTL - codexProvisionalRootCandidateTTL)
+		require.Equal(t, int64(1), exists)
 		candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
 		require.NoError(t, err)
 		require.Empty(t, candidates)
 	})
 
-	t.Run("provisional refresh does not shorten durable", func(t *testing.T) {
+	t.Run("successful settlement replaces provisional expiry", func(t *testing.T) {
 		server := useCodexPassiveRouteRedis(t)
+		redisNow := time.Now().UTC()
+		server.SetTime(redisNow)
 		const userID, tokenID = 42022, 10122
 		rootID := "root:" + t.Name()
 		binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
-		require.NoError(t, StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, false)
-		candidateKey := codexRecentRootChannelRedisKey(scopeKey)
-		member := codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding))
-		durableExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
-		require.NoError(t, err)
-		server.FastForward(time.Minute)
 		require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
-		afterProvisionalExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
+		candidateKey := codexRecentRootChannelRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, false))
+		member := codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding))
+		provisionalExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
 		require.NoError(t, err)
-		require.Equal(t, durableExpiry, afterProvisionalExpiry)
 
-		server.FastForward(codexProvisionalRootCandidateTTL + time.Second)
+		require.NoError(t, StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+		successfulExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
+		require.NoError(t, err)
+		require.Less(t, successfulExpiry, provisionalExpiry)
+		require.InDelta(t, time.Now().Add(codexRecentRootChannelCandidateTTL).UnixMilli(), successfulExpiry, float64(2*time.Second/time.Millisecond))
+
+		advance := codexRecentRootChannelCandidateTTL + time.Second
+		server.FastForward(advance)
+		server.SetTime(redisNow.Add(advance))
 		candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
 		require.NoError(t, err)
-		require.Len(t, candidates, 1, "a provisional refresh must preserve the later durable expiry")
+		require.Empty(t, candidates)
 	})
+
+	t.Run("new provisional activity extends successful expiry", func(t *testing.T) {
+		server := useCodexPassiveRouteRedis(t)
+		redisNow := time.Now().UTC()
+		server.SetTime(redisNow)
+		const userID, tokenID = 42028, 10128
+		rootID := "root:" + t.Name()
+		binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
+		require.NoError(t, StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+		candidateKey := codexRecentRootChannelRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, false))
+		member := codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding))
+		successfulExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
+		require.NoError(t, err)
+
+		server.FastForward(time.Second)
+		redisNow = redisNow.Add(time.Second)
+		server.SetTime(redisNow)
+		require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+		provisionalExpiry, err := common.RDB.ZScore(context.Background(), candidateKey, member).Result()
+		require.NoError(t, err)
+		require.Greater(t, provisionalExpiry, successfulExpiry)
+
+		advance := codexRecentRootChannelCandidateTTL + time.Second
+		server.FastForward(advance)
+		server.SetTime(redisNow.Add(advance))
+		candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+		require.NoError(t, err)
+		require.Len(t, candidates, 1)
+	})
+}
+
+func TestCodexRecentRootCandidateMemoryUsesProvisionalAndSuccessfulLifetimes(t *testing.T) {
+	originalEnabled := common.RedisEnabled
+	originalClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalEnabled
+		common.RDB = originalClient
+	})
+
+	const userID, tokenID = 42029, 10129
+	rootID := "root:" + t.Name()
+	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-a"}
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	provisionalExpiry := candidates[0].ExpiresAt
+	require.WithinDuration(t, time.Now().Add(codexProvisionalRootCandidateTTL), provisionalExpiry, 2*time.Second)
+
+	require.NoError(t, StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	successfulExpiry := candidates[0].ExpiresAt
+	require.WithinDuration(t, time.Now().Add(codexRecentRootChannelCandidateTTL), successfulExpiry, 2*time.Second)
+	require.True(t, successfulExpiry.Before(provisionalExpiry))
+
+	require.NoError(t, StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	candidates, err = LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	require.WithinDuration(t, time.Now().Add(codexProvisionalRootCandidateTTL), candidates[0].ExpiresAt, 2*time.Second)
+	require.True(t, candidates[0].ExpiresAt.After(successfulExpiry))
 }
 
 func TestCodexPassiveRootAliasRedisClaimRejectsExpiredOrReboundCandidate(t *testing.T) {

@@ -48,7 +48,7 @@ func Distribute() func(c *gin.Context) {
 		if !isCodexNamingRequest(rootSession) {
 			service.PrepareUserAgentRoutingMode(c, usingGroup)
 		}
-		rootSession, _, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
+		rootSession, passiveFeature, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
@@ -88,7 +88,7 @@ func Distribute() func(c *gin.Context) {
 				channel = rootChannel
 			}
 		} else {
-			passiveInternalAuthorized := strictPassiveRoute && rootBindingFound && rootChannel != nil
+			passiveInternalAuthorized := strictPassiveRoute && strings.TrimSpace(passiveFeature) != "" && rootBindingFound && rootChannel != nil
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
@@ -262,7 +262,30 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
+			turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
+			if turnBindingErr != nil {
+				logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			threadClaim, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+			if threadBindingErr != nil {
+				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
+				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			// Publish temporal candidates only after both exact lineage claims have
+			// succeeded, so a conflicting Turn/Thread loser cannot poison the
+			// 30-second summary/system bridge.
+			if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
+				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "candidate_publish", turnClaim, threadClaim)
+				logCodexPassiveRouteFailure(c, "candidate_publish", modelRequest.Model, rootSession, candidateErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
 			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
+				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "claim", turnClaim, threadClaim)
 				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
@@ -272,6 +295,8 @@ func Distribute() func(c *gin.Context) {
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 			recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+			recordCodexTurnRootBinding(c, rootSession, modelRequest.Model)
+			recordCodexThreadRootBinding(c, rootSession, modelRequest.Model)
 			if promoteErr := promoteCodexPassiveRootAlias(c); promoteErr != nil {
 				logCodexPassiveRouteFailure(c, "promote", modelRequest.Model, rootSession, promoteErr)
 			}

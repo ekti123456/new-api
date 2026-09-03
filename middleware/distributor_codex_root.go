@@ -23,14 +23,19 @@ import (
 const (
 	codexRootChannelRouteContextKey        = "codex_root_channel_route_v1"
 	codexPendingPassiveRootAliasContextKey = "codex_pending_passive_root_alias_v1"
+	codexTurnRouteRoleContextKey           = "codex_turn_route_role_v1"
 )
 
 var (
 	codexUnlinkedPassiveRootWaitTimeout  = 3 * time.Second
 	codexLinkedNamingRootWaitTimeout     = 3 * time.Second
+	codexTurnRootWaitTimeout             = 3 * time.Second
+	codexThreadRootWaitTimeout           = 3 * time.Second
 	waitForRecentCodexRootChannelUpdate  = service.WaitForRecentCodexRootChannelUpdate
 	waitForRecentCodexTitleRootUpdate    = service.WaitForCodexTitleRootChannelUpdate
 	waitForCodexRootChannelBindingUpdate = service.WaitForCodexRootChannelBindingUpdate
+	waitForCodexTurnRootBindingUpdate    = service.WaitForCodexTurnRootBindingUpdate
+	waitForCodexThreadRootBindingUpdate  = service.WaitForCodexThreadRootBindingUpdate
 )
 
 type codexRootChannelRoute struct {
@@ -118,7 +123,7 @@ func loadLinkedCodexNamingRootBinding(c *gin.Context, userID int, rootID string)
 	if c.Request != nil {
 		requestContext = c.Request.Context()
 	}
-	binding, found, err := service.LoadCodexRootChannelBindingContext(requestContext, userID, rootID)
+	binding, found, err := loadUniqueCodexRootChannelBindingContext(requestContext, userID, rootID)
 	if err != nil || found || codexLinkedNamingRootWaitTimeout <= 0 {
 		return binding, found, err
 	}
@@ -133,7 +138,7 @@ func loadLinkedCodexNamingRootBinding(c *gin.Context, userID int, rootID string)
 			}
 			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked Codex naming root binding: %w", waitErr)
 		}
-		binding, found, err = service.LoadCodexRootChannelBindingContext(waitContext, userID, rootID)
+		binding, found, err = loadUniqueCodexRootChannelBindingContext(waitContext, userID, rootID)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
 				return service.CodexRootChannelBinding{}, false, nil
@@ -150,6 +155,27 @@ func loadLinkedCodexNamingRootBinding(c *gin.Context, userID int, rootID string)
 			return service.CodexRootChannelBinding{}, false, fmt.Errorf("wait for linked Codex naming root binding: %w", err)
 		}
 	}
+}
+
+func loadUniqueCodexRootChannelBindingContext(ctx context.Context, userID int, rootID string) (service.CodexRootChannelBinding, bool, error) {
+	normal, normalFound, err := service.LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, false)
+	if err != nil {
+		return service.CodexRootChannelBinding{}, false, err
+	}
+	uaOnly, uaFound, err := service.LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, true)
+	if err != nil {
+		return service.CodexRootChannelBinding{}, false, err
+	}
+	if normalFound && uaFound {
+		return service.CodexRootChannelBinding{}, false, errors.New("Codex root channel binding is ambiguous across UA routing sides")
+	}
+	if normalFound {
+		return normal, true, nil
+	}
+	if uaFound {
+		return uaOnly, true, nil
+	}
+	return service.CodexRootChannelBinding{}, false, nil
 }
 
 func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, modelName, usingGroup string) (*model.Channel, string, bool, error) {
@@ -233,6 +259,328 @@ func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionReso
 		threadSource != "" && !strings.EqualFold(threadSource, "user") && !strings.EqualFold(threadSource, "system")
 }
 
+type codexTurnRootRoute struct {
+	mapping    service.CodexTurnRootBinding
+	binding    service.CodexRootChannelBinding
+	matchedOwn bool
+}
+
+type codexTurnRouteRole = service.CodexTurnRouteIdentity
+
+func currentCodexTurnRouteRole(c *gin.Context) (codexTurnRouteRole, bool) {
+	if c == nil {
+		return codexTurnRouteRole{}, false
+	}
+	raw, found := c.Get(codexTurnRouteRoleContextKey)
+	role, ok := raw.(codexTurnRouteRole)
+	return role, found && ok
+}
+
+func codexTurnRouteLabelConflict(current, stored string) bool {
+	current = strings.TrimSpace(current)
+	return current != "" && !strings.EqualFold(current, strings.TrimSpace(stored))
+}
+
+func isKnownCodexInternalThreadSource(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "system", "subagent", "memory_consolidation", "thread_summary",
+		"thread_title", "thread_description", "thread_title_reconsideration":
+		return true
+	default:
+		return false
+	}
+}
+
+type codexTurnRootLookup struct {
+	id  string
+	own bool
+}
+
+func codexTurnAncestryAllowed(resolution relaychannel.CodexRootSessionResolution) bool {
+	if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "user") {
+		return false
+	}
+	if strings.TrimSpace(resolution.ForkedFromID) != "" {
+		_, naming := relaychannel.ClassifyForkedCodexNamingRequest(resolution)
+		return naming
+	}
+	if strings.TrimSpace(resolution.SubagentKind) != "" {
+		return true
+	}
+	if isKnownCodexInternalThreadSource(resolution.ThreadSource) {
+		return true
+	}
+	return resolution.Resolved && resolution.Related
+}
+
+func codexTurnRootLookups(resolution relaychannel.CodexRootSessionResolution) []codexTurnRootLookup {
+	lookups := make([]codexTurnRootLookup, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	candidates := []codexTurnRootLookup{{id: resolution.TurnID, own: true}}
+	// Only positively identified internal work may inherit an ancestor Turn.
+	// An ordinary user fork can carry root_turn_id from its source task and must
+	// still open an independent root/account window.
+	if codexTurnAncestryAllowed(resolution) {
+		candidates = append(candidates,
+			codexTurnRootLookup{id: resolution.RootTurnID},
+			codexTurnRootLookup{id: resolution.ParentTurnID},
+		)
+	}
+	for _, candidate := range candidates {
+		candidate.id = strings.TrimSpace(candidate.id)
+		if candidate.id == "" {
+			continue
+		}
+		if _, exists := seen[candidate.id]; exists {
+			continue
+		}
+		seen[candidate.id] = struct{}{}
+		lookups = append(lookups, candidate)
+	}
+	return lookups
+}
+
+func sameCodexLineageRoute(left, right codexTurnRootRoute) bool {
+	return strings.EqualFold(left.mapping.RootID, right.mapping.RootID) &&
+		left.mapping.SelectedGroup == right.mapping.SelectedGroup &&
+		left.mapping.UARoutingOnly == right.mapping.UARoutingOnly &&
+		left.mapping.BindingFingerprint == right.mapping.BindingFingerprint &&
+		left.binding == right.binding
+}
+
+func loadCodexTurnRootRouteOnce(ctx context.Context, userID int, resolution relaychannel.CodexRootSessionResolution) (codexTurnRootRoute, bool, error) {
+	var resolved codexTurnRootRoute
+	foundAny := false
+	for _, lookup := range codexTurnRootLookups(resolution) {
+		mapping, binding, found, err := service.ResolveCodexTurnRootBinding(ctx, userID, lookup.id)
+		if err != nil {
+			return codexTurnRootRoute{}, false, fmt.Errorf("resolve Codex turn root binding: %w", err)
+		}
+		if !found {
+			continue
+		}
+		candidate := codexTurnRootRoute{mapping: mapping, binding: binding, matchedOwn: lookup.own}
+		if foundAny && !sameCodexLineageRoute(candidate, resolved) {
+			return codexTurnRootRoute{}, false, errors.New("Codex turn lineage resolves to conflicting root bindings")
+		}
+		if !foundAny || lookup.own {
+			resolved = candidate
+		}
+		foundAny = true
+	}
+	return resolved, foundAny, nil
+}
+
+func codexTurnRootFallbackRequired(resolution relaychannel.CodexRootSessionResolution) bool {
+	if !codexTurnAncestryAllowed(resolution) {
+		return false
+	}
+	if strings.TrimSpace(resolution.RootTurnID) == "" && strings.TrimSpace(resolution.ParentTurnID) == "" {
+		return false
+	}
+	if resolution.Resolved && resolution.Related {
+		return false
+	}
+	return true
+}
+
+func codexTurnLineageRequiredForRouting(resolution relaychannel.CodexRootSessionResolution) bool {
+	if !resolution.Resolved {
+		return true
+	}
+	threadSource := strings.TrimSpace(resolution.ThreadSource)
+	return !resolution.Related && threadSource != "" && !strings.EqualFold(threadSource, "user")
+}
+
+func loadCodexTurnRootRoute(c *gin.Context, userID int, resolution relaychannel.CodexRootSessionResolution) (codexTurnRootRoute, bool, error) {
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	route, found, err := loadCodexTurnRootRouteOnce(requestContext, userID, resolution)
+	if err != nil || found || !codexTurnRootFallbackRequired(resolution) || codexTurnRootWaitTimeout <= 0 {
+		return route, found, err
+	}
+
+	waitTurnID := strings.TrimSpace(resolution.RootTurnID)
+	if waitTurnID == "" {
+		waitTurnID = strings.TrimSpace(resolution.ParentTurnID)
+	}
+	waitContext, cancelWait := context.WithTimeout(requestContext, codexTurnRootWaitTimeout)
+	defer cancelWait()
+	for {
+		waitErr := waitForCodexTurnRootBindingUpdate(waitContext, userID, waitTurnID, codexTurnRootWaitTimeout)
+		if waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return codexTurnRootRoute{}, false, nil
+			}
+			return codexTurnRootRoute{}, false, fmt.Errorf("wait for Codex turn root binding: %w", waitErr)
+		}
+		if err := waitContext.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return codexTurnRootRoute{}, false, nil
+			}
+			return codexTurnRootRoute{}, false, fmt.Errorf("wait for Codex turn root binding: %w", err)
+		}
+		route, found, err = loadCodexTurnRootRouteOnce(waitContext, userID, resolution)
+		if err != nil || found {
+			return route, found, err
+		}
+	}
+}
+
+func applyCodexTurnRootRoute(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, route codexTurnRootRoute) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+	mappedRootID := strings.TrimSpace(route.mapping.RootID)
+	if mappedRootID == "" {
+		return resolution, "", true, service.ErrCodexTurnRootBindingInvalid
+	}
+	if route.matchedOwn && (codexTurnRouteLabelConflict(resolution.ThreadSource, route.mapping.ThreadSource) ||
+		codexTurnRouteLabelConflict(resolution.RequestKind, route.mapping.RequestKind) ||
+		codexTurnRouteLabelConflict(resolution.SubagentKind, route.mapping.SubagentKind)) {
+		return resolution, "", true, errors.New("Codex turn retry conflicts with its recorded request role")
+	}
+	if resolution.Resolved && strings.TrimSpace(resolution.RootID) != "" &&
+		!strings.EqualFold(strings.TrimSpace(resolution.RootID), mappedRootID) {
+		threadID := strings.TrimSpace(resolution.ThreadID)
+		temporaryRoot := threadID == "" || strings.EqualFold(strings.TrimSpace(resolution.RootID), threadID)
+		_, forkedNaming := relaychannel.ClassifyForkedCodexNamingRequest(resolution)
+		independentFork := strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "user") ||
+			(strings.TrimSpace(resolution.ForkedFromID) != "" && !forkedNaming)
+		mayReplaceTemporaryRoot := temporaryRoot && !independentFork &&
+			((route.matchedOwn && !route.mapping.RootOwner) ||
+				(!route.matchedOwn && codexTurnAncestryAllowed(resolution)))
+		if !mayReplaceTemporaryRoot {
+			return resolution, "", true, errors.New("Codex turn binding conflicts with explicit root session")
+		}
+	}
+
+	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, route.binding.UARoutingOnly)
+	role := codexTurnRouteRole{
+		Related: true, PassiveFeature: "related_internal",
+		ThreadSource: strings.TrimSpace(resolution.ThreadSource),
+		RequestKind:  strings.TrimSpace(resolution.RequestKind),
+		SubagentKind: strings.TrimSpace(resolution.SubagentKind),
+	}
+	if route.matchedOwn {
+		role = route.mapping.RouteIdentity()
+	} else if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+		role.PassiveFeature = "system_passive"
+	}
+	if !role.Related {
+		role.PassiveFeature = ""
+	} else if role.PassiveFeature == "" && !role.RootOwner {
+		role.PassiveFeature = "related_internal"
+	}
+	c.Set(codexTurnRouteRoleContextKey, role)
+	if !relaychannel.SetCodexTurnRootSessionOverride(c, mappedRootID, role.Related, role.PassiveFeature, role.ThreadSource, role.RequestKind, role.SubagentKind) {
+		return resolution, role.PassiveFeature, true, errors.New("invalid Codex turn root session override")
+	}
+	resolution.RootID = mappedRootID
+	resolution.Resolved = true
+	resolution.Related = role.Related
+	resolution.ThreadSource = role.ThreadSource
+	resolution.RequestKind = role.RequestKind
+	resolution.SubagentKind = role.SubagentKind
+	return resolution, role.PassiveFeature, true, nil
+}
+
+func loadCodexThreadRootRoute(c *gin.Context, userID int, threadID string) (codexTurnRootRoute, bool, error) {
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	load := func(ctx context.Context) (codexTurnRootRoute, bool, error) {
+		mapping, binding, found, err := service.ResolveCodexThreadRootBinding(ctx, userID, threadID)
+		return codexTurnRootRoute{mapping: mapping, binding: binding}, found, err
+	}
+	route, found, err := load(requestContext)
+	if err != nil || found || codexThreadRootWaitTimeout <= 0 {
+		return route, found, err
+	}
+	waitContext, cancelWait := context.WithTimeout(requestContext, codexThreadRootWaitTimeout)
+	defer cancelWait()
+	for {
+		waitErr := waitForCodexThreadRootBindingUpdate(waitContext, userID, threadID, codexThreadRootWaitTimeout)
+		if waitErr != nil {
+			if errors.Is(waitErr, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return codexTurnRootRoute{}, false, nil
+			}
+			return codexTurnRootRoute{}, false, fmt.Errorf("wait for Codex thread root binding: %w", waitErr)
+		}
+		if err := waitContext.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && requestContext.Err() == nil {
+				return codexTurnRootRoute{}, false, nil
+			}
+			return codexTurnRootRoute{}, false, fmt.Errorf("wait for Codex thread root binding: %w", err)
+		}
+		route, found, err = load(waitContext)
+		if err != nil || found {
+			return route, found, err
+		}
+	}
+}
+
+func resolveForkedCodexNamingRoot(c *gin.Context, userID int, resolution relaychannel.CodexRootSessionResolution, feature string, turnRoute codexTurnRootRoute, turnRouteFound bool) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+	sourceThreadID := strings.TrimSpace(resolution.ForkedFromID)
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	mapping, threadBinding, found, err := service.ResolveCodexThreadRootBinding(requestContext, userID, sourceThreadID)
+	if err != nil {
+		return resolution, feature, true, fmt.Errorf("load forked Codex naming thread binding: %w", err)
+	}
+	sourceRoute := codexTurnRootRoute{mapping: mapping, binding: threadBinding}
+	if !found {
+		// Upgrade compatibility: roots recorded before thread lineage support may
+		// only have the root-session binding. This fallback is valid precisely
+		// when the source Thread ID is itself the root ID.
+		binding, rootFound, rootErr := loadUniqueCodexRootChannelBindingContext(requestContext, userID, sourceThreadID)
+		if rootErr != nil {
+			return resolution, feature, true, fmt.Errorf("load forked Codex naming root binding: %w", rootErr)
+		}
+		if rootFound {
+			sourceRoute = codexTurnRootRoute{
+				mapping: service.CodexTurnRootBinding{
+					RootID: sourceThreadID, SelectedGroup: binding.SelectedGroup,
+					BindingFingerprint: service.CodexRootChannelBindingFingerprint(binding),
+					UARoutingOnly:      binding.UARoutingOnly,
+				},
+				binding: binding,
+			}
+			found = true
+		}
+	}
+	if !found {
+		sourceRoute, found, err = loadCodexThreadRootRoute(c, userID, sourceThreadID)
+		if err != nil {
+			return resolution, feature, true, fmt.Errorf("wait for forked Codex naming thread binding: %w", err)
+		}
+		if !found {
+			binding, rootFound, rootErr := loadLinkedCodexNamingRootBinding(c, userID, sourceThreadID)
+			if rootErr != nil {
+				return resolution, feature, true, fmt.Errorf("wait for forked Codex naming root binding: %w", rootErr)
+			}
+			if !rootFound {
+				return resolution, feature, true, errors.New("forked Codex naming thread binding is unavailable")
+			}
+			sourceRoute = codexTurnRootRoute{
+				mapping: service.CodexTurnRootBinding{
+					RootID: sourceThreadID, SelectedGroup: binding.SelectedGroup,
+					BindingFingerprint: service.CodexRootChannelBindingFingerprint(binding),
+					UARoutingOnly:      binding.UARoutingOnly,
+				},
+				binding: binding,
+			}
+		}
+	}
+	if turnRouteFound && !sameCodexLineageRoute(sourceRoute, turnRoute) {
+		return resolution, feature, true, errors.New("Codex turn binding conflicts with naming fork source thread")
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelAffinityUserAgentRouted, sourceRoute.binding.UARoutingOnly)
+	return applyUnlinkedCodexPassiveRoot(c, resolution, sourceRoute.mapping.RootID, feature)
+}
+
 // resolveUnlinkedCodexPassiveRoot pins an explicitly related child to its exact
 // root. The independent system thread used for project metadata may recover a
 // sole candidate on its own routing side. A native thread_title has no parent
@@ -240,6 +588,58 @@ func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionReso
 // across both routing sides. Other independent internal roots schedule normally.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (relaychannel.CodexRootSessionResolution, string, bool, error) {
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+	if resolution.IdentityConflict && (strings.TrimSpace(resolution.TurnID) != "" ||
+		strings.TrimSpace(resolution.RootTurnID) != "" || strings.TrimSpace(resolution.ParentTurnID) != "" ||
+		strings.TrimSpace(resolution.ForkedFromID) != "") {
+		return resolution, "", true, errors.New("Codex session identity is conflicting")
+	}
+	if resolution.TurnLineageConflict && codexTurnLineageRequiredForRouting(resolution) {
+		return resolution, "", true, errors.New("Codex turn lineage is conflicting or malformed")
+	}
+	ordinaryFork := strings.TrimSpace(resolution.ForkedFromID) != "" &&
+		strings.EqualFold(strings.TrimSpace(resolution.RootID), strings.TrimSpace(resolution.ThreadID))
+	if ordinaryFork {
+		// Unknown future source labels on a root/leaf-equal fork are treated as a
+		// user-owned window. Normalize before looking up the Turn so the first
+		// request and an otherwise identical retry compare against the same role,
+		// and so ancestor Turn IDs cannot collapse the fork into its source task.
+		threadSource := strings.TrimSpace(resolution.ThreadSource)
+		if !strings.EqualFold(threadSource, "user") && !isKnownCodexInternalThreadSource(threadSource) {
+			role := codexTurnRouteRole{
+				RootOwner: true, Related: true, ThreadSource: "user",
+				RequestKind: strings.TrimSpace(resolution.RequestKind),
+			}
+			c.Set(codexTurnRouteRoleContextKey, role)
+			if !relaychannel.SetCodexTurnRootSessionOverride(c, resolution.RootID, true, "", "user", role.RequestKind, "") {
+				return resolution, "", true, errors.New("invalid independent Codex fork root override")
+			}
+			resolution.Related = true
+			resolution.ThreadSource = "user"
+			resolution.SubagentKind = ""
+		}
+	}
+	turnRoute, turnRouteFound, turnRouteErr := loadCodexTurnRootRoute(c, userID, resolution)
+	if turnRouteErr != nil {
+		return resolution, "", true, turnRouteErr
+	}
+	if feature, forkedNaming := relaychannel.ClassifyForkedCodexNamingRequest(resolution); forkedNaming {
+		return resolveForkedCodexNamingRoot(c, userID, resolution, feature, turnRoute, turnRouteFound)
+	}
+	if turnRouteFound {
+		return applyCodexTurnRootRoute(c, resolution, turnRoute)
+	}
+	if codexTurnRootFallbackRequired(resolution) {
+		return resolution, "", true, errors.New("Codex turn root binding is unavailable")
+	}
+	if ordinaryFork {
+		// A root/leaf-equal fork is a new user window unless the stricter naming
+		// classifier above proved otherwise. Unknown or missing source labels must
+		// not let the generic linked classifier collapse it into the old task.
+		threadSource := strings.TrimSpace(resolution.ThreadSource)
+		if strings.EqualFold(threadSource, "user") {
+			return resolution, "", false, nil
+		}
+	}
 	if feature, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution); linked {
 		// A coherent explicit parent graph is intentionally scoped to the NewAPI
 		// user and root, not to one API key. This lets the same user resume a
@@ -254,6 +654,9 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	classified := titleCandidate
 	if !classified {
 		feature, classified = relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
+	}
+	if !classified {
+		feature, classified = relaychannel.ClassifyUnlinkedCodexThreadSummaryRequest(resolution)
 	}
 	if !classified {
 		return resolution, "", false, nil
@@ -540,6 +943,9 @@ func isCodexRecentMainRoute(c *gin.Context, resolution relaychannel.CodexRootSes
 	if c == nil {
 		return false
 	}
+	if role, found := currentCodexTurnRouteRole(c); found {
+		return role.RootOwner
+	}
 	threadSource := strings.ToLower(strings.TrimSpace(resolution.ThreadSource))
 	// Only an ordinary user root may own and publish a durable channel binding.
 	// Any non-user source is an internal root or child; allowing a future source
@@ -569,38 +975,207 @@ func selectedCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Cod
 	return userID, tokenID, resolution.RootID, binding, true
 }
 
+func selectedCodexTurnRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (int, string, string, service.CodexRootChannelBinding, service.CodexTurnRouteIdentity, bool) {
+	turnID := strings.TrimSpace(resolution.TurnID)
+	rootID := strings.TrimSpace(resolution.RootID)
+	if c == nil || turnID == "" || rootID == "" || !resolution.Resolved || resolution.TurnLineageConflict {
+		return 0, "", "", service.CodexRootChannelBinding{}, service.CodexTurnRouteIdentity{}, false
+	}
+	rootOwner := isCodexRecentMainRoute(c, resolution)
+	if !rootOwner && !common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned) {
+		return 0, "", "", service.CodexRootChannelBinding{}, service.CodexTurnRouteIdentity{}, false
+	}
+	userID, _, binding, ok := selectedCodexChannelBinding(c)
+	if !ok {
+		return 0, "", "", service.CodexRootChannelBinding{}, service.CodexTurnRouteIdentity{}, false
+	}
+	role := service.CodexTurnRouteIdentity{
+		RootOwner: rootOwner, Related: resolution.Related,
+		ThreadSource: strings.TrimSpace(resolution.ThreadSource),
+		RequestKind:  strings.TrimSpace(resolution.RequestKind),
+		SubagentKind: strings.TrimSpace(resolution.SubagentKind),
+	}
+	if storedRole, found := currentCodexTurnRouteRole(c); found {
+		return userID, turnID, rootID, binding, storedRole, true
+	}
+	if !rootOwner {
+		role.Related = true
+		role.PassiveFeature = strings.TrimSpace(relaychannel.CodexPassiveRootSessionOverrideFeature(c))
+		if role.PassiveFeature == "" {
+			role.PassiveFeature = "related_internal"
+			if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "system") {
+				role.PassiveFeature = "system_passive"
+			}
+		}
+	}
+	if rootOwner {
+		role.PassiveFeature = ""
+	}
+	return userID, turnID, rootID, binding, role, true
+}
+
+type codexProvisionalLineageClaim struct {
+	kind          string
+	userID        int
+	identifier    string
+	expected      service.CodexTurnRootBinding
+	rollbackToken string
+}
+
+func (claim codexProvisionalLineageClaim) rollback() (bool, error) {
+	switch claim.kind {
+	case "turn":
+		return service.ReleaseProvisionalCodexTurnRootBinding(claim.userID, claim.identifier, claim.expected, claim.rollbackToken)
+	case "thread":
+		return service.ReleaseProvisionalCodexThreadRootBinding(claim.userID, claim.identifier, claim.expected, claim.rollbackToken)
+	default:
+		return false, nil
+	}
+}
+
+func rollbackProvisionalCodexLineageClaims(requestModel, failedStage string, claims ...codexProvisionalLineageClaim) {
+	for index := len(claims) - 1; index >= 0; index-- {
+		claim := claims[index]
+		if claim.kind == "" {
+			continue
+		}
+		if _, err := claim.rollback(); err != nil {
+			common.SysError(fmt.Sprintf("rollback provisional Codex %s binding failed: stage=%s user=%d model=%s err=%v",
+				claim.kind, failedStage, claim.userID, requestModel, err))
+		}
+	}
+}
+
+func claimProvisionalCodexTurnRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (codexProvisionalLineageClaim, error) {
+	userID, turnID, rootID, binding, role, ok := selectedCodexTurnRootBinding(c, resolution)
+	if !ok {
+		return codexProvisionalLineageClaim{}, nil
+	}
+	winner, won, created, rollbackToken, err := service.ClaimProvisionalCodexTurnRootBinding(userID, turnID, rootID, binding, role)
+	if err != nil {
+		return codexProvisionalLineageClaim{}, err
+	}
+	claim := codexProvisionalLineageClaim{}
+	if created {
+		claim = codexProvisionalLineageClaim{
+			kind: "turn", userID: userID, identifier: turnID,
+			expected: winner, rollbackToken: rollbackToken,
+		}
+	}
+	if !won {
+		return codexProvisionalLineageClaim{}, fmt.Errorf("%w: requested_role=%+v winner=%+v", service.ErrCodexTurnRootBindingConflict, role, winner.RouteIdentity())
+	}
+	if winner.RootID != rootID || winner.SelectedGroup != binding.SelectedGroup ||
+		winner.UARoutingOnly != binding.UARoutingOnly ||
+		winner.BindingFingerprint != service.CodexRootChannelBindingFingerprint(binding) ||
+		winner.RouteIdentity() != role {
+		_, rollbackErr := claim.rollback()
+		return codexProvisionalLineageClaim{}, errors.Join(service.ErrCodexTurnRootBindingConflict, rollbackErr)
+	}
+	return claim, nil
+}
+
+func recordCodexTurnRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
+	userID, turnID, rootID, binding, role, ok := selectedCodexTurnRootBinding(c, resolution)
+	if !ok {
+		return
+	}
+	if err := service.StoreCodexTurnRootBinding(userID, turnID, rootID, binding, role); err != nil {
+		common.SysError(fmt.Sprintf("store Codex turn root binding failed: user=%d channel=%d model=%s err=%v", userID, binding.ChannelID, requestModel, err))
+	}
+}
+
+func selectedCodexThreadRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (int, string, string, service.CodexRootChannelBinding, bool) {
+	threadID := strings.TrimSpace(resolution.ThreadID)
+	rootID := strings.TrimSpace(resolution.RootID)
+	if c == nil || threadID == "" || rootID == "" || !resolution.Resolved || resolution.IdentityConflict {
+		return 0, "", "", service.CodexRootChannelBinding{}, false
+	}
+	if !isCodexRecentMainRoute(c, resolution) && !common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned) {
+		return 0, "", "", service.CodexRootChannelBinding{}, false
+	}
+	userID, _, binding, ok := selectedCodexChannelBinding(c)
+	if !ok {
+		return 0, "", "", service.CodexRootChannelBinding{}, false
+	}
+	return userID, threadID, rootID, binding, true
+}
+
+func claimProvisionalCodexThreadRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (codexProvisionalLineageClaim, error) {
+	userID, threadID, rootID, binding, ok := selectedCodexThreadRootBinding(c, resolution)
+	if !ok {
+		return codexProvisionalLineageClaim{}, nil
+	}
+	winner, won, created, rollbackToken, err := service.ClaimProvisionalCodexThreadRootBinding(userID, threadID, rootID, binding)
+	if err != nil {
+		return codexProvisionalLineageClaim{}, err
+	}
+	claim := codexProvisionalLineageClaim{}
+	if created {
+		claim = codexProvisionalLineageClaim{
+			kind: "thread", userID: userID, identifier: threadID,
+			expected: winner, rollbackToken: rollbackToken,
+		}
+	}
+	if !won || winner.RootID != rootID || winner.SelectedGroup != binding.SelectedGroup ||
+		winner.UARoutingOnly != binding.UARoutingOnly ||
+		winner.BindingFingerprint != service.CodexRootChannelBindingFingerprint(binding) {
+		_, rollbackErr := claim.rollback()
+		return codexProvisionalLineageClaim{}, errors.Join(service.ErrCodexTurnRootBindingConflict, rollbackErr)
+	}
+	return claim, nil
+}
+
+func recordCodexThreadRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
+	userID, threadID, rootID, binding, ok := selectedCodexThreadRootBinding(c, resolution)
+	if !ok {
+		return
+	}
+	if err := service.StoreCodexThreadRootBinding(userID, threadID, rootID, binding); err != nil {
+		common.SysError(fmt.Sprintf("store Codex thread root binding failed: user=%d channel=%d model=%s err=%v", userID, binding.ChannelID, requestModel, err))
+	}
+}
+
 func claimProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) (bool, bool, error) {
 	mainRoute := isCodexRecentMainRoute(c, resolution)
 	_, _, _, recentOK, bindingReason := inspectSelectedCodexChannelBinding(c)
 	if mainRoute && !recentOK {
 		logSkippedCodexRootBridge(c, resolution, requestModel, bindingReason)
 	}
-	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
+	userID, _, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
 	if !ok {
 		return false, false, nil
 	}
-	winner, selectedWon, err := service.ClaimProvisionalCodexRootChannelBinding(userID, rootID, binding)
+	_, selectedWon, err := service.ClaimProvisionalCodexRootChannelBinding(userID, rootID, binding)
 	if err != nil {
 		return false, true, err
 	}
 	if !selectedWon {
-		// The request will be aborted before upstream dispatch. Do not publish
-		// another token's/root contender's winning binding into this token's
-		// recent-candidate scope.
 		return true, true, nil
-	}
-	if err := service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, winner); err != nil {
-		return false, true, err
-	}
-	if err := service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, winner); err != nil {
-		return false, true, err
 	}
 	return false, true, nil
 }
 
+func publishProvisionalCodexRootCandidates(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) error {
+	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
+	if !ok {
+		return nil
+	}
+	if err := service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding); err != nil {
+		return err
+	}
+	return service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding)
+}
+
 func recordProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
-	if _, _, err := claimProvisionalCodexRootChannelBinding(c, resolution, requestModel); err != nil {
+	changed, claimed, err := claimProvisionalCodexRootChannelBinding(c, resolution, requestModel)
+	if err != nil || (claimed && changed) {
 		common.SysError(fmt.Sprintf("claim provisional Codex root channel binding failed: user=%d err=%v",
+			common.GetContextKeyInt(c, constant.ContextKeyUserId), err))
+		return
+	}
+	if err := publishProvisionalCodexRootCandidates(c, resolution); err != nil {
+		common.SysError(fmt.Sprintf("publish provisional Codex root candidates failed: user=%d err=%v",
 			common.GetContextKeyInt(c, constant.ContextKeyUserId), err))
 	}
 }
@@ -620,6 +1195,10 @@ func recordCodexRootChannelBinding(c *gin.Context, resolution relaychannel.Codex
 	// Refresh the short temporal bridge after a long first response so a title
 	// generated immediately after completion still resolves to this root.
 	storeRecentCodexRootChannelBinding(userID, tokenID, rootID, binding, "refresh")
+	if err := service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding); err != nil {
+		common.SysError(fmt.Sprintf("refresh title Codex root channel binding failed: user=%d token=%d channel=%d err=%v",
+			userID, tokenID, binding.ChannelID, err))
+	}
 }
 
 func storeRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding service.CodexRootChannelBinding, action string) {

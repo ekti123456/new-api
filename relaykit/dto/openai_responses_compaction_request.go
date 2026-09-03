@@ -23,7 +23,12 @@ type OpenAIResponsesCompactionRequest struct {
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
-	Text                 json.RawMessage `json:"text,omitempty"`
+	// ClientMetadata carries Codex's per-turn session graph. Although it is not
+	// part of the public compact surface, native Codex clients send it on this
+	// endpoint and downstream Codex relays use it for affinity and fingerprint
+	// consistency.
+	ClientMetadata json.RawMessage `json:"client_metadata,omitempty"`
+	Text           json.RawMessage `json:"text,omitempty"`
 }
 
 func (r *OpenAIResponsesCompactionRequest) GetTokenCountMeta() *types.TokenCountMeta {

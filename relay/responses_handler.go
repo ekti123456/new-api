@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -38,9 +39,15 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	case *dto.OpenAIResponsesCompactionRequest:
 		// Only fields documented for POST /v1/responses/compact are forwarded:
 		// model, input, instructions, previous_response_id, prompt_cache_key,
-		// prompt_cache_options, prompt_cache_retention, service_tier.
+		// prompt_cache_options, prompt_cache_retention, service_tier. Codex
+		// client_metadata is also preserved as transport metadata so downstream
+		// session affinity remains consistent.
 		// Undocumented Codex-parity fields (tools, reasoning, text) are parsed
 		// for client compatibility but intentionally not sent upstream.
+		clientMetadata := req.ClientMetadata
+		if !relaychannel.IsCodex2APIPolicyDestination(info.ChannelBaseUrl, info.ApiKey) {
+			clientMetadata = nil
+		}
 		responsesReq = &dto.OpenAIResponsesRequest{
 			Model:                req.Model,
 			Input:                req.Input,
@@ -51,6 +58,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			PromptCacheKey:       req.PromptCacheKey,
 			PromptCacheOptions:   req.PromptCacheOptions,
 			PromptCacheRetention: req.PromptCacheRetention,
+			ClientMetadata:       clientMetadata,
 		}
 	default:
 		return types.NewErrorWithStatusCode(

@@ -20,17 +20,20 @@ import (
 )
 
 const (
-	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v2"
+	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v3"
 	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v1"
 	codexTitleRootCandidateNamespace         = "new-api:codex_title_root_candidate:v1"
-	codexRecentRootChannelCandidateTTL       = 10 * time.Minute
+	codexRecentRootChannelCandidateTTL       = 30 * time.Second
 	codexProvisionalRootCandidateTTL         = 2 * time.Minute
-	codexPassiveRootAliasProvisionalTTL      = 2 * time.Minute
-	codexPassiveRootAliasTTL                 = 24 * time.Hour
-	codexRecentRootChannelCandidateLimit     = 32
-	codexPassiveRootRedisTimeout             = 500 * time.Millisecond
-	codexRecentRootPollInterval              = 200 * time.Millisecond
-	codexTitleRootCandidateTTL               = 5 * time.Second
+	// A scope container must live at least as long as its longest per-member
+	// candidate. Member scores still enforce the shorter successful-root lifetime.
+	codexRecentRootChannelContainerTTL   = codexProvisionalRootCandidateTTL
+	codexPassiveRootAliasProvisionalTTL  = 2 * time.Minute
+	codexPassiveRootAliasTTL             = 24 * time.Hour
+	codexRecentRootChannelCandidateLimit = 32
+	codexPassiveRootRedisTimeout         = 500 * time.Millisecond
+	codexRecentRootPollInterval          = 200 * time.Millisecond
+	codexTitleRootCandidateTTL           = 5 * time.Second
 )
 
 var (
@@ -85,7 +88,8 @@ local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
 local expires_at = now_ms + tonumber(ARGV[1])
 local current_expires_at = redis.call('ZSCORE', KEYS[1], ARGV[2])
-if not current_expires_at or tonumber(current_expires_at) < expires_at then
+local replace_expiry = ARGV[5] == '1'
+if replace_expiry or not current_expires_at or tonumber(current_expires_at) < expires_at then
   redis.call('ZADD', KEYS[1], expires_at, ARGV[2])
 end
 local count = redis.call('ZCARD', KEYS[1])
@@ -184,7 +188,7 @@ return 0
 func getCodexRecentRootMemory() *hot.HotCache[string, map[string]int64] {
 	codexRecentRootMemoryOnce.Do(func() {
 		codexRecentRootMemory = hot.NewHotCache[string, map[string]int64](hot.LRU, 100_000).
-			WithTTL(codexRecentRootChannelCandidateTTL).
+			WithTTL(codexRecentRootChannelContainerTTL).
 			WithJanitor().
 			Build()
 	})
@@ -292,15 +296,15 @@ func StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID int, rootID s
 }
 
 // StoreRecentCodexRootChannelCandidate records an already-persisted successful
-// root binding as a durable passive-route candidate.
+// root binding as a short-lived passive-route candidate.
 func StoreRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
-	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexRecentRootChannelCandidateTTL)
+	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexRecentRootChannelCandidateTTL, true)
 }
 
 // StoreProvisionalRecentCodexRootChannelCandidate records an already-claimed
-// in-flight root binding without extending either provisional lifetime.
+// in-flight root binding and only extends an existing candidate expiry.
 func StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
-	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexProvisionalRootCandidateTTL)
+	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexProvisionalRootCandidateTTL, false)
 }
 
 // StoreProvisionalCodexTitleRootChannelCandidate marks one already-published
@@ -333,7 +337,7 @@ func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID 
 		defer cancel()
 		_, err = storeCodexRecentRootCandidateScript.Run(ctx, common.RDB,
 			[]string{codexTitleRootCandidateRedisKey(scopeKey)}, int64(codexTitleRootCandidateTTL/time.Millisecond),
-			member, codexRecentRootChannelCandidateLimit, int64(codexTitleRootCandidateTTL/time.Second)).Result()
+			member, codexRecentRootChannelCandidateLimit, int64(codexTitleRootCandidateTTL/time.Second), 0).Result()
 		if err != nil {
 			return err
 		}
@@ -363,7 +367,7 @@ func storeCodexCandidateMemory(cache *hot.HotCache[string, map[string]int64], sc
 	cache.SetWithTTL(scopeKey, updated, ttl)
 }
 
-func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, activeTTL time.Duration) error {
+func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, activeTTL time.Duration, replaceExpiry bool) error {
 	rootID = strings.TrimSpace(rootID)
 	bindingFingerprint := CodexRootChannelBindingFingerprint(binding)
 	candidateMember := codexRecentRootCandidateMember(rootID, bindingFingerprint)
@@ -381,16 +385,21 @@ func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID s
 	}
 	now := time.Now().UTC()
 	if common.RedisEnabled && common.RDB != nil {
+		replaceExpiryFlag := 0
+		if replaceExpiry {
+			replaceExpiryFlag = 1
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), codexPassiveRootRedisTimeout)
 		defer cancel()
 		_, err = storeCodexRecentRootCandidateScript.Run(ctx, common.RDB, []string{codexRecentRootChannelRedisKey(scopeKey)},
 			int64(activeTTL/time.Millisecond), candidateMember,
-			codexRecentRootChannelCandidateLimit, int64(codexRecentRootChannelCandidateTTL/time.Second)).Result()
+			codexRecentRootChannelCandidateLimit, int64(codexRecentRootChannelContainerTTL/time.Second),
+			replaceExpiryFlag).Result()
 		if err != nil {
 			return err
 		}
 	} else {
-		storeCodexRecentRootCandidateMemory(scopeKey, candidateMember, now.Add(activeTTL))
+		storeCodexRecentRootCandidateMemory(scopeKey, candidateMember, now.Add(activeTTL), replaceExpiry)
 	}
 	notifyCodexRecentRootChannelUpdate(scopeKey)
 	return nil
@@ -424,7 +433,7 @@ func parseCodexRecentRootCandidateMember(member string) (string, string, bool) {
 	return rootID, bindingFingerprint, true
 }
 
-func storeCodexRecentRootCandidateMemory(scopeKey, candidateMember string, expiresAt time.Time) {
+func storeCodexRecentRootCandidateMemory(scopeKey, candidateMember string, expiresAt time.Time, replaceExpiry bool) {
 	codexRecentRootMemoryMu.Lock()
 	defer codexRecentRootMemoryMu.Unlock()
 	cache := getCodexRecentRootMemory()
@@ -445,7 +454,7 @@ func storeCodexRecentRootCandidateMemory(scopeKey, candidateMember string, expir
 		}
 	}
 	newExpiresAt := expiresAt.UnixMilli()
-	if currentExpiresAt, exists := current[candidateMember]; !exists || currentExpiresAt < newExpiresAt {
+	if currentExpiresAt, exists := current[candidateMember]; replaceExpiry || !exists || currentExpiresAt < newExpiresAt {
 		current[candidateMember] = newExpiresAt
 	}
 	for len(current) > codexRecentRootChannelCandidateLimit {
@@ -459,7 +468,7 @@ func storeCodexRecentRootCandidateMemory(scopeKey, candidateMember string, expir
 		}
 		delete(current, oldestRoot)
 	}
-	cache.SetWithTTL(scopeKey, current, codexRecentRootChannelCandidateTTL)
+	cache.SetWithTTL(scopeKey, current, codexRecentRootChannelContainerTTL)
 }
 
 func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID int, uaRoutingOnly bool) ([]CodexRecentRootChannelCandidate, error) {
@@ -673,7 +682,7 @@ func removeStaleCodexRecentRootCandidates(ctx context.Context, scopeKey string, 
 	if len(updated) == 0 {
 		cache.Delete(scopeKey)
 	} else if len(updated) != len(current) {
-		cache.SetWithTTL(scopeKey, updated, codexRecentRootChannelCandidateTTL)
+		cache.SetWithTTL(scopeKey, updated, codexRecentRootChannelContainerTTL)
 	}
 	return nil
 }
@@ -705,7 +714,7 @@ func loadCodexRecentRootCandidateTimes(ctx context.Context, scopeKey string, now
 	if len(active) == 0 {
 		cache.Delete(scopeKey)
 	} else if len(active) != len(current) {
-		cache.SetWithTTL(scopeKey, active, codexRecentRootChannelCandidateTTL)
+		cache.SetWithTTL(scopeKey, active, codexRecentRootChannelContainerTTL)
 	}
 	return active, nil
 }
