@@ -23,7 +23,12 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Label } from '@/components/ui/label'
-import { formatQuota, formatCompactNumber } from '@/lib/format'
+import {
+  formatQuota,
+  formatCompactNumber,
+  formatSessionWindowCountdown,
+  getSessionWindowRemainingSeconds,
+} from '@/lib/format'
 
 import { getUserInfo } from '../../api'
 import type { UserInfo } from '../../types'
@@ -34,6 +39,19 @@ interface UserInfoDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+const InfoItem = ({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) => (
+  <div className='space-y-1.5'>
+    <Label className='text-muted-foreground text-xs'>{label}</Label>
+    <div className='text-sm font-semibold'>{value}</div>
+  </div>
+)
+
 export function UserInfoDialog({
   userId,
   open,
@@ -42,6 +60,7 @@ export function UserInfoDialog({
   const { t } = useTranslation()
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const fetchUserInfo = useCallback(
     async (id: number) => {
@@ -70,18 +89,12 @@ export function UserInfoDialog({
     }
   }, [open, userId, fetchUserInfo])
 
-  const InfoItem = ({
-    label,
-    value,
-  }: {
-    label: string
-    value: string | number
-  }) => (
-    <div className='space-y-1.5'>
-      <Label className='text-muted-foreground text-xs'>{label}</Label>
-      <div className='text-sm font-semibold'>{value}</div>
-    </div>
-  )
+  useEffect(() => {
+    if (!open) return
+    setNowMs(Date.now())
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [open])
 
   let concurrencyValue = ''
   if (userInfo?.concurrency_source === 'unlimited') {
@@ -103,6 +116,140 @@ export function UserInfoDialog({
     })
   }
 
+  let dialogBody = (
+    <div className='flex items-center justify-center py-8'>
+      <Loader2 className='text-muted-foreground size-6 animate-spin' />
+    </div>
+  )
+  if (!isLoading && !userInfo) {
+    dialogBody = (
+      <div className='text-muted-foreground py-8 text-center text-sm'>
+        {t('No user information available')}
+      </div>
+    )
+  } else if (!isLoading && userInfo) {
+    let resetLabel = '-'
+    const remaining = getSessionWindowRemainingSeconds(
+      userInfo.session_window_updated_at,
+      userInfo.session_window_seconds,
+      nowMs
+    )
+    if (remaining === 0) {
+      resetLabel = t('Available')
+    } else if (remaining !== null) {
+      resetLabel = formatSessionWindowCountdown(remaining)
+    }
+
+    dialogBody = (
+      <div className='space-y-4 py-4'>
+        {/* Basic Info */}
+        <div className='grid grid-cols-2 gap-4'>
+          <InfoItem label={t('Username')} value={userInfo.username} />
+          {userInfo.display_name && (
+            <InfoItem
+              label={t('Display Name')}
+              value={userInfo.display_name}
+            />
+          )}
+        </div>
+
+        {/* Balance Info */}
+        <div className='grid grid-cols-2 gap-4'>
+          <InfoItem label={t('Balance')} value={formatQuota(userInfo.quota)} />
+          <InfoItem
+            label={t('Used Quota')}
+            value={formatQuota(userInfo.used_quota)}
+          />
+        </div>
+
+        {/* Statistics */}
+        <div className='grid grid-cols-2 gap-4'>
+          <InfoItem
+            label={t('Request Count')}
+            value={formatCompactNumber(userInfo.request_count)}
+          />
+          {userInfo.group && (
+            <InfoItem label={t('User Group')} value={userInfo.group} />
+          )}
+        </div>
+
+        {/* On-demand request activity */}
+        <div className='grid grid-cols-2 gap-4'>
+          <InfoItem label={t('Current RPM')} value={userInfo.current_rpm} />
+          <InfoItem
+            label={t('Current Concurrency')}
+            value={concurrencyValue}
+          />
+        </div>
+
+        <InfoItem
+          label={t('Occupied Concurrency')}
+          value={userInfo.occupied_concurrency}
+        />
+
+        <InfoItem
+          label={t('Concurrency Configuration')}
+          value={concurrencyConfiguration}
+        />
+
+        {userInfo.session_window_limit !== undefined && (
+          <div className='grid grid-cols-2 gap-4'>
+            <InfoItem
+              label={t('Session window usage')}
+              value={`${userInfo.session_window_used ?? 0} / ${userInfo.session_window_limit}`}
+            />
+            <InfoItem
+              label={t('Session window duration')}
+              value={`${userInfo.session_window_seconds ?? 0}s`}
+            />
+            <InfoItem label={t('Resets in:')} value={resetLabel} />
+          </div>
+        )}
+
+        {/* Invitation Info */}
+        {(userInfo.aff_code ||
+          userInfo.aff_count !== undefined ||
+          (userInfo.aff_quota !== undefined && userInfo.aff_quota > 0)) && (
+          <>
+            <div className='grid grid-cols-2 gap-4'>
+              {userInfo.aff_code && (
+                <InfoItem
+                  label={t('Invitation Code')}
+                  value={userInfo.aff_code}
+                />
+              )}
+              {userInfo.aff_count !== undefined && (
+                <InfoItem
+                  label={t('Invited Users')}
+                  value={formatCompactNumber(userInfo.aff_count)}
+                />
+              )}
+            </div>
+
+            {userInfo.aff_quota !== undefined && userInfo.aff_quota > 0 && (
+              <InfoItem
+                label={t('Invitation Quota')}
+                value={formatQuota(userInfo.aff_quota)}
+              />
+            )}
+          </>
+        )}
+
+        {/* Remark */}
+        {userInfo.remark && (
+          <div className='space-y-1.5'>
+            <Label className='text-muted-foreground text-xs'>
+              {t('Remark')}
+            </Label>
+            <div className='text-sm leading-relaxed font-semibold break-words'>
+              {userInfo.remark}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <Dialog
       open={open}
@@ -115,124 +262,7 @@ export function UserInfoDialog({
       contentHeight='auto'
       bodyClassName='space-y-4'
     >
-      {isLoading ? (
-        <div className='flex items-center justify-center py-8'>
-          <Loader2 className='text-muted-foreground size-6 animate-spin' />
-        </div>
-      ) : userInfo ? (
-        <div className='space-y-4 py-4'>
-          {/* Basic Info */}
-          <div className='grid grid-cols-2 gap-4'>
-            <InfoItem label={t('Username')} value={userInfo.username} />
-            {userInfo.display_name && (
-              <InfoItem
-                label={t('Display Name')}
-                value={userInfo.display_name}
-              />
-            )}
-          </div>
-
-          {/* Balance Info */}
-          <div className='grid grid-cols-2 gap-4'>
-            <InfoItem
-              label={t('Balance')}
-              value={formatQuota(userInfo.quota)}
-            />
-            <InfoItem
-              label={t('Used Quota')}
-              value={formatQuota(userInfo.used_quota)}
-            />
-          </div>
-
-          {/* Statistics */}
-          <div className='grid grid-cols-2 gap-4'>
-            <InfoItem
-              label={t('Request Count')}
-              value={formatCompactNumber(userInfo.request_count)}
-            />
-            {userInfo.group && (
-              <InfoItem label={t('User Group')} value={userInfo.group} />
-            )}
-          </div>
-
-          {/* On-demand request activity */}
-          <div className='grid grid-cols-2 gap-4'>
-            <InfoItem label={t('Current RPM')} value={userInfo.current_rpm} />
-            <InfoItem
-              label={t('Current Concurrency')}
-              value={concurrencyValue}
-            />
-          </div>
-
-          <InfoItem
-            label={t('Occupied Concurrency')}
-            value={userInfo.occupied_concurrency}
-          />
-
-          <InfoItem
-            label={t('Concurrency Configuration')}
-            value={concurrencyConfiguration}
-          />
-
-          {userInfo.session_window_limit !== undefined && (
-            <div className='grid grid-cols-2 gap-4'>
-              <InfoItem
-                label={t('Session window usage')}
-                value={`${userInfo.session_window_used ?? 0} / ${userInfo.session_window_limit}`}
-              />
-              <InfoItem
-                label={t('Session window duration')}
-                value={`${userInfo.session_window_seconds ?? 0}s`}
-              />
-            </div>
-          )}
-
-          {/* Invitation Info */}
-          {(userInfo.aff_code ||
-            userInfo.aff_count !== undefined ||
-            (userInfo.aff_quota !== undefined && userInfo.aff_quota > 0)) && (
-            <>
-              <div className='grid grid-cols-2 gap-4'>
-                {userInfo.aff_code && (
-                  <InfoItem
-                    label={t('Invitation Code')}
-                    value={userInfo.aff_code}
-                  />
-                )}
-                {userInfo.aff_count !== undefined && (
-                  <InfoItem
-                    label={t('Invited Users')}
-                    value={formatCompactNumber(userInfo.aff_count)}
-                  />
-                )}
-              </div>
-
-              {userInfo.aff_quota !== undefined && userInfo.aff_quota > 0 && (
-                <InfoItem
-                  label={t('Invitation Quota')}
-                  value={formatQuota(userInfo.aff_quota)}
-                />
-              )}
-            </>
-          )}
-
-          {/* Remark */}
-          {userInfo.remark && (
-            <div className='space-y-1.5'>
-              <Label className='text-muted-foreground text-xs'>
-                {t('Remark')}
-              </Label>
-              <div className='text-sm leading-relaxed font-semibold break-words'>
-                {userInfo.remark}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className='text-muted-foreground py-8 text-center text-sm'>
-          {t('No user information available')}
-        </div>
-      )}
+      {dialogBody}
     </Dialog>
   )
 }

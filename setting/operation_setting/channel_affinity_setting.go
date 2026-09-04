@@ -71,6 +71,8 @@ var codexCliPassThroughHeaders = []string{
 }
 
 var claudeCliPassThroughHeaders = []string{
+	"Accept",
+	"Accept-Language",
 	"X-Stainless-Arch",
 	"X-Stainless-Lang",
 	"X-Stainless-Os",
@@ -79,11 +81,16 @@ var claudeCliPassThroughHeaders = []string{
 	"X-Stainless-Runtime",
 	"X-Stainless-Runtime-Version",
 	"X-Stainless-Timeout",
+	"x-stainless-helper-method",
 	"User-Agent",
 	"X-App",
 	"Anthropic-Beta",
 	"Anthropic-Dangerous-Direct-Browser-Access",
 	"Anthropic-Version",
+	"Content-Type",
+	"Sec-Fetch-Mode",
+	"X-Claude-Code-Session-Id",
+	"X-Client-Request-Id",
 }
 
 func buildPassHeaderTemplate(headers []string) map[string]interface{} {

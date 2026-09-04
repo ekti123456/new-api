@@ -18,13 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { CircleAlert, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { UserInfoDialog } from '@/features/usage-logs/components/dialogs/user-info-dialog'
 import { toIntlLocale } from '@/i18n/languages'
+import {
+  formatSessionWindowCountdown,
+  getSessionWindowRemainingSeconds,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { getFullSessionWindows } from '../../api'
@@ -49,6 +53,7 @@ export function FullSessionWindowsPanel() {
   const { t, i18n } = useTranslation()
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [userDialogOpen, setUserDialogOpen] = useState(false)
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const query = useQuery({
     queryKey: ['dashboard-full-session-windows'],
     queryFn: getFullSessionWindows,
@@ -58,6 +63,11 @@ export function FullSessionWindowsPanel() {
   })
   const data = query.data?.data
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const openUser = (userId: number) => {
     setSelectedUserId(userId)
@@ -165,34 +175,50 @@ export function FullSessionWindowsPanel() {
                     </span>
                   </div>
                   <div className='mt-2 space-y-1.5'>
-                    {item.targets.map((target) => (
-                      <div
-                        key={target.target}
-                        className='bg-muted/50 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-1.5 text-xs'
-                      >
-                        <span className='text-destructive font-mono font-semibold tabular-nums'>
-                          {target.session_window_used} /{' '}
-                          {target.session_window_limit}
-                        </span>
-                        <span className='text-muted-foreground'>
-                          {formatWindowDuration(
-                            target.session_window_seconds,
-                            t
-                          )}
-                        </span>
-                        <span
-                          className='min-w-0 flex-1 truncate font-mono'
-                          title={target.target}
+                    {item.targets.map((target) => {
+                      const remaining = getSessionWindowRemainingSeconds(
+                        target.session_window_updated_at,
+                        target.session_window_seconds,
+                        nowMs
+                      )
+                      let resetLabel = '-'
+                      if (remaining === 0) {
+                        resetLabel = t('Available')
+                      } else if (remaining !== null) {
+                        resetLabel = formatSessionWindowCountdown(remaining)
+                      }
+                      return (
+                        <div
+                          key={target.target}
+                          className='bg-muted/50 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-1.5 text-xs'
                         >
-                          {target.target}
-                        </span>
-                        <span className='text-muted-foreground shrink-0 tabular-nums'>
-                          {new Date(
-                            target.session_window_updated_at
-                          ).toLocaleString(locale)}
-                        </span>
-                      </div>
-                    ))}
+                          <span className='text-destructive font-mono font-semibold tabular-nums'>
+                            {target.session_window_used} /{' '}
+                            {target.session_window_limit}
+                          </span>
+                          <span className='text-muted-foreground'>
+                            {formatWindowDuration(
+                              target.session_window_seconds,
+                              t
+                            )}
+                          </span>
+                          <span className='text-amber-600 dark:text-amber-400 shrink-0 tabular-nums'>
+                            {t('Resets in:')} {resetLabel}
+                          </span>
+                          <span
+                            className='min-w-0 flex-1 truncate font-mono'
+                            title={target.target}
+                          >
+                            {target.target}
+                          </span>
+                          <span className='text-muted-foreground shrink-0 tabular-nums'>
+                            {new Date(
+                              target.session_window_updated_at
+                            ).toLocaleString(locale)}
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )

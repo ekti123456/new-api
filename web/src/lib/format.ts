@@ -186,6 +186,62 @@ export function formatTimestampRelative(
   return formatter.format(Math.round(diffSeconds / 31536000), 'year')
 }
 
+/**
+ * Return the number of seconds until a session window expires.
+ *
+ * Session-window timestamps come from the API as RFC3339 strings. Returning
+ * null for malformed or incomplete data lets callers keep rendering the
+ * usage row without showing a misleading countdown.
+ */
+export function getSessionWindowRemainingSeconds(
+  updatedAt?: string,
+  windowSeconds?: number,
+  nowMs: number = Date.now()
+): number | null {
+  if (
+    !updatedAt ||
+    windowSeconds === undefined ||
+    !Number.isFinite(windowSeconds) ||
+    windowSeconds <= 0
+  ) {
+    return null
+  }
+
+  const updatedAtMs = Date.parse(updatedAt)
+  if (!Number.isFinite(updatedAtMs)) {
+    return null
+  }
+
+  const expiresAtMs = updatedAtMs + windowSeconds * 1000
+  return Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000))
+}
+
+/** Format a non-negative session-window countdown as a compact duration. */
+export function formatSessionWindowCountdown(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '-'
+
+  let remaining = Math.max(0, Math.floor(seconds))
+  const days = Math.floor(remaining / 86400)
+  remaining %= 86400
+  const hours = Math.floor(remaining / 3600)
+  remaining %= 3600
+  const minutes = Math.floor(remaining / 60)
+  const displaySeconds = remaining % 60
+
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0 || days > 0) parts.push(`${hours}h`)
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes}m`)
+  if (
+    displaySeconds > 0 ||
+    (days === 0 && hours === 0 && minutes === 0) ||
+    parts.length === 0
+  ) {
+    parts.push(`${displaySeconds}s`)
+  }
+  return parts.join(' ')
+}
+
 /** Format a Date object to YYYY-MM-DD HH:mm:ss */
 export function formatDateTimeStr(date: Date): string {
   return dayjs(date).format('YYYY-MM-DD HH:mm:ss')

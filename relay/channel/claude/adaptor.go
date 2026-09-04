@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -80,15 +81,75 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 	model_setting.GetClaudeSettings().WriteHeaders(info.OriginModelName, req)
 }
 
+// claudeCodePassthroughHeaderNames is the safe subset of Claude Code headers
+// that may be copied when the request body is passed through unchanged.  The
+// authentication headers are deliberately excluded: NewAPI must always use
+// the selected channel's credential, just like the Sub2API passthrough path.
+var claudeCodePassthroughHeaderNames = []string{
+	"Accept",
+	"X-Stainless-Retry-Count",
+	"X-Stainless-Timeout",
+	"X-Stainless-Lang",
+	"X-Stainless-Package-Version",
+	"X-Stainless-OS",
+	"X-Stainless-Arch",
+	"X-Stainless-Runtime",
+	"X-Stainless-Runtime-Version",
+	"x-stainless-helper-method",
+	"anthropic-dangerous-direct-browser-access",
+	"anthropic-version",
+	"x-app",
+	"anthropic-beta",
+	"accept-language",
+	"sec-fetch-mode",
+	"User-Agent",
+	"content-type",
+	"x-claude-code-session-id",
+	"x-client-request-id",
+}
+
+func claudeBodyPassthroughEnabled(info *relaycommon.RelayInfo) bool {
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
+		return true
+	}
+	return info != nil && info.ChannelMeta != nil && info.ChannelSetting.PassThroughBodyEnabled
+}
+
+func applyClaudeCodePassthroughHeaders(c *gin.Context, req *http.Header) {
+	if c == nil || c.Request == nil || req == nil {
+		return
+	}
+	for _, name := range claudeCodePassthroughHeaderNames {
+		values := c.Request.Header.Values(name)
+		if len(values) == 0 {
+			continue
+		}
+		req.Del(name)
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				req.Add(name, value)
+			}
+		}
+	}
+}
+
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	passthrough := claudeBodyPassthroughEnabled(info)
+	if passthrough {
+		// Raw Claude Code bodies require the matching client/runtime headers;
+		// otherwise an upstream can reject a valid body as a rewritten request.
+		applyClaudeCodePassthroughHeaders(c, req)
+	}
 	req.Set("x-api-key", info.ApiKey)
 	anthropicVersion := c.Request.Header.Get("anthropic-version")
 	if anthropicVersion == "" {
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
-	CommonClaudeHeadersOperation(c, req, info)
+	if !passthrough {
+		CommonClaudeHeadersOperation(c, req, info)
+	}
 	return nil
 }
 
