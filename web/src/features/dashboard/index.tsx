@@ -101,6 +101,12 @@ const LazyPerformanceOverview = lazy(() =>
   }))
 )
 
+const LazyPerformanceErrorsPanel = lazy(() =>
+  import('./components/models/performance-errors-panel').then((m) => ({
+    default: m.PerformanceErrorsPanel,
+  }))
+)
+
 const LazyUserAgentStatsPanel = lazy(() =>
   import('./components/models/user-agent-stats-panel').then((m) => ({
     default: m.UserAgentStatsPanel,
@@ -381,11 +387,18 @@ export function Dashboard() {
                 </Suspense>
               </FadeIn>
               {isAdmin && (
-                <FadeIn delay={0.05}>
-                  <Suspense fallback={<PerformanceOverviewFallback />}>
-                    <LazyPerformanceOverview />
-                  </Suspense>
-                </FadeIn>
+                <>
+                  <FadeIn delay={0.05}>
+                    <Suspense fallback={<PerformanceOverviewFallback />}>
+                      <LazyPerformanceOverview />
+                    </Suspense>
+                  </FadeIn>
+                  <FadeIn delay={0.08}>
+                    <Suspense fallback={<ModelChartsFallback />}>
+                      <LazyPerformanceErrorsPanel filters={modelFilters} />
+                    </Suspense>
+                  </FadeIn>
+                </>
               )}
               {isRoot && (
                 <>

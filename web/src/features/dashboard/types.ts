@@ -60,6 +60,33 @@ export interface UserAgentStatsData {
   items: UserAgentStatItem[]
 }
 
+export interface PerformanceErrorItem {
+  id: number
+  created_at: number
+  user_id: number
+  username?: string
+  model_name: string
+  group: string
+  channel_id?: number
+  channel_name?: string
+  token_id?: number
+  request_id?: string
+  upstream_request_id?: string
+  error_type: string
+  error_code: string
+  status_code: number
+  error_reason: string
+  request_path?: string
+  user_agent?: string
+}
+
+export interface PerformanceErrorsData {
+  page: number
+  page_size: number
+  total: number
+  items: PerformanceErrorItem[]
+}
+
 export interface FullSessionWindowTarget {
   user_id: number
   target: string

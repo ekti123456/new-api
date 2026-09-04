@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting"
 
@@ -33,6 +35,37 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// GetPerfMetricErrors returns final relay failures that are included in the
+// model performance metrics. The route is administrator-only because entries
+// contain user, channel, request and upstream error details.
+func GetPerfMetricErrors(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	userID, _ := strconv.Atoi(c.Query("user_id"))
+	statusCode, _ := strconv.Atoi(c.Query("status_code"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	result, err := model.ListPerfMetricErrors(model.PerfMetricErrorQuery{
+		ModelName:      c.Query("model_name"),
+		Group:          c.Query("group"),
+		Username:       c.Query("username"),
+		ErrorType:      c.Query("error_type"),
+		ErrorCode:      c.Query("error_code"),
+		UserID:         userID,
+		StatusCode:     statusCode,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		StartIndex:     pageInfo.GetStartIdx(),
+		PageSize:       pageInfo.GetPageSize(),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(result.Total))
+	pageInfo.SetItems(result.Items)
+	common.ApiSuccess(c, pageInfo)
 }
 
 func GetPerfMetrics(c *gin.Context) {

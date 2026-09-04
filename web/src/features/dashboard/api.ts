@@ -26,6 +26,7 @@ import type {
   ReferralRankingPeriod,
   UptimeGroupResult,
   UserAgentStatsData,
+  PerformanceErrorsData,
   UserPerformanceAnomaliesData,
 } from './types'
 
@@ -107,6 +108,42 @@ export async function getUserAgentStats(params: {
     success: boolean
     data: UserAgentStatsData
   }>('/api/data/user-agents', { params })
+  return res.data
+}
+
+export async function getPerformanceErrors(params: {
+  startTimestamp?: number
+  endTimestamp?: number
+  username?: string
+  errorType?: string
+  errorCode?: string
+  group?: string
+  modelName?: string
+  statusCode?: number
+  page: number
+  pageSize: number
+}) {
+  const res = await api.get<{
+    success: boolean
+    data: PerformanceErrorsData
+  }>('/api/data/performance-errors', {
+    params: {
+      p: params.page,
+      page_size: params.pageSize,
+      ...(params.startTimestamp != null
+        ? { start_timestamp: params.startTimestamp }
+        : {}),
+      ...(params.endTimestamp != null
+        ? { end_timestamp: params.endTimestamp }
+        : {}),
+      ...(params.username ? { username: params.username } : {}),
+      ...(params.errorType ? { error_type: params.errorType } : {}),
+      ...(params.errorCode ? { error_code: params.errorCode } : {}),
+      ...(params.group ? { group: params.group } : {}),
+      ...(params.modelName ? { model_name: params.modelName } : {}),
+      ...(params.statusCode ? { status_code: params.statusCode } : {}),
+    },
+  })
   return res.data
 }
 

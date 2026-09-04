@@ -249,6 +249,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
+		// Keep a dedicated administrator-visible event in sync with the failed
+		// performance sample, even when ERROR_LOG_ENABLED is disabled.
+		perfmetrics.RecordRelayError(c, relayInfo, newAPIError)
 		gopool.Go(func() {
 			// Keep existing model/group success-rate metrics, but do not attach a
 			// user identity: user anomaly errors come only from explicit stream
