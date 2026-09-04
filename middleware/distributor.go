@@ -86,9 +86,32 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		if rootErr != nil {
-			logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
-			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-			return
+			// A stale root channel may be disabled, out of quota, fail the current
+			// model/group/UA filter, or have an invalidated key. Only an ordinary
+			// fresh user root may discard that binding and re-enter normal channel
+			// selection. Related/passive/explicit lineage requests must remain
+			// strict because their upstream state is tied to the original route.
+			if codexRootBindingFallbackAllowed(c, rootSession, rootBindingFound, rootErr) {
+				cleared, clearErr := clearInvalidCodexRootBindingForFreshRequest(c, rootSession)
+				if clearErr != nil {
+					logCodexPassiveRouteFailure(c, "clear", modelRequest.Model, rootSession, clearErr)
+				} else if cleared {
+					rootChannel = nil
+					rootSelectedGroup = ""
+					rootBindingFound = false
+					rootErr = nil
+				} else {
+					// The binding changed between preparation and the CAS delete. A
+					// single re-read lets a concurrently published valid route win;
+					// if it is still invalid, keep the fail-closed behavior below.
+					rootChannel, rootSelectedGroup, rootBindingFound, rootErr = prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+				}
+			}
+			if rootErr != nil {
+				logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
 		}
 		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) && !recognizedRootPassThrough {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)

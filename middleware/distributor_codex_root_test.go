@@ -879,6 +879,95 @@ func TestPrepareCodexRootChannelRoutePinsLaterMainTurnToRootChannel(t *testing.T
 	require.Equal(t, key, pinnedKey)
 }
 
+func TestDistributorFreshRootClearsUnavailableBindingAndReselects(t *testing.T) {
+	channel, oldKey, _ := setupCodexRootDistributorTest(t)
+	priority := int64(1)
+	// Keep the fallback within the same configured Codex2API policy target;
+	// only the channel route changes in this test.
+	newBaseURL := channel.GetBaseURL()
+	newKey := oldKey
+	fallback := &model.Channel{
+		Id: channel.Id + 100, Type: constant.ChannelTypeOpenAI, Key: newKey,
+		Status: common.ChannelStatusEnabled, Name: "codex-root-fallback-channel",
+		BaseURL: &newBaseURL, Models: "gpt-5.6-sol", Group: "pro", Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(fallback).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group: "pro", Model: "gpt-5.6-sol", ChannelId: fallback.Id, Enabled: true, Priority: &priority,
+	}).Error)
+	model.InitChannelCache()
+
+	rootID := "01a06000-0000-7000-8000-000000000901"
+	oldFingerprint := sha256.Sum256([]byte(oldKey))
+	require.NoError(t, service.StoreCodexRootChannelBinding(42, rootID, service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0,
+		KeyFingerprint: hex.EncodeToString(oldFingerprint[:]),
+	}))
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("status", common.ChannelStatusAutoDisabled).Error)
+	model.InitChannelCache()
+
+	c, recorder := codexMainRootContext(42, 901, 0, rootID)
+	Distribute()(c)
+
+	require.Less(t, recorder.Code, http.StatusBadRequest, "fresh user roots should re-enter normal channel selection")
+	require.Equal(t, fallback.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	require.Equal(t, newKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+	stored, found, err := service.LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, fallback.Id, stored.ChannelID)
+}
+
+func TestDistributorFreshRootTurnClearsUnavailableBindingAndReselects(t *testing.T) {
+	channel, oldKey, _ := setupCodexRootDistributorTest(t)
+	priority := int64(1)
+	baseURL := channel.GetBaseURL()
+	fallback := &model.Channel{
+		Id: channel.Id + 101, Type: constant.ChannelTypeOpenAI, Key: oldKey,
+		Status: common.ChannelStatusEnabled, Name: "codex-root-turn-fallback-channel",
+		BaseURL: &baseURL, Models: "gpt-5.6-sol", Group: "pro", Priority: &priority,
+	}
+	require.NoError(t, model.DB.Create(fallback).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{Group: "pro", Model: "gpt-5.6-sol", ChannelId: fallback.Id, Enabled: true, Priority: &priority}).Error)
+	model.InitChannelCache()
+	rootID := "01a06000-0000-7000-8000-000000000911"
+	turnID := "01a06000-0000-7000-8000-000000000912"
+	oldFingerprint := sha256.Sum256([]byte(oldKey))
+	require.NoError(t, service.StoreCodexRootChannelBinding(42, rootID, service.CodexRootChannelBinding{ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: hex.EncodeToString(oldFingerprint[:])}))
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("status", common.ChannelStatusAutoDisabled).Error)
+	model.InitChannelCache()
+	c, recorder := codexMainRootTurnContext(42, 911, 0, rootID, turnID)
+	Distribute()(c)
+	require.Less(t, recorder.Code, http.StatusBadRequest)
+	require.False(t, c.IsAborted())
+	require.Equal(t, fallback.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+	stored, found, err := service.LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, fallback.Id, stored.ChannelID)
+}
+
+func TestDistributorRelatedRootKeepsUnavailableBindingStrict(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+	rootID := "01a06000-0000-7000-8000-000000000902"
+	require.NoError(t, service.StoreCodexRootChannelBinding(42, rootID, service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}))
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("status", common.ChannelStatusAutoDisabled).Error)
+	model.InitChannelCache()
+
+	childID := "01a06000-0000-7000-8000-000000000903"
+	c, recorder := codexRootDistributorRequestContext(42, 0, rootID, childID)
+	Distribute()(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.True(t, c.IsAborted())
+	stored, found, err := service.LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, channel.Id, stored.ChannelID)
+}
+
 func TestPrepareCodexRootChannelRouteFailsClosedWhenPinnedKeyChanges(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	rootID := "root:" + t.Name()

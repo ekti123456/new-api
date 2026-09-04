@@ -110,6 +110,17 @@ redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
 return 1
 `)
 
+// clearCodexRootChannelBindingScript removes a stale route only when the
+// value inspected by the caller is still the value stored in Redis. A plain
+// DEL would let an older fallback delete a newer route published concurrently.
+var clearCodexRootChannelBindingScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current and current == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
+
 func getCodexRootChannelCache() *cachex.HybridCache[CodexRootChannelBinding] {
 	codexRootChannelCacheOnce.Do(func() {
 		codexRootChannelCache = cachex.NewHybridCache[CodexRootChannelBinding](cachex.HybridCacheConfig[CodexRootChannelBinding]{
@@ -227,6 +238,84 @@ func storeCodexRootChannelBindingWithTTL(userID int, rootID string, binding Code
 	codexRootChannelWriteMu.Unlock()
 	notifyCodexRootChannelBindingUpdate(userID, rootID)
 	return nil
+}
+
+// ClearCodexRootChannelBindingIfMatches removes an invalid root route after a
+// fresh user request discovers that its channel/key is no longer dispatchable.
+// The expected binding is compared atomically in Redis (and while holding the
+// in-memory write lock), so a route published by a concurrent request is never
+// erased by an older fallback. Both the current v2 side-specific cache and the
+// legacy v1 cache are checked; only values equal to expected are removed.
+//
+// It returns true when at least one matching cache entry was removed. A false
+// result with nil error means the route was already gone or had changed, so a
+// caller should re-run route preparation instead of assuming the old binding
+// is still authoritative.
+func ClearCodexRootChannelBindingIfMatches(userID int, rootID string, expected CodexRootChannelBinding) (bool, error) {
+	rootID = strings.TrimSpace(rootID)
+	key := codexRootChannelCacheKey(userID, rootID, expected.UARoutingOnly)
+	legacyKey := legacyCodexRootChannelCacheKey(userID, rootID)
+	if key == "" || legacyKey == "" || expected.ChannelID <= 0 ||
+		strings.TrimSpace(expected.SelectedGroup) == "" || strings.TrimSpace(expected.KeyFingerprint) == "" {
+		return false, nil
+	}
+	payload, err := common.Marshal(expected)
+	if err != nil {
+		return false, err
+	}
+
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), codexRootChannelRedisTimeout)
+		defer cancel()
+		removed := false
+		for _, cacheKey := range []string{
+			getCodexRootChannelCache().FullKey(key),
+			getCodexLegacyRootChannelCache().FullKey(legacyKey),
+		} {
+			if cacheKey == "" {
+				continue
+			}
+			count, runErr := clearCodexRootChannelBindingScript.Run(ctx, common.RDB, []string{cacheKey}, string(payload)).Int()
+			if runErr != nil {
+				return removed, runErr
+			}
+			removed = removed || count > 0
+		}
+		if removed {
+			notifyCodexRootChannelBindingUpdate(userID, rootID)
+		}
+		return removed, nil
+	}
+
+	codexRootChannelWriteMu.Lock()
+	removed := false
+	for _, entry := range []struct {
+		cache *cachex.HybridCache[CodexRootChannelBinding]
+		key   string
+	}{
+		{cache: getCodexRootChannelCache(), key: key},
+		{cache: getCodexLegacyRootChannelCache(), key: legacyKey},
+	} {
+		current, found, getErr := entry.cache.Get(entry.key)
+		if getErr != nil {
+			codexRootChannelWriteMu.Unlock()
+			return removed, getErr
+		}
+		if !found || current != expected {
+			continue
+		}
+		if _, deleteErr := entry.cache.DeleteMany([]string{entry.key}); deleteErr != nil {
+			codexRootChannelWriteMu.Unlock()
+			return removed, deleteErr
+		}
+		delete(codexRootChannelMemoryExpiresAt, entry.key)
+		removed = true
+	}
+	codexRootChannelWriteMu.Unlock()
+	if removed {
+		notifyCodexRootChannelBindingUpdate(userID, rootID)
+	}
+	return removed, nil
 }
 
 // ClaimProvisionalCodexRootChannelBinding atomically chooses the first

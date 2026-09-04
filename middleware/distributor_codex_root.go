@@ -27,6 +27,7 @@ const (
 	codexRequestArrivalContextKey          = "codex_request_arrival_v1"
 	codexRecognizedRootContextKey          = "codex_recognized_root_v1"
 	codexFallbackChannelKeyContextKey      = "codex_fallback_channel_key_v1"
+	codexRootBindingCandidateContextKey    = "codex_root_binding_candidate_v1"
 )
 
 var (
@@ -62,6 +63,16 @@ type codexPendingPassiveRootAlias struct {
 type codexRequestArrivalState struct {
 	arrival service.CodexRequestArrival
 	err     error
+}
+
+// codexRootBindingCandidate keeps the exact value inspected by
+// prepareCodexRootChannelRoute. It lets a fresh-root fallback perform a
+// compare-and-delete instead of deleting a route that a concurrent request
+// may have replaced in the meantime.
+type codexRootBindingCandidate struct {
+	userID  int
+	rootID  string
+	binding service.CodexRootChannelBinding
 }
 
 func codexPassiveAliasIsTemporary(c *gin.Context) bool {
@@ -390,6 +401,9 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	if c == nil {
 		return nil, "", false, nil
 	}
+	// Do not let a second preparation attempt in the same request reuse the
+	// candidate captured by an earlier route check.
+	c.Set(codexRootBindingCandidateContextKey, codexRootBindingCandidate{})
 	if !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" {
 		return nil, "", false, nil
 	}
@@ -421,6 +435,9 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	if !found {
 		return nil, "", false, nil
 	}
+	c.Set(codexRootBindingCandidateContextKey, codexRootBindingCandidate{
+		userID: userID, rootID: strings.TrimSpace(resolution.RootID), binding: binding,
+	})
 	if binding.UARoutingOnly != requestUARoutingOnly {
 		return nil, "", true, errors.New("root channel binding is outside the current UA routing side")
 	}
@@ -461,6 +478,37 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 		common.SetContextKey(c, constant.ContextKeyAutoGroup, binding.SelectedGroup)
 	}
 	return channel, binding.SelectedGroup, true, nil
+}
+
+// codexRootBindingFallbackAllowed limits stale-root recovery to an ordinary
+// user request. A related/passive/explicit lineage request must stay on the
+// account/channel that created its upstream state; silently selecting another
+// channel would turn a deterministic upstream identity error into cross-window
+// drift. Token-specific channel selection is likewise explicit and remains
+// fail-closed when it disagrees with the root binding.
+func codexRootBindingFallbackAllowed(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, rootBindingFound bool, rootErr error) bool {
+	if c == nil || rootErr == nil || !rootBindingFound || !resolution.Resolved ||
+		resolution.Related || resolution.IdentityConflict {
+		return false
+	}
+	return strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenSpecificChannelId)) == ""
+}
+
+// clearInvalidCodexRootBindingForFreshRequest performs a compare-and-delete
+// for the binding captured by prepareCodexRootChannelRoute. Returning false
+// without an error means another request already removed/replaced it; callers
+// should prepare the route again before deciding whether to fail closed.
+func clearInvalidCodexRootBindingForFreshRequest(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (bool, error) {
+	if c == nil || !resolution.Resolved || strings.TrimSpace(resolution.RootID) == "" {
+		return false, nil
+	}
+	raw, found := c.Get(codexRootBindingCandidateContextKey)
+	candidate, ok := raw.(codexRootBindingCandidate)
+	if !found || !ok || candidate.userID <= 0 || strings.TrimSpace(candidate.rootID) == "" ||
+		candidate.binding.ChannelID <= 0 {
+		return false, nil
+	}
+	return service.ClearCodexRootChannelBindingIfMatches(candidate.userID, candidate.rootID, candidate.binding)
 }
 
 func isIndependentCodexInternalRoot(resolution relaychannel.CodexRootSessionResolution) bool {

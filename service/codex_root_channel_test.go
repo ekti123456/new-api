@@ -85,6 +85,68 @@ func TestCodexRootChannelBindingRoundtripIsScopedByUserAndRoot(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestClearCodexRootChannelBindingIfMatchesUsesCompareAndDelete(t *testing.T) {
+	originalEnabled := common.RedisEnabled
+	originalClient := common.RDB
+	common.RedisEnabled = false
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalEnabled
+		common.RDB = originalClient
+	})
+
+	rootID := "root:clear-cas:" + t.Name()
+	oldBinding := CodexRootChannelBinding{
+		ChannelID: 731, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "old-key",
+	}
+	newBinding := CodexRootChannelBinding{
+		ChannelID: 732, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "new-key",
+	}
+	require.NoError(t, StoreCodexRootChannelBinding(42, rootID, oldBinding))
+
+	removed, err := ClearCodexRootChannelBindingIfMatches(42, rootID, newBinding)
+	require.NoError(t, err)
+	require.False(t, removed, "a replacement route must not be deleted by an old CAS value")
+	got, found, err := LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, oldBinding, got)
+
+	removed, err = ClearCodexRootChannelBindingIfMatches(42, rootID, oldBinding)
+	require.NoError(t, err)
+	require.True(t, removed)
+	_, found, err = LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestClearCodexRootChannelBindingIfMatchesRedisIsCompareAndDelete(t *testing.T) {
+	useCodexPassiveRouteRedis(t)
+	rootID := "root:clear-cas-redis:" + t.Name()
+	oldBinding := CodexRootChannelBinding{
+		ChannelID: 741, SelectedGroup: "pro", KeyIndex: 1, KeyFingerprint: "old-redis-key",
+	}
+	newBinding := CodexRootChannelBinding{
+		ChannelID: 742, SelectedGroup: "pro", KeyIndex: 1, KeyFingerprint: "new-redis-key",
+	}
+	require.NoError(t, StoreCodexRootChannelBinding(42, rootID, oldBinding))
+
+	removed, err := ClearCodexRootChannelBindingIfMatches(42, rootID, newBinding)
+	require.NoError(t, err)
+	require.False(t, removed)
+	got, found, err := LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, oldBinding, got)
+
+	removed, err = ClearCodexRootChannelBindingIfMatches(42, rootID, oldBinding)
+	require.NoError(t, err)
+	require.True(t, removed)
+	_, found, err = LoadCodexRootChannelBinding(42, rootID)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func TestCodexRootChannelBindingUpdateWakesExactRootAndLoadsAcrossRoutingSides(t *testing.T) {
 	originalEnabled := common.RedisEnabled
 	originalClient := common.RDB
