@@ -37,7 +37,8 @@ const (
 	codexRecentRootPollInterval          = 200 * time.Millisecond
 	codexTitleRootCandidateTTL           = 5 * time.Second
 	codexRootObservationWindow           = 30 * time.Second
-	codexRootObservationContainerTTL     = 2 * time.Minute
+	codexRootObservationFallbackWindow   = 5 * time.Minute
+	codexRootObservationContainerTTL     = codexRootObservationFallbackWindow
 	codexRequestArrivalSequenceTTL       = 10 * time.Minute
 )
 
@@ -56,6 +57,10 @@ type CodexRecentRootChannelCandidate struct {
 	ObservationID      string
 	ArrivalOrder       int64
 	ArrivedAt          time.Time
+	// ObservationWindow records the maximum predecessor age proved when this
+	// candidate was loaded. It is used by the atomic alias claim to apply the
+	// same strict or extended window that selected the event.
+	ObservationWindow time.Duration
 }
 
 // CodexRequestArrival is a server-issued ordering ticket for one downstream
@@ -73,6 +78,10 @@ type CodexPassiveRootAlias struct {
 	SelectedGroup      string `json:"selected_group"`
 	UARoutingOnly      bool   `json:"ua_routing_only"`
 	BindingFingerprint string `json:"binding_fingerprint"`
+	// Temporary marks aliases inferred through the bounded fallback window. It
+	// prevents a retry that loads the provisional alias from promoting it into a
+	// durable root binding.
+	Temporary bool `json:"temporary,omitempty"`
 }
 
 type codexRecentRootWaiter struct {
@@ -542,11 +551,24 @@ func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, bindin
 // before cutoff. Events at or after cutoff are invisible even if they publish
 // while this request is waiting.
 func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival) (CodexRecentRootChannelCandidate, bool, error) {
+	return LoadLatestCodexRootChannelObservationBeforeWithin(ctx, userID, tokenID, uaRoutingOnly, cutoff, codexRootObservationWindow)
+}
+
+// LoadLatestCodexRootChannelObservationBeforeWithin is the bounded fallback
+// variant used when the strict 30-second predecessor window has no event. It
+// still returns only the immediate predecessor before the server-issued
+// arrival ticket; a later request can never be used to infer this request's
+// parent. Callers should keep the window finite and treat the result as a
+// lower-confidence alias.
+func LoadLatestCodexRootChannelObservationBeforeWithin(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival, observationWindow time.Duration) (CodexRecentRootChannelCandidate, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return CodexRecentRootChannelCandidate{}, false, err
+	}
+	if observationWindow <= 0 {
+		observationWindow = codexRootObservationWindow
 	}
 	if !cutoff.validFor(userID, tokenID) {
 		return CodexRecentRootChannelCandidate{}, false, ErrCodexRecentRootBindingUnavailable
@@ -605,7 +627,7 @@ func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, to
 	if !validEvent || arrival.Order != eventOrder || arrival.Order >= cutoff.Order || arrival.ArrivedAt.After(cutoff.ArrivedAt) {
 		return CodexRecentRootChannelCandidate{}, false, ErrCodexPassiveRootCandidatesChanged
 	}
-	if arrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+	if arrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-observationWindow)) {
 		return CodexRecentRootChannelCandidate{}, false, nil
 	}
 	binding, found, err := LoadCodexRootChannelBindingForRoutingSideContext(ctx, userID, rootID, uaRoutingOnly)
@@ -617,8 +639,8 @@ func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, to
 	}
 	return CodexRecentRootChannelCandidate{
 		RootID: rootID, Binding: binding, BindingFingerprint: bindingFingerprint,
-		ExpiresAt: arrival.ArrivedAt.Add(codexRootObservationWindow), ObservationID: eventID,
-		ArrivalOrder: arrival.Order, ArrivedAt: arrival.ArrivedAt,
+		ExpiresAt: arrival.ArrivedAt.Add(observationWindow), ObservationID: eventID,
+		ArrivalOrder: arrival.Order, ArrivedAt: arrival.ArrivedAt, ObservationWindow: observationWindow,
 	}, true, nil
 }
 
@@ -1457,12 +1479,16 @@ func ClaimCodexObservedPassiveRootAlias(
 	}
 	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
 	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
+	observationWindow := candidate.ObservationWindow
+	if observationWindow <= 0 {
+		observationWindow = codexRootObservationWindow
+	}
 	eventArrival, eventRootID, eventFingerprint, validEvent := parseCodexRootObservationMember(candidate.ObservationID)
 	if cacheKey == "" || !validAlias || !cutoff.validFor(userID, tokenID) || !validEvent ||
 		eventRootID != alias.RootID || eventFingerprint != alias.BindingFingerprint ||
 		eventArrival.Order != candidate.ArrivalOrder || !eventArrival.ArrivedAt.Equal(candidate.ArrivedAt) ||
 		eventArrival.Order >= cutoff.Order || eventArrival.ArrivedAt.After(cutoff.ArrivedAt) ||
-		eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+		eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-observationWindow)) {
 		return ErrCodexPassiveRootAliasInvalid
 	}
 	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID)
@@ -1505,7 +1531,7 @@ func ClaimCodexObservedPassiveRootAlias(
 		stored, claimErr := claimCodexObservedPassiveRootAliasScript.Run(claimContext, common.RDB,
 			[]string{codexPassiveRootAliasRedisKey(redisScopeKey, cacheKey), codexRootObservationRedisKey(scopeKey)},
 			string(payload), candidate.ObservationID, int64(codexPassiveRootAliasProvisionalTTL/time.Second), cutoff.Order,
-			candidate.ArrivalOrder, cutoff.ArrivedAt.UnixMilli(), codexRootObservationWindow/time.Millisecond).Int()
+			candidate.ArrivalOrder, cutoff.ArrivedAt.UnixMilli(), observationWindow/time.Millisecond).Int()
 		if claimErr != nil {
 			return claimErr
 		}
@@ -1543,7 +1569,7 @@ func ClaimCodexObservedPassiveRootAlias(
 				continue
 			}
 			eventArrival, _, _, valid := parseCodexRootObservationMember(eventID)
-			if !valid || eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-codexRootObservationWindow)) {
+			if !valid || eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-observationWindow)) {
 				continue
 			}
 			if latestEvent == "" || order > latestOrder || (order == latestOrder && eventID < latestEvent) {

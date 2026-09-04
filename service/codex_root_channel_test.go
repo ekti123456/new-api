@@ -493,6 +493,52 @@ func TestCodexRootObservationCutoffPreservesSameRootRequestHistory(t *testing.T)
 	}
 }
 
+func TestCodexRootObservationExtendedWindowUsesOnlyPredecessor(t *testing.T) {
+	server := useCodexPassiveRouteRedis(t)
+	base := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	server.SetTime(base)
+	const userID, tokenID = 42025, 10125
+	binding := CodexRootChannelBinding{ChannelID: 812, SelectedGroup: "pro", KeyFingerprint: "key-extended"}
+	rootA := "root:" + t.Name() + ":a"
+	rootB := "root:" + t.Name() + ":b"
+	require.NoError(t, StoreCodexRootChannelBinding(userID, rootA, binding))
+	require.NoError(t, StoreCodexRootChannelBinding(userID, rootB, binding))
+
+	arrivalA, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.NoError(t, StoreCodexRootChannelObservation(userID, tokenID, rootA, binding, arrivalA))
+
+	// At 31 seconds the strict predecessor window is intentionally empty, but
+	// the bounded five-minute fallback can still identify the same predecessor.
+	server.SetTime(base.Add(31 * time.Second))
+	cutoff, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	strict, strictFound, err := LoadLatestCodexRootChannelObservationBefore(context.Background(), userID, tokenID, false, cutoff)
+	require.NoError(t, err)
+	require.False(t, strictFound)
+	require.Empty(t, strict.RootID)
+	extended, extendedFound, err := LoadLatestCodexRootChannelObservationBeforeWithin(
+		context.Background(), userID, tokenID, false, cutoff, 5*time.Minute,
+	)
+	require.NoError(t, err)
+	require.True(t, extendedFound)
+	require.Equal(t, rootA, extended.RootID)
+	require.Equal(t, 5*time.Minute, extended.ObservationWindow)
+
+	// A request arriving after the cutoff must never become the inferred parent,
+	// even when it is published before the lookup executes.
+	server.SetTime(base.Add(32 * time.Second))
+	arrivalFuture, err := BeginCodexRequestArrival(context.Background(), userID, tokenID)
+	require.NoError(t, err)
+	require.NoError(t, StoreCodexRootChannelObservation(userID, tokenID, rootB, binding, arrivalFuture))
+	selected, selectedFound, err := LoadLatestCodexRootChannelObservationBeforeWithin(
+		context.Background(), userID, tokenID, false, cutoff, 5*time.Minute,
+	)
+	require.NoError(t, err)
+	require.True(t, selectedFound)
+	require.Equal(t, rootA, selected.RootID)
+}
+
 func TestCodexPassiveRootAliasClaimRequiresExactCandidateFingerprint(t *testing.T) {
 	const userID, tokenID = 42012, 10112
 	rootID := "root:" + t.Name()

@@ -544,6 +544,11 @@ func TestUnlinkedCodexSystemRequiresPredecessorWithinThirtySeconds(t *testing.T)
 	}
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// Keep this regression focused on the strict 30-second contract; the
+			// separate extended-window coverage exercises the production fallback.
+			originalFallbackWindow := codexUnlinkedPassiveRootFallbackWindow
+			codexUnlinkedPassiveRootFallbackWindow = 30 * time.Second
+			t.Cleanup(func() { codexUnlinkedPassiveRootFallbackWindow = originalFallbackWindow })
 			channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 			userID := 183 + index
 			tokenID := 1741 + index

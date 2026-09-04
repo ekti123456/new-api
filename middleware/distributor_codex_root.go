@@ -30,15 +30,16 @@ const (
 )
 
 var (
-	codexUnlinkedPassiveRootWaitTimeout  = 3 * time.Second
-	codexLinkedRootWaitTimeout           = 3 * time.Second
-	codexTurnRootWaitTimeout             = 3 * time.Second
-	codexThreadRootWaitTimeout           = 3 * time.Second
-	waitForRecentCodexRootChannelUpdate  = service.WaitForRecentCodexRootChannelUpdate
-	waitForRecentCodexTitleRootUpdate    = service.WaitForCodexTitleRootChannelUpdate
-	waitForCodexRootChannelBindingUpdate = service.WaitForCodexRootChannelBindingUpdate
-	waitForCodexTurnRootBindingUpdate    = service.WaitForCodexTurnRootBindingUpdate
-	waitForCodexThreadRootBindingUpdate  = service.WaitForCodexThreadRootBindingUpdate
+	codexUnlinkedPassiveRootWaitTimeout    = 3 * time.Second
+	codexLinkedRootWaitTimeout             = 3 * time.Second
+	codexTurnRootWaitTimeout               = 3 * time.Second
+	codexThreadRootWaitTimeout             = 3 * time.Second
+	codexUnlinkedPassiveRootFallbackWindow = 5 * time.Minute
+	waitForRecentCodexRootChannelUpdate    = service.WaitForRecentCodexRootChannelUpdate
+	waitForRecentCodexTitleRootUpdate      = service.WaitForCodexTitleRootChannelUpdate
+	waitForCodexRootChannelBindingUpdate   = service.WaitForCodexRootChannelBindingUpdate
+	waitForCodexTurnRootBindingUpdate      = service.WaitForCodexTurnRootBindingUpdate
+	waitForCodexThreadRootBindingUpdate    = service.WaitForCodexThreadRootBindingUpdate
 )
 
 type codexRootChannelRoute struct {
@@ -55,11 +56,21 @@ type codexPendingPassiveRootAlias struct {
 	titleCandidate bool
 	observation    service.CodexRecentRootChannelCandidate
 	cutoff         service.CodexRequestArrival
+	temporaryOnly  bool
 }
 
 type codexRequestArrivalState struct {
 	arrival service.CodexRequestArrival
 	err     error
+}
+
+func codexPassiveAliasIsTemporary(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	raw, found := c.Get(codexPendingPassiveRootAliasContextKey)
+	pending, ok := raw.(codexPendingPassiveRootAlias)
+	return found && ok && pending.temporaryOnly
 }
 
 func captureCodexRequestArrival(c *gin.Context) {
@@ -986,7 +997,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		}
 		c.Set(codexPendingPassiveRootAliasContextKey, codexPendingPassiveRootAlias{
 			userID: userID, tokenID: tokenID, sourceRootID: sourceRootID, alias: alias,
-			titleCandidate: titleCandidate,
+			titleCandidate: titleCandidate, temporaryOnly: alias.Temporary,
 		})
 		return applyUnlinkedCodexPassiveRoot(c, resolution, alias.RootID, feature)
 	}
@@ -1006,6 +1017,38 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	waitContext, cancelWait := context.WithTimeout(requestContext, codexUnlinkedPassiveRootWaitTimeout)
 	defer cancelWait()
 	var soleCandidate *service.CodexRecentRootChannelCandidate
+	// Once the strict predecessor wait expires, an unlinked system request may
+	// use one bounded, lower-confidence predecessor lookup. This lookup remains
+	// ordered (only arrivals before the request) and never considers title
+	// candidates, which have their own five-second bridge.
+	loadExtendedPredecessor := func() (relaychannel.CodexRootSessionResolution, string, bool, error) {
+		candidate, candidateFound, loadErr := service.LoadLatestCodexRootChannelObservationBeforeWithin(
+			requestContext, userID, tokenID, uaRoutingOnly, cutoff, codexUnlinkedPassiveRootFallbackWindow,
+		)
+		if loadErr != nil {
+			return resolution, feature, true, fmt.Errorf("load extended Codex root observation: %w", loadErr)
+		}
+		if !candidateFound {
+			return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
+		}
+		// Preserve the nearest-predecessor safety rule: a newer candidate in a
+		// different group is not skipped in favour of an older candidate.
+		if !requestCanUseStoredCodexGroup(c, usingGroup, candidate.Binding.SelectedGroup) {
+			return resolution, feature, true, errors.New("recent Codex root channel binding is outside the current group")
+		}
+		resolved, resolvedFeature, strict, applyErr := applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, candidate, false, cutoff)
+		if applyErr != nil {
+			return resolved, resolvedFeature, strict, applyErr
+		}
+		if raw, found := c.Get(codexPendingPassiveRootAliasContextKey); found {
+			if pending, ok := raw.(codexPendingPassiveRootAlias); ok {
+				pending.temporaryOnly = true
+				pending.alias.Temporary = true
+				c.Set(codexPendingPassiveRootAliasContextKey, pending)
+			}
+		}
+		return resolved, resolvedFeature, strict, nil
+	}
 	for {
 		if titleCandidate {
 			candidates, loadErr := service.LoadCodexTitleRootChannelCandidates(waitContext, userID, tokenID)
@@ -1058,7 +1101,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 				return resolution, feature, true, fmt.Errorf("wait for recent Codex root channel binding: %w", err)
 			}
 			if soleCandidate == nil {
-				return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
+				return loadExtendedPredecessor()
 			}
 			return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, *soleCandidate, true, service.CodexRequestArrival{})
 		}
@@ -1076,7 +1119,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 				return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, *soleCandidate, true, service.CodexRequestArrival{})
 			}
 			if !titleCandidate && errors.Is(waitErr, context.DeadlineExceeded) && errors.Is(waitContext.Err(), context.DeadlineExceeded) && requestContext.Err() == nil {
-				return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
+				return loadExtendedPredecessor()
 			}
 			return resolution, feature, true, fmt.Errorf("wait for recent Codex root channel binding: %w", waitErr)
 		}
@@ -1152,6 +1195,12 @@ func promoteCodexPassiveRootAlias(c *gin.Context) error {
 	raw, found := c.Get(codexPendingPassiveRootAliasContextKey)
 	pending, ok := raw.(codexPendingPassiveRootAlias)
 	if !found || !ok {
+		return nil
+	}
+	if pending.temporaryOnly {
+		// Extended-window inference is intentionally provisional. A successful
+		// request may use the alias for its current dispatch, but must not turn a
+		// low-confidence predecessor into a durable 24-hour root binding.
 		return nil
 	}
 	return service.PromoteCodexPassiveRootAlias(c.Request.Context(), pending.userID, pending.tokenID, pending.sourceRootID, pending.alias)
@@ -1382,6 +1431,9 @@ func rollbackProvisionalCodexLineageClaims(requestModel, failedStage string, cla
 }
 
 func claimProvisionalCodexTurnRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (codexProvisionalLineageClaim, error) {
+	if codexPassiveAliasIsTemporary(c) {
+		return codexProvisionalLineageClaim{}, nil
+	}
 	userID, turnID, rootID, binding, role, ok := selectedCodexTurnRootBinding(c, resolution)
 	if !ok {
 		return codexProvisionalLineageClaim{}, nil
@@ -1411,6 +1463,9 @@ func claimProvisionalCodexTurnRootBinding(c *gin.Context, resolution relaychanne
 }
 
 func recordCodexTurnRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
+	if codexPassiveAliasIsTemporary(c) {
+		return
+	}
 	userID, turnID, rootID, binding, role, ok := selectedCodexTurnRootBinding(c, resolution)
 	if !ok {
 		return
@@ -1437,6 +1492,9 @@ func selectedCodexThreadRootBinding(c *gin.Context, resolution relaychannel.Code
 }
 
 func claimProvisionalCodexThreadRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (codexProvisionalLineageClaim, error) {
+	if codexPassiveAliasIsTemporary(c) {
+		return codexProvisionalLineageClaim{}, nil
+	}
 	userID, threadID, rootID, binding, ok := selectedCodexThreadRootBinding(c, resolution)
 	if !ok {
 		return codexProvisionalLineageClaim{}, nil
@@ -1462,6 +1520,9 @@ func claimProvisionalCodexThreadRootBinding(c *gin.Context, resolution relaychan
 }
 
 func recordCodexThreadRootBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
+	if codexPassiveAliasIsTemporary(c) {
+		return
+	}
 	userID, threadID, rootID, binding, ok := selectedCodexThreadRootBinding(c, resolution)
 	if !ok {
 		return
@@ -1492,6 +1553,15 @@ func claimProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaycha
 }
 
 func publishProvisionalCodexRootCandidates(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) error {
+	if c != nil {
+		if raw, found := c.Get(codexPendingPassiveRootAliasContextKey); found {
+			if pending, ok := raw.(codexPendingPassiveRootAlias); ok && pending.temporaryOnly {
+				// Do not publish a guessed system predecessor as a new root
+				// candidate; doing so could influence later unrelated requests.
+				return nil
+			}
+		}
+	}
 	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
 	if !ok {
 		return nil
@@ -1529,6 +1599,9 @@ func recordProvisionalCodexRootChannelBinding(c *gin.Context, resolution relaych
 
 func recordCodexRootChannelBinding(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, requestModel string) {
 	if c == nil || c.Writer == nil || c.Writer.Status() >= http.StatusBadRequest {
+		return
+	}
+	if codexPassiveAliasIsTemporary(c) {
 		return
 	}
 	userID, tokenID, rootID, binding, ok := selectedCodexRootChannelBinding(c, resolution)
