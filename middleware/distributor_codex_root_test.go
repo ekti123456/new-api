@@ -580,6 +580,49 @@ func TestUnlinkedCodexSystemRequiresPredecessorWithinThirtySeconds(t *testing.T)
 	}
 }
 
+func TestUnlinkedCodexSystemExtendedPredecessorIsTemporary(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
+	const (
+		userID       = 186
+		tokenID      = 1744
+		rootID       = "01a04000-0000-7000-8000-000000000751"
+		systemRootID = "01a04000-0000-7000-8000-000000000752"
+	)
+	rootArrival := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	server, _ := useCodexRecentRootRedisFixture(t, rootArrival)
+	binding := service.CodexRootChannelBinding{
+		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
+	}
+	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, rootID, binding, rootArrival)
+
+	systemContext, _ := codexSystemTurnContext(userID, tokenID, systemRootID, "01a04000-0000-7000-8000-000000000753", "", "")
+	server.SetTime(rootArrival.Add(31 * time.Second))
+	captureCodexRequestArrival(systemContext)
+	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
+	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
+	require.NoError(t, err)
+	require.True(t, strict)
+	require.Equal(t, "system_passive", feature)
+	require.True(t, resolved.Related)
+	require.Equal(t, rootID, resolved.RootID)
+
+	rawPending, foundPending := systemContext.Get(codexPendingPassiveRootAliasContextKey)
+	pending, pendingOK := rawPending.(codexPendingPassiveRootAlias)
+	require.True(t, foundPending && pendingOK)
+	require.True(t, pending.temporaryOnly)
+	require.True(t, pending.alias.Temporary)
+
+	// Commit the provisional alias, then run the normal promotion hook. The
+	// temporary marker must keep it on the short TTL instead of upgrading it to
+	// the durable 24-hour alias.
+	require.NoError(t, commitCodexPassiveRootAlias(systemContext))
+	require.NoError(t, promoteCodexPassiveRootAlias(systemContext))
+	stored, found, err := service.LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, stored.Temporary)
+}
+
 func TestUnlinkedCodexTitleNeverUsesThirtySecondPredecessorBridge(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const (

@@ -974,6 +974,13 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	if !classified {
 		return resolution, "", false, nil
 	}
+	// The wider predecessor search is deliberately limited to the unlinked
+	// project/system passive request.  Title and summary requests have their
+	// own short-lived bridges (or no reliable predecessor at all); allowing
+	// them to reach back five minutes would make an old window look like the
+	// current one and is exactly the cross-window drift this fallback is meant
+	// to avoid.
+	allowExtendedPredecessor := !titleCandidate && feature == "system_passive"
 	tokenID := common.GetContextKeyInt(c, constant.ContextKeyTokenId)
 	sourceRootID := strings.TrimSpace(resolution.RootID)
 	uaRoutingOnly := common.GetContextKeyBool(c, constant.ContextKeyChannelAffinityUserAgentRouted)
@@ -1022,6 +1029,9 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	// ordered (only arrivals before the request) and never considers title
 	// candidates, which have their own five-second bridge.
 	loadExtendedPredecessor := func() (relaychannel.CodexRootSessionResolution, string, bool, error) {
+		if !allowExtendedPredecessor {
+			return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
+		}
 		candidate, candidateFound, loadErr := service.LoadLatestCodexRootChannelObservationBeforeWithin(
 			requestContext, userID, tokenID, uaRoutingOnly, cutoff, codexUnlinkedPassiveRootFallbackWindow,
 		)
@@ -1079,6 +1089,9 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 			)
 			if loadErr != nil {
 				if errors.Is(loadErr, context.DeadlineExceeded) && requestContext.Err() == nil && time.Until(deadline) <= 0 {
+					if allowExtendedPredecessor {
+						return loadExtendedPredecessor()
+					}
 					return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
 				}
 				return resolution, feature, true, fmt.Errorf("load recent Codex root observation: %w", loadErr)
@@ -1101,6 +1114,9 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 				return resolution, feature, true, fmt.Errorf("wait for recent Codex root channel binding: %w", err)
 			}
 			if soleCandidate == nil {
+				if !allowExtendedPredecessor {
+					return resolution, feature, true, errors.New("recent Codex root channel binding is unavailable")
+				}
 				return loadExtendedPredecessor()
 			}
 			return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, *soleCandidate, true, service.CodexRequestArrival{})
@@ -1118,7 +1134,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 				}
 				return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, *soleCandidate, true, service.CodexRequestArrival{})
 			}
-			if !titleCandidate && errors.Is(waitErr, context.DeadlineExceeded) && errors.Is(waitContext.Err(), context.DeadlineExceeded) && requestContext.Err() == nil {
+			if allowExtendedPredecessor && errors.Is(waitErr, context.DeadlineExceeded) && errors.Is(waitContext.Err(), context.DeadlineExceeded) && requestContext.Err() == nil {
 				return loadExtendedPredecessor()
 			}
 			return resolution, feature, true, fmt.Errorf("wait for recent Codex root channel binding: %w", waitErr)
