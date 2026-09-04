@@ -26,8 +26,10 @@ import {
   FormControl,
   FormDescription,
   FormField,
+  FormItem,
   FormLabel,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -44,6 +46,12 @@ const behaviorSchema = z.object({
   DefaultCollapseSidebar: z.boolean(),
   DemoSiteEnabled: z.boolean(),
   SelfUseModeEnabled: z.boolean(),
+  codex_unlinked_account_fallback_enabled: z.boolean(),
+  codex_unlinked_account_fallback_seconds: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(3600),
 })
 
 type BehaviorFormValues = z.infer<typeof behaviorSchema>
@@ -143,6 +151,58 @@ export function SystemBehaviorSection({
                   />
                 </FormControl>
               </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='codex_unlinked_account_fallback_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Codex Unlinked Account Fallback')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Allow unlinked Codex passive requests to reuse a recent account within the configured window'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='codex_unlinked_account_fallback_seconds'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Codex Fallback Window (seconds)')}</FormLabel>
+                <FormDescription>
+                  {t(
+                    'Used only when unlinked account fallback is enabled; 1–3600 seconds'
+                  )}
+                </FormDescription>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={3600}
+                    step={1}
+                    disabled={
+                      !form.watch('codex_unlinked_account_fallback_enabled')
+                    }
+                    {...field}
+                    value={field.value as number}
+                    onChange={(event) => field.onChange(event.target.value)}
+                  />
+                </FormControl>
+              </FormItem>
             )}
           />
         </SettingsForm>

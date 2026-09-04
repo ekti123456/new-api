@@ -36,6 +36,10 @@ const OPERATIONS_SECTIONS = [
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
+          codex_unlinked_account_fallback_enabled:
+            settings.codex_unlinked_account_fallback_enabled ?? false,
+          codex_unlinked_account_fallback_seconds:
+            settings.codex_unlinked_account_fallback_seconds ?? 300,
         }}
       />
     ),

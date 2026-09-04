@@ -50,6 +50,8 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["RequestIPLogEnabled"] = strconv.FormatBool(common.RequestIPLogEnabled)
+	common.OptionMap["codex_unlinked_account_fallback_enabled"] = "false"
+	common.OptionMap["codex_unlinked_account_fallback_seconds"] = "300"
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
@@ -217,6 +219,18 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == "codex_unlinked_account_fallback_enabled" {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized != "true" && normalized != "false" && normalized != "1" && normalized != "0" {
+			return fmt.Errorf("codex unlinked account fallback enabled must be a boolean")
+		}
+	}
+	if key == "codex_unlinked_account_fallback_seconds" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || parsed < 1 || parsed > 3600 {
+			return fmt.Errorf("codex unlinked account fallback seconds must be between 1 and 3600")
+		}
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
@@ -296,6 +310,16 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == "codex_unlinked_account_fallback_seconds" {
+		parsed, parseErr := strconv.Atoi(strings.TrimSpace(value))
+		if parseErr != nil || parsed <= 0 {
+			parsed = 300
+		}
+		if parsed > 3600 {
+			parsed = 3600
+		}
+		value = strconv.Itoa(parsed)
+	}
 	if key == retiredThemeOptionKey || key == legacyReferralMigrationKey || key == "QuotaForInviter" || key == "QuotaForInvitee" {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)

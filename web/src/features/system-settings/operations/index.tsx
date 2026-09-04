@@ -30,6 +30,8 @@ const defaultOperationsSettings: OperationsSettings = {
   DefaultCollapseSidebar: false,
   DemoSiteEnabled: false,
   SelfUseModeEnabled: false,
+  codex_unlinked_account_fallback_enabled: false,
+  codex_unlinked_account_fallback_seconds: 300,
   QuotaRemindThreshold: '',
   EmailProvider: 'smtp',
   SMTPServer: '',

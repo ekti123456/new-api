@@ -45,6 +45,7 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	context.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses?client=true", nil)
 	context.Request.RemoteAddr = "203.0.113.9:4567"
 	context.Request.Header.Set("Session-Id", "conversation-42")
+	context.Request.Header.Set("X-Codex-Installation-Id", "device-42")
 	common2.SetContextKey(context, constant.ContextKeyUserName, "policy-user")
 
 	body := []byte(`{"model":"gpt-5","input":"hello"}`)
@@ -53,6 +54,7 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	upstreamRequest.Header.Set("X-NewAPI-Signature", "client-controlled")
 	info := &relaycommon.RelayInfo{
 		UserId:                  42,
+		TokenId:                 314,
 		UserEmail:               "user@example.com",
 		UserGroup:               "default",
 		RequestId:               "req-newapi-policy-1",
@@ -94,6 +96,8 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	assert.Equal(t, "/v1/responses", meta.OriginalEndpoint)
 	assert.Equal(t, string(types.RelayFormatOpenAIResponses), meta.Protocol)
 	assert.Equal(t, "gpt-5-codex", meta.UpstreamModel)
+	assert.Equal(t, 314, meta.TokenID)
+	assert.Equal(t, "device-42", meta.InstallationID)
 	assert.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", "conversation-42"), meta.SessionFingerprint)
 	assert.Len(t, meta.SessionFingerprint, 32)
 	assert.Equal(t, 1, meta.RootSessionVersion)
@@ -107,6 +111,15 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	forwardedBody, err := io.ReadAll(upstreamRequest.Body)
 	require.NoError(t, err)
 	assert.Equal(t, body, forwardedBody)
+}
+
+func TestNewAPIPolicyInstallationIDReadsClientMetadataAndEmbeddedTurnMetadata(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		Request: &dto.OpenAIResponsesRequest{ClientMetadata: []byte(`{"x-codex-turn-metadata":"{\"installation_id\":\"device-from-turn\"}"}`)},
+	}
+	if got := newAPIPolicyInstallationID(nil, info); got != "device-from-turn" {
+		t.Fatalf("installation id = %q, want device-from-turn", got)
+	}
 }
 
 func TestApplyNewAPIPolicyHeadersSeparatesGuardianLeafFromRoot(t *testing.T) {

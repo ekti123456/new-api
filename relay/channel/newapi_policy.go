@@ -20,6 +20,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -81,19 +82,24 @@ type newAPIPolicyRequestContextKey struct{}
 const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
-	PlatformID         string `json:"platform_id"`
-	UserName           string `json:"user_name,omitempty"`
-	UserEmail          string `json:"user_email,omitempty"`
-	UserGroup          string `json:"user_group,omitempty"`
-	Profile            string `json:"profile"`
-	Mode               string `json:"mode"`
-	Provider           string `json:"provider"`
-	Protocol           string `json:"protocol"`
-	OriginalEndpoint   string `json:"original_endpoint,omitempty"`
-	OriginalProtocol   string `json:"original_protocol,omitempty"`
-	RequestedModel     string `json:"requested_model,omitempty"`
-	UpstreamModel      string `json:"upstream_model,omitempty"`
-	ChannelID          int    `json:"channel_id,omitempty"`
+	PlatformID       string `json:"platform_id"`
+	UserName         string `json:"user_name,omitempty"`
+	UserEmail        string `json:"user_email,omitempty"`
+	UserGroup        string `json:"user_group,omitempty"`
+	Profile          string `json:"profile"`
+	Mode             string `json:"mode"`
+	Provider         string `json:"provider"`
+	Protocol         string `json:"protocol"`
+	OriginalEndpoint string `json:"original_endpoint,omitempty"`
+	OriginalProtocol string `json:"original_protocol,omitempty"`
+	RequestedModel   string `json:"requested_model,omitempty"`
+	UpstreamModel    string `json:"upstream_model,omitempty"`
+	ChannelID        int    `json:"channel_id,omitempty"`
+	// TokenID and InstallationID are trusted, signed routing hints. They let
+	// Codex2API narrow a no-root request to the same NewAPI user/token/device
+	// without changing the canonical root-session fingerprint.
+	TokenID            int    `json:"token_id,omitempty"`
+	InstallationID     string `json:"installation_id,omitempty"`
 	SessionFingerprint string `json:"session_fingerprint,omitempty"`
 	RootSessionVersion int    `json:"root_session_version,omitempty"`
 	RootSessionState   string `json:"root_session_state,omitempty"`
@@ -187,6 +193,8 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		RequestedModel:     info.OriginModelName,
 		UpstreamModel:      info.UpstreamModelName,
 		ChannelID:          info.ChannelId,
+		TokenID:            info.TokenId,
+		InstallationID:     newAPIPolicyInstallationID(c, info),
 		RootSessionVersion: 1,
 	}
 	sessionID := newAPIPolicyStableSessionID(c, info)
@@ -292,6 +300,100 @@ func newAPIPolicyStableSessionID(c *gin.Context, info *relaycommon.RelayInfo) st
 	default:
 		return ""
 	}
+}
+
+// newAPIPolicyInstallationID extracts the device/install identifier from the
+// original Codex request. It is included in signed policy metadata, so
+// Codex2API can use it only as a bounded fallback scope; it never changes the
+// canonical root-session fingerprint. The header is checked first for clients
+// that send it separately, followed by client_metadata and embedded turn
+// metadata used by Responses WS.
+func newAPIPolicyInstallationID(c *gin.Context, info *relaycommon.RelayInfo) string {
+	for _, name := range []string{"X-Codex-Installation-Id", "X-Codex-Installation-ID"} {
+		if c != nil {
+			if value := normalizeNewAPIPolicyInstallationID(c.GetHeader(name)); value != "" {
+				return value
+			}
+		}
+		if info != nil {
+			for header, value := range info.RequestHeaders {
+				if strings.EqualFold(strings.TrimSpace(header), name) {
+					if normalized := normalizeNewAPIPolicyInstallationID(value); normalized != "" {
+						return normalized
+					}
+				}
+			}
+		}
+	}
+	if raw := newAPIPolicyClientMetadata(info); len(raw) > 0 {
+		if value := findNewAPIPolicyInstallationID(raw, 0); value != "" {
+			return value
+		}
+	}
+	if c != nil && c.Request != nil {
+		for _, raw := range c.Request.Header.Values("X-Codex-Turn-Metadata") {
+			if value := findNewAPIPolicyInstallationID([]byte(raw), 0); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+// CodexInstallationIDFromRequest extracts the native device/install marker
+// from an inbound Codex request. It is intentionally a best-effort hint; the
+// NewAPI policy metadata remains the authenticated source when traffic reaches
+// Codex2API.
+func CodexInstallationIDFromRequest(headers http.Header, body []byte) string {
+	for _, name := range []string{"X-Codex-Installation-Id", "X-Codex-Installation-ID"} {
+		if headers != nil {
+			if value := normalizeNewAPIPolicyInstallationID(headers.Get(name)); value != "" {
+				return value
+			}
+		}
+	}
+	if value := findNewAPIPolicyInstallationID(body, 0); value != "" {
+		return value
+	}
+	return ""
+}
+
+func normalizeNewAPIPolicyInstallationID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+		return ""
+	}
+	return value
+}
+
+func findNewAPIPolicyInstallationID(raw []byte, depth int) string {
+	if depth > 3 || len(raw) == 0 || !gjson.ValidBytes(raw) {
+		return ""
+	}
+	result := gjson.ParseBytes(raw)
+	if result.Type == gjson.String {
+		text := strings.TrimSpace(result.String())
+		if text == "" || !gjson.Valid(text) {
+			return ""
+		}
+		return findNewAPIPolicyInstallationID([]byte(text), depth+1)
+	}
+	if !result.IsObject() {
+		return ""
+	}
+	for _, key := range []string{"installation_id", "x-codex-installation-id", "x_codex_installation_id"} {
+		if value := normalizeNewAPIPolicyInstallationID(result.Get(key).String()); value != "" {
+			return value
+		}
+	}
+	for _, key := range []string{"x-codex-turn-metadata", "x_codex_turn_metadata", "client_metadata"} {
+		if nested := result.Get(key); nested.Exists() && !nested.IsArray() {
+			if value := findNewAPIPolicyInstallationID([]byte(nested.Raw), depth+1); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func normalizeNewAPIPolicySessionID(value string) string {

@@ -20,6 +20,11 @@ import (
 )
 
 const (
+	CodexUnlinkedAccountFallbackEnabledOptionKey = "codex_unlinked_account_fallback_enabled"
+	CodexUnlinkedAccountFallbackSecondsOptionKey = "codex_unlinked_account_fallback_seconds"
+	CodexUnlinkedAccountFallbackDefaultSeconds   = 300
+	CodexUnlinkedAccountFallbackMaxSeconds       = 3600
+
 	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v3"
 	codexRootObservationNamespace            = "new-api:codex_root_observation:v1"
 	codexRequestArrivalSequenceNamespace     = "new-api:codex_request_arrival:v1"
@@ -37,10 +42,40 @@ const (
 	codexRecentRootPollInterval          = 200 * time.Millisecond
 	codexTitleRootCandidateTTL           = 5 * time.Second
 	codexRootObservationWindow           = 30 * time.Second
-	codexRootObservationFallbackWindow   = 5 * time.Minute
+	// Keep observations long enough for the maximum operator-configured
+	// fallback window. Individual lookups still enforce their requested age.
+	codexRootObservationFallbackWindow = CodexUnlinkedAccountFallbackMaxSeconds * time.Second
 	codexRootObservationContainerTTL     = codexRootObservationFallbackWindow
 	codexRequestArrivalSequenceTTL       = 10 * time.Minute
 )
+
+// CodexUnlinkedAccountFallbackEnabled reads the persisted NewAPI option. The
+// switch is intentionally opt-in; strict 30-second predecessor matching is
+// unchanged when it is disabled.
+func CodexUnlinkedAccountFallbackEnabled() bool {
+	common.OptionMapRWMutex.RLock()
+	raw, found := common.OptionMap[CodexUnlinkedAccountFallbackEnabledOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	return found && (strings.EqualFold(strings.TrimSpace(raw), "true") || strings.TrimSpace(raw) == "1")
+}
+
+func CodexUnlinkedAccountFallbackSeconds() int {
+	common.OptionMapRWMutex.RLock()
+	raw, found := common.OptionMap[CodexUnlinkedAccountFallbackSecondsOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	seconds, err := strconv.Atoi(strings.TrimSpace(raw))
+	if !found || err != nil || seconds <= 0 {
+		seconds = CodexUnlinkedAccountFallbackDefaultSeconds
+	}
+	if seconds > CodexUnlinkedAccountFallbackMaxSeconds {
+		seconds = CodexUnlinkedAccountFallbackMaxSeconds
+	}
+	return seconds
+}
+
+func CodexUnlinkedAccountFallbackWindow() time.Duration {
+	return time.Duration(CodexUnlinkedAccountFallbackSeconds()) * time.Second
+}
 
 var (
 	ErrCodexPassiveRootAliasConflict     = errors.New("Codex passive root alias conflict")
@@ -64,13 +99,48 @@ type CodexRecentRootChannelCandidate struct {
 }
 
 // CodexRequestArrival is a server-issued ordering ticket for one downstream
-// request. Order is monotonic within one NewAPI user/token scope; ArrivedAt is
-// taken from the same backing store so the 30-second predecessor window is
+// request. Order is monotonic within one platform/user/token/device scope;
+// ArrivedAt is taken from the same backing store so the predecessor window is
 // consistent across instances.
 type CodexRequestArrival struct {
 	Order     int64
 	ArrivedAt time.Time
 	scopeKey  string
+}
+
+// CodexPassiveRootScope is the identity namespace used by the bounded
+// no-parent fallback.  It deliberately contains the same signed NewAPI
+// identity components that Codex2API uses, while leaving the canonical
+// root/session affinity key untouched.
+type CodexPassiveRootScope struct {
+	PlatformID     string
+	UserID         int
+	TokenID        int
+	InstallationID string
+}
+
+func normalizeCodexPassiveRootScope(userID, tokenID int, scopes []CodexPassiveRootScope) CodexPassiveRootScope {
+	scope := CodexPassiveRootScope{UserID: userID, TokenID: tokenID}
+	if len(scopes) > 0 {
+		scope = scopes[0]
+		if scope.UserID <= 0 {
+			scope.UserID = userID
+		}
+		if scope.TokenID <= 0 {
+			scope.TokenID = tokenID
+		}
+	}
+	scope.PlatformID = strings.ToLower(strings.TrimSpace(scope.PlatformID))
+	if scope.PlatformID == "" {
+		scope.PlatformID = strings.ToLower(strings.TrimSpace(common.GetEnvOrDefaultString("CODEX2API_POLICY_PLATFORM_ID", "newapi")))
+	}
+	scope.InstallationID = strings.TrimSpace(scope.InstallationID)
+	return scope
+}
+
+func codexPassiveRootScopeKey(userID, tokenID int, scopes ...CodexPassiveRootScope) string {
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	return codexPassiveRootRedisScopeKeyForScope(scope)
 }
 
 type CodexPassiveRootAlias struct {
@@ -322,8 +392,8 @@ func getCodexTitleRootMemory() *hot.HotCache[string, map[string]int64] {
 	return codexTitleRootMemory
 }
 
-func codexRecentRootChannelScopeKey(userID, tokenID int, uaRoutingOnly bool) string {
-	baseScope := codexPassiveRootRedisScopeKey(userID, tokenID)
+func codexRecentRootChannelScopeKey(userID, tokenID int, uaRoutingOnly bool, scopes ...CodexPassiveRootScope) string {
+	baseScope := codexPassiveRootScopeKey(userID, tokenID, scopes...)
 	if baseScope == "" {
 		return ""
 	}
@@ -366,19 +436,50 @@ func codexTitleRootCandidateRedisKey(scopeKey string) string {
 }
 
 func codexPassiveRootRedisScopeKey(userID, tokenID int) string {
-	if userID <= 0 || tokenID <= 0 {
+	return codexPassiveRootRedisScopeKeyForScope(CodexPassiveRootScope{UserID: userID, TokenID: tokenID})
+}
+
+func codexPassiveRootRedisScopeKeyForScope(scope CodexPassiveRootScope) string {
+	if scope.UserID <= 0 || scope.TokenID <= 0 {
 		return ""
 	}
-	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + strconv.Itoa(tokenID)))
+	platform := strings.ToLower(strings.TrimSpace(scope.PlatformID))
+	if platform == "" {
+		platform = strings.ToLower(strings.TrimSpace(common.GetEnvOrDefaultString("CODEX2API_POLICY_PLATFORM_ID", "newapi")))
+	}
+	canonical := strings.Join([]string{
+		"codex-passive-root-scope-v2",
+		platform,
+		strconv.Itoa(scope.UserID),
+		strconv.Itoa(scope.TokenID),
+		strings.TrimSpace(scope.InstallationID),
+	}, "\x00")
+	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])
 }
 
 func codexPassiveRootAliasCacheKey(userID, tokenID int, systemRootID string) string {
+	return codexPassiveRootAliasCacheKeyForScope(CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, systemRootID)
+}
+
+func codexPassiveRootAliasCacheKeyForScope(scope CodexPassiveRootScope, systemRootID string) string {
 	systemRootID = strings.TrimSpace(systemRootID)
-	if userID <= 0 || tokenID <= 0 || systemRootID == "" {
+	if scope.UserID <= 0 || scope.TokenID <= 0 || systemRootID == "" {
 		return ""
 	}
-	digest := sha256.Sum256([]byte(strconv.Itoa(userID) + "\x00" + strconv.Itoa(tokenID) + "\x00" + systemRootID))
+	platform := strings.ToLower(strings.TrimSpace(scope.PlatformID))
+	if platform == "" {
+		platform = strings.ToLower(strings.TrimSpace(common.GetEnvOrDefaultString("CODEX2API_POLICY_PLATFORM_ID", "newapi")))
+	}
+	canonical := strings.Join([]string{
+		"codex-passive-root-alias-v2",
+		platform,
+		strconv.Itoa(scope.UserID),
+		strconv.Itoa(scope.TokenID),
+		strings.TrimSpace(scope.InstallationID),
+		systemRootID,
+	}, "\x00")
+	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -392,14 +493,14 @@ func codexPassiveRootAliasRedisKey(scopeKey, cacheKey string) string {
 // BeginCodexRequestArrival reserves the request's position before distributor
 // parsing, waiting, or channel selection. The ticket is intentionally separate
 // from ContextKeyRequestStartTime, which measures relay/FRT timing later.
-func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int) (CodexRequestArrival, error) {
+func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int, scopes ...CodexPassiveRootScope) (CodexRequestArrival, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return CodexRequestArrival{}, err
 	}
-	scopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+	scopeKey := codexPassiveRootScopeKey(userID, tokenID, scopes...)
 	if scopeKey == "" {
 		return CodexRequestArrival{}, nil
 	}
@@ -440,9 +541,9 @@ func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int) (CodexRe
 	return CodexRequestArrival{Order: current, ArrivedAt: time.Now().UTC(), scopeKey: scopeKey}, nil
 }
 
-func (arrival CodexRequestArrival) validFor(userID, tokenID int) bool {
+func (arrival CodexRequestArrival) validFor(userID, tokenID int, scopes ...CodexPassiveRootScope) bool {
 	return arrival.Order > 0 && !arrival.ArrivedAt.IsZero() &&
-		arrival.scopeKey != "" && arrival.scopeKey == codexPassiveRootRedisScopeKey(userID, tokenID)
+		arrival.scopeKey != "" && arrival.scopeKey == codexPassiveRootScopeKey(userID, tokenID, scopes...)
 }
 
 func codexRootObservationMember(arrival CodexRequestArrival, rootID, bindingFingerprint string) string {
@@ -481,12 +582,12 @@ func parseCodexRootObservationMember(member string) (CodexRequestArrival, string
 // reserved at HTTP arrival. Provisional and successful publication of the same
 // request therefore update the same event, while a later request on the same
 // root gets a distinct order and cannot overwrite its predecessor.
-func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, binding CodexRootChannelBinding, arrival CodexRequestArrival) error {
+func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, binding CodexRootChannelBinding, arrival CodexRequestArrival, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
 	bindingFingerprint := CodexRootChannelBindingFingerprint(binding)
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly, scopes...)
 	member := codexRootObservationMember(arrival, rootID, bindingFingerprint)
-	if scopeKey == "" || member == "" || !arrival.validFor(userID, tokenID) {
+	if scopeKey == "" || member == "" || !arrival.validFor(userID, tokenID, scopes...) {
 		return ErrCodexRecentRootBindingUnavailable
 	}
 	currentBinding, found, err := LoadCodexRootChannelBindingForRoutingSide(userID, rootID, binding.UARoutingOnly)
@@ -550,8 +651,8 @@ func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, bindin
 // predecessor on one routing side, provided it arrived no more than 30 seconds
 // before cutoff. Events at or after cutoff are invisible even if they publish
 // while this request is waiting.
-func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival) (CodexRecentRootChannelCandidate, bool, error) {
-	return LoadLatestCodexRootChannelObservationBeforeWithin(ctx, userID, tokenID, uaRoutingOnly, cutoff, codexRootObservationWindow)
+func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival, scopes ...CodexPassiveRootScope) (CodexRecentRootChannelCandidate, bool, error) {
+	return LoadLatestCodexRootChannelObservationBeforeWithin(ctx, userID, tokenID, uaRoutingOnly, cutoff, codexRootObservationWindow, scopes...)
 }
 
 // LoadLatestCodexRootChannelObservationBeforeWithin is the bounded fallback
@@ -560,7 +661,7 @@ func LoadLatestCodexRootChannelObservationBefore(ctx context.Context, userID, to
 // arrival ticket; a later request can never be used to infer this request's
 // parent. Callers should keep the window finite and treat the result as a
 // lower-confidence alias.
-func LoadLatestCodexRootChannelObservationBeforeWithin(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival, observationWindow time.Duration) (CodexRecentRootChannelCandidate, bool, error) {
+func LoadLatestCodexRootChannelObservationBeforeWithin(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, cutoff CodexRequestArrival, observationWindow time.Duration, scopes ...CodexPassiveRootScope) (CodexRecentRootChannelCandidate, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -570,10 +671,10 @@ func LoadLatestCodexRootChannelObservationBeforeWithin(ctx context.Context, user
 	if observationWindow <= 0 {
 		observationWindow = codexRootObservationWindow
 	}
-	if !cutoff.validFor(userID, tokenID) {
+	if !cutoff.validFor(userID, tokenID, scopes...) {
 		return CodexRecentRootChannelCandidate{}, false, ErrCodexRecentRootBindingUnavailable
 	}
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scopes...)
 	if scopeKey == "" {
 		return CodexRecentRootChannelCandidate{}, false, nil
 	}
@@ -644,21 +745,21 @@ func LoadLatestCodexRootChannelObservationBeforeWithin(ctx context.Context, user
 	}, true, nil
 }
 
-func StoreRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
+func StoreRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
-	if codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly) == "" ||
+	if codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly, scopes...) == "" ||
 		codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding)) == "" {
 		return nil
 	}
 	if err := StoreCodexRootChannelBinding(userID, rootID, binding); err != nil {
 		return err
 	}
-	return StoreRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding)
+	return StoreRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, scopes...)
 }
 
-func StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
+func StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
-	if codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly) == "" ||
+	if codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly, scopes...) == "" ||
 		codexRecentRootCandidateMember(rootID, CodexRootChannelBindingFingerprint(binding)) == "" {
 		return nil
 	}
@@ -669,32 +770,32 @@ func StoreProvisionalRecentCodexRootChannelBinding(userID, tokenID int, rootID s
 	if !selectedWon {
 		return ErrCodexRootChannelBindingConflict
 	}
-	return StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, winner)
+	return StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, winner, scopes...)
 }
 
 // StoreRecentCodexRootChannelCandidate records an already-persisted successful
 // root binding as a short-lived passive-route candidate.
-func StoreRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
-	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexRecentRootChannelCandidateTTL, true)
+func StoreRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
+	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexRecentRootChannelCandidateTTL, true, scopes...)
 }
 
 // StoreProvisionalRecentCodexRootChannelCandidate records an already-claimed
 // in-flight root binding and only extends an existing candidate expiry.
-func StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
-	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexProvisionalRootCandidateTTL, false)
+func StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
+	return storeValidatedRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, codexProvisionalRootCandidateTTL, false, scopes...)
 }
 
 // StoreProvisionalCodexTitleRootChannelCandidate marks one already-published
 // recent root as eligible for a title request arriving in the next few seconds.
-func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding) error {
+func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
 	fingerprint := CodexRootChannelBindingFingerprint(binding)
 	member := codexRecentRootCandidateMember(rootID, fingerprint)
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly, scopes...)
 	if scopeKey == "" || member == "" {
 		return nil
 	}
-	candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, binding.UARoutingOnly)
+	candidates, err := LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, binding.UARoutingOnly, scopes...)
 	if err != nil {
 		return err
 	}
@@ -723,7 +824,7 @@ func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID 
 		storeCodexCandidateMemory(getCodexTitleRootMemory(), scopeKey, member, expiresAt, codexTitleRootCandidateTTL)
 		codexRecentRootMemoryMu.Unlock()
 	}
-	notifyCodexTitleRootChannelUpdate(codexPassiveRootRedisScopeKey(userID, tokenID))
+	notifyCodexTitleRootChannelUpdate(codexPassiveRootScopeKey(userID, tokenID, scopes...))
 	return nil
 }
 
@@ -744,11 +845,11 @@ func storeCodexCandidateMemory(cache *hot.HotCache[string, map[string]int64], sc
 	cache.SetWithTTL(scopeKey, updated, ttl)
 }
 
-func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, activeTTL time.Duration, replaceExpiry bool) error {
+func storeValidatedRecentCodexRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, activeTTL time.Duration, replaceExpiry bool, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
 	bindingFingerprint := CodexRootChannelBindingFingerprint(binding)
 	candidateMember := codexRecentRootCandidateMember(rootID, bindingFingerprint)
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, binding.UARoutingOnly, scopes...)
 	if scopeKey == "" || candidateMember == "" || activeTTL <= 0 {
 		return nil
 	}
@@ -848,14 +949,14 @@ func storeCodexRecentRootCandidateMemory(scopeKey, candidateMember string, expir
 	cache.SetWithTTL(scopeKey, current, codexRecentRootChannelContainerTTL)
 }
 
-func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID int, uaRoutingOnly bool) ([]CodexRecentRootChannelCandidate, error) {
+func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, scopes ...CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scopes...)
 	if scopeKey == "" {
 		return nil, nil
 	}
@@ -958,7 +1059,7 @@ func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID i
 // LoadCodexTitleRootChannelCandidates returns only roots present in both the
 // normal recent-candidate set and the five-second title marker, across both
 // routing sides.
-func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID int) ([]CodexRecentRootChannelCandidate, error) {
+func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID int, scopes ...CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -967,11 +1068,11 @@ func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID in
 	}
 	result := make([]CodexRecentRootChannelCandidate, 0, 2)
 	for _, uaRoutingOnly := range []bool{false, true} {
-		recent, err := LoadRecentCodexRootChannelCandidates(ctx, userID, tokenID, uaRoutingOnly)
+		recent, err := LoadRecentCodexRootChannelCandidates(ctx, userID, tokenID, uaRoutingOnly, scopes...)
 		if err != nil {
 			return nil, err
 		}
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scopes...)
 		fresh, err := loadCodexCandidateTimes(ctx, scopeKey, codexTitleRootCandidateRedisKey(scopeKey), getCodexTitleRootMemory(), time.Now().UTC())
 		if err != nil {
 			return nil, err
@@ -1196,7 +1297,7 @@ func WaitForCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int
 	if maxWait <= 0 {
 		return nil
 	}
-	scopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+	scopeKey := codexPassiveRootScopeKey(userID, tokenID)
 	if scopeKey == "" {
 		return nil
 	}
@@ -1247,14 +1348,15 @@ func notifyCodexTitleRootChannelUpdate(scopeKey string) {
 // ClaimCodexTitleRootAlias atomically binds an unlinked title session only
 // when the fresh-title/recent-candidate intersection contains exactly the
 // requested root across both routing sides.
-func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias) error {
+func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, titleRootID)
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, titleRootID)
 	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
 	if cacheKey == "" || !validAlias {
 		return ErrCodexPassiveRootAliasInvalid
@@ -1283,9 +1385,9 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 		}
 		claimContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
-		baseScope := codexPassiveRootRedisScopeKey(userID, tokenID)
-		normalScope := codexRecentRootChannelScopeKey(userID, tokenID, false)
-		uaScope := codexRecentRootChannelScopeKey(userID, tokenID, true)
+		baseScope := codexPassiveRootScopeKey(userID, tokenID, scope)
+		normalScope := codexRecentRootChannelScopeKey(userID, tokenID, false, scope)
+		uaScope := codexRecentRootChannelScopeKey(userID, tokenID, true, scope)
 		stored, err := claimCodexTitleRootAliasScript.Run(claimContext, common.RDB, []string{
 			codexPassiveRootAliasRedisKey(baseScope, cacheKey),
 			codexTitleRootCandidateRedisKey(normalScope), codexTitleRootCandidateRedisKey(uaScope),
@@ -1319,7 +1421,7 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 	activeMember := ""
 	activeCount := 0
 	for _, side := range []bool{false, true} {
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, side)
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, side, scope)
 		fresh, freshFound, freshErr := getCodexTitleRootMemory().Get(scopeKey)
 		if freshErr != nil {
 			return freshErr
@@ -1350,19 +1452,20 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 
 // ClaimCodexPassiveRootAlias preserves the legacy single-candidate claim used
 // by callers that do not carry an arrival-event proof.
-func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias) error {
+func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, systemRootID)
 	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
 	if cacheKey == "" || !validAlias {
 		return ErrCodexPassiveRootAliasInvalid
 	}
-	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID)
+	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID, scope)
 	if err != nil {
 		return err
 	}
@@ -1402,8 +1505,8 @@ func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, system
 		}
 		ctx, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
-		redisScopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly, scope)
+		redisScopeKey := codexPassiveRootScopeKey(userID, tokenID, scope)
 		stored, err := claimCodexPassiveRootAliasScript.Run(ctx, common.RDB,
 			[]string{codexPassiveRootAliasRedisKey(redisScopeKey, cacheKey), codexRecentRootChannelRedisKey(scopeKey)},
 			string(payload), candidateMember, int64(codexPassiveRootAliasProvisionalTTL/time.Second)).Int()
@@ -1432,7 +1535,7 @@ func ClaimCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, system
 		return nil
 	}
 	if !found {
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly, scope)
 		candidateTimes, candidatesFound, candidateErr := getCodexRecentRootMemory().Get(scopeKey)
 		if candidateErr != nil {
 			return candidateErr
@@ -1470,6 +1573,7 @@ func ClaimCodexObservedPassiveRootAlias(
 	alias CodexPassiveRootAlias,
 	candidate CodexRecentRootChannelCandidate,
 	cutoff CodexRequestArrival,
+	scopes ...CodexPassiveRootScope,
 ) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1477,21 +1581,22 @@ func ClaimCodexObservedPassiveRootAlias(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, systemRootID)
 	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
 	observationWindow := candidate.ObservationWindow
 	if observationWindow <= 0 {
 		observationWindow = codexRootObservationWindow
 	}
 	eventArrival, eventRootID, eventFingerprint, validEvent := parseCodexRootObservationMember(candidate.ObservationID)
-	if cacheKey == "" || !validAlias || !cutoff.validFor(userID, tokenID) || !validEvent ||
+	if cacheKey == "" || !validAlias || !cutoff.validFor(userID, tokenID, scope) || !validEvent ||
 		eventRootID != alias.RootID || eventFingerprint != alias.BindingFingerprint ||
 		eventArrival.Order != candidate.ArrivalOrder || !eventArrival.ArrivedAt.Equal(candidate.ArrivedAt) ||
 		eventArrival.Order >= cutoff.Order || eventArrival.ArrivedAt.After(cutoff.ArrivedAt) ||
 		eventArrival.ArrivedAt.Before(cutoff.ArrivedAt.Add(-observationWindow)) {
 		return ErrCodexPassiveRootAliasInvalid
 	}
-	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID)
+	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID, scope)
 	if err != nil {
 		return err
 	}
@@ -1526,8 +1631,8 @@ func ClaimCodexObservedPassiveRootAlias(
 		}
 		claimContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
-		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
-		redisScopeKey := codexPassiveRootRedisScopeKey(userID, tokenID)
+		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly, scope)
+		redisScopeKey := codexPassiveRootScopeKey(userID, tokenID, scope)
 		stored, claimErr := claimCodexObservedPassiveRootAliasScript.Run(claimContext, common.RDB,
 			[]string{codexPassiveRootAliasRedisKey(redisScopeKey, cacheKey), codexRootObservationRedisKey(scopeKey)},
 			string(payload), candidate.ObservationID, int64(codexPassiveRootAliasProvisionalTTL/time.Second), cutoff.Order,
@@ -1556,7 +1661,7 @@ func ClaimCodexObservedPassiveRootAlias(
 		}
 		return nil
 	}
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, alias.UARoutingOnly, scope)
 	events, eventsFound, eventsErr := getCodexRootObservationMemory().Get(scopeKey)
 	if eventsErr != nil {
 		return eventsErr
@@ -1591,19 +1696,20 @@ func ClaimCodexObservedPassiveRootAlias(
 // PromoteCodexPassiveRootAlias makes a successfully dispatched passive route
 // durable together with its exact root channel binding. Failed passive calls
 // retain only the short provisional alias and cannot poison retries for 24h.
-func PromoteCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias) error {
+func PromoteCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, systemRootID)
 	alias, validAlias := normalizeCodexPassiveRootAlias(alias)
 	if cacheKey == "" || !validAlias {
 		return ErrCodexPassiveRootAliasInvalid
 	}
-	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID)
+	currentAlias, aliasFound, err := LoadCodexPassiveRootAlias(ctx, userID, tokenID, systemRootID, scope)
 	if err != nil {
 		return err
 	}
@@ -1631,7 +1737,7 @@ func PromoteCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, syst
 		ctx, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
 		promoted, err := promoteCodexPassiveRootAliasScript.Run(ctx, common.RDB,
-			[]string{codexPassiveRootAliasRedisKey(codexPassiveRootRedisScopeKey(userID, tokenID), cacheKey)},
+			[]string{codexPassiveRootAliasRedisKey(codexPassiveRootScopeKey(userID, tokenID, scope), cacheKey)},
 			string(payload), int64(codexPassiveRootAliasTTL/time.Second)).Int()
 		if err != nil {
 			return err
@@ -1658,21 +1764,22 @@ func PromoteCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, syst
 	return nil
 }
 
-func LoadCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string) (CodexPassiveRootAlias, bool, error) {
+func LoadCodexPassiveRootAlias(ctx context.Context, userID, tokenID int, systemRootID string, scopes ...CodexPassiveRootScope) (CodexPassiveRootAlias, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return CodexPassiveRootAlias{}, false, err
 	}
-	cacheKey := codexPassiveRootAliasCacheKey(userID, tokenID, systemRootID)
+	scope := normalizeCodexPassiveRootScope(userID, tokenID, scopes)
+	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, systemRootID)
 	if cacheKey == "" {
 		return CodexPassiveRootAlias{}, false, nil
 	}
 	if common.RedisEnabled && common.RDB != nil {
 		ctx, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
-		payload, err := common.RDB.Get(ctx, codexPassiveRootAliasRedisKey(codexPassiveRootRedisScopeKey(userID, tokenID), cacheKey)).Bytes()
+		payload, err := common.RDB.Get(ctx, codexPassiveRootAliasRedisKey(codexPassiveRootScopeKey(userID, tokenID, scope), cacheKey)).Bytes()
 		if errors.Is(err, redis.Nil) {
 			return CodexPassiveRootAlias{}, false, nil
 		}

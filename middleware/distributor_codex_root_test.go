@@ -581,6 +581,22 @@ func TestUnlinkedCodexSystemRequiresPredecessorWithinThirtySeconds(t *testing.T)
 }
 
 func TestUnlinkedCodexSystemExtendedPredecessorIsTemporary(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousFallbackEnabled, hadFallbackEnabled := common.OptionMap[service.CodexUnlinkedAccountFallbackEnabledOptionKey]
+	common.OptionMap[service.CodexUnlinkedAccountFallbackEnabledOptionKey] = "true"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		if hadFallbackEnabled {
+			common.OptionMap[service.CodexUnlinkedAccountFallbackEnabledOptionKey] = previousFallbackEnabled
+		} else {
+			delete(common.OptionMap, service.CodexUnlinkedAccountFallbackEnabledOptionKey)
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const (
 		userID       = 186

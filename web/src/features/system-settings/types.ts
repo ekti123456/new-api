@@ -341,6 +341,8 @@ export type OperationsSettings = {
   DefaultCollapseSidebar: boolean
   DemoSiteEnabled: boolean
   SelfUseModeEnabled: boolean
+  codex_unlinked_account_fallback_enabled: boolean
+  codex_unlinked_account_fallback_seconds: number
   QuotaRemindThreshold: string
   EmailProvider: 'smtp' | 'zeabur'
   SMTPServer: string
