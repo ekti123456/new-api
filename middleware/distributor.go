@@ -333,10 +333,10 @@ func Distribute() func(c *gin.Context) {
 			// succeeded, so a conflicting Turn/Thread loser cannot poison the
 			// 30-second summary/system bridge.
 			if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
-				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "candidate_publish", turnClaim, threadClaim)
-				logCodexPassiveRouteFailure(c, "candidate_publish", modelRequest.Model, rootSession, candidateErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
+				common.SysError(fmt.Sprintf("Codex root history publication failed; continuing bound route: user=%d token=%d model=%s request_id=%s reason=%s",
+					common.GetContextKeyInt(c, constant.ContextKeyUserId),
+					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
 			}
 			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
 				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "claim", turnClaim, threadClaim)

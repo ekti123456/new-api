@@ -45,8 +45,8 @@ const (
 	// Keep observations long enough for the maximum operator-configured
 	// fallback window. Individual lookups still enforce their requested age.
 	codexRootObservationFallbackWindow = CodexUnlinkedAccountFallbackMaxSeconds * time.Second
-	codexRootObservationContainerTTL     = codexRootObservationFallbackWindow
-	codexRequestArrivalSequenceTTL       = 10 * time.Minute
+	codexRootObservationContainerTTL   = codexRootObservationFallbackWindow
+	codexRequestArrivalSequenceTTL     = codexRootObservationContainerTTL + 10*time.Minute
 )
 
 // CodexUnlinkedAccountFallbackEnabled reads the persisted NewAPI option. The
@@ -184,8 +184,13 @@ var (
 )
 
 var beginCodexRequestArrivalScript = redis.NewScript(`
-local order = redis.call('INCR', KEYS[1])
-redis.call('PEXPIRE', KEYS[1], ARGV[1])
+local order = tonumber(redis.call('GET', KEYS[1]) or '0')
+for index = 2, #KEYS do
+  local latest = redis.call('ZREVRANGE', KEYS[index], 0, 0, 'WITHSCORES')
+  if #latest == 2 then order = math.max(order, tonumber(latest[2])) end
+end
+order = order + 1
+redis.call('SET', KEYS[1], order, 'PX', ARGV[1])
 local redis_time = redis.call('TIME')
 local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
 return { order, now_ms }
@@ -194,12 +199,8 @@ return { order, now_ms }
 var storeCodexRootObservationScript = redis.NewScript(`
 local existing = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[2], ARGV[2])
 for _, member in ipairs(existing) do
-  if member == ARGV[1] then
-    redis.call('EXPIRE', KEYS[1], ARGV[4])
-    return 1
-  end
+  if member ~= ARGV[1] then return -1 end
 end
-if #existing > 0 then return -1 end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 local count = redis.call('ZCARD', KEYS[1])
 local max_observations = tonumber(ARGV[3])
@@ -207,6 +208,9 @@ if count > max_observations then
   redis.call('ZREMRANGEBYRANK', KEYS[1], 0, count - max_observations - 1)
 end
 redis.call('EXPIRE', KEYS[1], ARGV[4])
+local sequence = tonumber(redis.call('GET', KEYS[2]) or '0')
+if sequence < tonumber(ARGV[2]) then redis.call('SET', KEYS[2], ARGV[2]) end
+redis.call('PEXPIRE', KEYS[2], ARGV[5])
 return 1
 `)
 
@@ -508,7 +512,11 @@ func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int, scopes .
 		arrivalContext, cancel := context.WithTimeout(ctx, codexPassiveRootRedisTimeout)
 		defer cancel()
 		raw, err := beginCodexRequestArrivalScript.Run(arrivalContext, common.RDB,
-			[]string{codexRequestArrivalSequenceRedisKey(scopeKey)},
+			[]string{
+				codexRequestArrivalSequenceRedisKey(scopeKey),
+				codexRootObservationRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, false, scopes...)),
+				codexRootObservationRedisKey(codexRecentRootChannelScopeKey(userID, tokenID, true, scopes...)),
+			},
 			int64(codexRequestArrivalSequenceTTL/time.Millisecond)).Result()
 		if err != nil {
 			return CodexRequestArrival{}, err
@@ -535,6 +543,17 @@ func BeginCodexRequestArrival(ctx context.Context, userID, tokenID int, scopes .
 	}
 	if !found || current < 0 {
 		current = 0
+	}
+	for _, uaRoutingOnly := range []bool{false, true} {
+		observations, _, observationErr := getCodexRootObservationMemory().Get(codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scopes...))
+		if observationErr != nil {
+			return CodexRequestArrival{}, observationErr
+		}
+		for _, order := range observations {
+			if order > current {
+				current = order
+			}
+		}
 	}
 	current++
 	sequenceCache.SetWithTTL(scopeKey, current, codexRequestArrivalSequenceTTL)
@@ -602,8 +621,9 @@ func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, bindin
 		storeContext, cancel := context.WithTimeout(context.Background(), codexPassiveRootRedisTimeout)
 		defer cancel()
 		stored, err := storeCodexRootObservationScript.Run(storeContext, common.RDB,
-			[]string{codexRootObservationRedisKey(scopeKey)}, member, arrival.Order,
-			codexRecentRootChannelCandidateLimit, int64(codexRootObservationContainerTTL/time.Second)).Int()
+			[]string{codexRootObservationRedisKey(scopeKey), codexRequestArrivalSequenceRedisKey(arrival.scopeKey)}, member, arrival.Order,
+			codexRecentRootChannelCandidateLimit, int64(codexRootObservationContainerTTL/time.Second),
+			int64(codexRequestArrivalSequenceTTL/time.Millisecond)).Int()
 		if err != nil {
 			return err
 		}
@@ -641,6 +661,16 @@ func StoreCodexRootChannelObservation(userID, tokenID int, rootID string, bindin
 			delete(updated, oldestEvent)
 		}
 		cache.SetWithTTL(scopeKey, updated, codexRootObservationContainerTTL)
+		sequenceCache := getCodexRequestArrivalMemory()
+		sequence, _, sequenceErr := sequenceCache.Get(arrival.scopeKey)
+		if sequenceErr != nil {
+			codexRecentRootMemoryMu.Unlock()
+			return sequenceErr
+		}
+		if sequence < arrival.Order {
+			sequence = arrival.Order
+		}
+		sequenceCache.SetWithTTL(arrival.scopeKey, sequence, codexRequestArrivalSequenceTTL)
 		codexRecentRootMemoryMu.Unlock()
 	}
 	notifyCodexRecentRootChannelUpdate(scopeKey)
