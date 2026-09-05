@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -15,13 +16,16 @@ func TestGetPerfMetricErrorsReturnsPagedFinalFailures(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.PerfMetricError{}))
 	require.NoError(t, db.Create(&model.PerfMetricError{
-		CreatedAt: 100, UserId: 7, Username: "alice", ModelName: "gpt-a", Group: "pro",
+		CreatedAt: time.Now().Add(-47 * time.Hour).Unix(), UserId: 7, Username: "alice", ModelName: "gpt-a", Group: "pro",
 		StatusCode: 503, ErrorType: "upstream", ErrorCode: "no_channel", ErrorReason: "no available channel",
+	}).Error)
+	require.NoError(t, db.Create(&model.PerfMetricError{
+		CreatedAt: time.Now().Add(-49 * time.Hour).Unix(), ModelName: "gpt-a", ErrorReason: "expired",
 	}).Error)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/data/performance-errors?model_name=gpt-a&p=1&page_size=10", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/data/performance-errors?model_name=gpt-a&p=1&page_size=10&start_timestamp=1", nil)
 	GetPerfMetricErrors(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)

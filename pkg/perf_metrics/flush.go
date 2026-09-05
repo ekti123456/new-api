@@ -83,9 +83,6 @@ func cleanupExpiredMetrics(retentionDays int) {
 	if err := model.DeletePerfMetricsBefore(cutoff); err != nil {
 		common.SysError("failed to cleanup expired perf metrics: " + err.Error())
 	}
-	if err := model.DeletePerfMetricErrorsBefore(cutoff); err != nil {
-		common.SysError("failed to cleanup expired performance errors: " + err.Error())
-	}
 }
 
 func redisCounters(values map[string]string) counters {

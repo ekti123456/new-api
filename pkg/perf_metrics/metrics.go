@@ -22,6 +22,7 @@ const seriesSchema = "dbcd0a3c01b55203"
 
 func Init() {
 	go flushLoop()
+	go cleanupPerfMetricErrorsLoop()
 }
 
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, user *UserMetricIdentity) {

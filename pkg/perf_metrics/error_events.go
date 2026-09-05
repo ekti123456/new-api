@@ -15,6 +15,15 @@ import (
 
 const maxPerfMetricErrorReasonBytes = 8192
 
+func cleanupPerfMetricErrorsLoop() {
+	for {
+		if err := model.DeleteExpiredPerfMetricErrors(time.Now()); err != nil {
+			common.SysError("failed to cleanup expired performance errors: " + err.Error())
+		}
+		time.Sleep(5 * time.Minute)
+	}
+}
+
 func truncatePerfMetricErrorText(value string) string {
 	value = strings.Map(func(r rune) rune {
 		if r == '\r' || r == '\n' || r == 0 {

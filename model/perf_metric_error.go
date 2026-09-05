@@ -2,6 +2,8 @@ package model
 
 import "time"
 
+const perfMetricErrorRetention = 48 * time.Hour
+
 // PerfMetricError stores one final failed relay request for the administrator
 // performance dashboard. It is deliberately separate from the user-facing log
 // table because error logs can be disabled while performance metrics remain
@@ -64,7 +66,8 @@ func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, erro
 		startIndex = 0
 	}
 
-	tx := DB.Model(&PerfMetricError{})
+	tx := DB.Model(&PerfMetricError{}).
+		Where("created_at >= ?", time.Now().Add(-perfMetricErrorRetention).Unix())
 	if query.ModelName != "" {
 		tx = tx.Where("model_name = ?", query.ModelName)
 	}
@@ -119,9 +122,25 @@ func CreatePerfMetricError(item *PerfMetricError) error {
 	return DB.Create(item).Error
 }
 
-func DeletePerfMetricErrorsBefore(cutoffTs int64) error {
+func DeleteExpiredPerfMetricErrors(now time.Time) error {
+	cutoffTs := now.Add(-perfMetricErrorRetention).Unix()
 	if cutoffTs <= 0 {
 		return nil
 	}
-	return DB.Where("created_at < ?", cutoffTs).Delete(&PerfMetricError{}).Error
+	for {
+		var expiredIDs []int64
+		if err := DB.Model(&PerfMetricError{}).
+			Where("created_at < ?", cutoffTs).
+			Order("created_at ASC, id ASC").Limit(500).
+			Pluck("id", &expiredIDs).Error; err != nil {
+			return err
+		}
+		if len(expiredIDs) == 0 {
+			return nil
+		}
+		if err := DB.Where("id IN ? AND created_at < ?", expiredIDs, cutoffTs).
+			Delete(&PerfMetricError{}).Error; err != nil {
+			return err
+		}
+	}
 }
