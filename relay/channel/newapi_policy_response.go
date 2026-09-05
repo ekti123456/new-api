@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/hmac"
 	"encoding/hex"
@@ -167,24 +168,30 @@ func (b *newAPIPolicyStreamBody) processLine(line []byte) {
 }
 
 func processNewAPIPolicyResponse(c *gin.Context, resp *http.Response) bool {
-	if resp == nil || resp.Request == nil {
+	if resp == nil {
 		return false
 	}
-	requestContext, ok := resp.Request.Context().Value(newAPIPolicyRequestContextKey{}).(newAPIPolicyRequestContext)
-	if !ok {
-		return false
+	var requestContext newAPIPolicyRequestContext
+	if resp.Request != nil {
+		requestContext, _ = resp.Request.Context().Value(newAPIPolicyRequestContextKey{}).(newAPIPolicyRequestContext)
 	}
 	processed := processNewAPIPolicyResponseWithContext(c, resp, requestContext)
-	if !processed && resp.Body != nil && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		resp.Body = &newAPIPolicyStreamBody{
-			ReadCloser: resp.Body, c: c, resp: resp, requestContext: requestContext,
-			seen: make(map[string]struct{}),
+	if resp.Body != nil && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		resp.Body = &codexDispatchStreamBody{ReadCloser: resp.Body, reader: bufio.NewReaderSize(resp.Body, 4096), request: requestContext}
+		resp.ContentLength = -1
+		resp.Header.Del("Content-Length")
+		if !processed && requestContext.Secret != "" {
+			resp.Body = &newAPIPolicyStreamBody{ReadCloser: resp.Body, c: c, resp: resp, requestContext: requestContext, seen: make(map[string]struct{})}
 		}
 	}
 	return processed
 }
 
 func processNewAPIPolicyResponseWithContext(c *gin.Context, resp *http.Response, requestContext newAPIPolicyRequestContext) bool {
+	processCodexDispatchHeader(resp, requestContext)
+	if requestContext.Secret == "" || requestContext.RequestID == "" {
+		return false
+	}
 	if resp == nil || !strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Codex2API-Policy-Violation")), "true") {
 		return false
 	}

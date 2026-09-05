@@ -192,6 +192,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		common.ClearCodexDispatchDiagnostic(c)
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
@@ -229,6 +230,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			if diagnostic, ok := common.GetCodexDispatchDiagnostic(c, relayInfo.ChannelId, http.StatusServiceUnavailable); ok && diagnostic.Stream {
+				perfmetrics.RecordRelayError(c, relayInfo, types.NewErrorWithStatusCode(errors.New("Request temporarily unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable))
+			}
 			relayInfo.LastError = nil
 			return
 		}
@@ -336,6 +340,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
+		return false
+	}
+	if diagnostic, ok := common.GetCodexDispatchDiagnostic(c, c.GetInt("channel_id"), openaiErr.StatusCode); ok && (diagnostic.Retry == "stop" || diagnostic.Retry == "backoff_same_route" || diagnostic.Stream) {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
@@ -528,6 +535,7 @@ func RelayTask(c *gin.Context) {
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		common.ClearCodexDispatchDiagnostic(c)
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {

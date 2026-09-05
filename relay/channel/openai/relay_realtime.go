@@ -115,6 +115,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					close(targetClosed)
 					return
 				}
+				message = channel.SanitizeCodexDispatchWebSocketMessage(c, message)
 				policyResult := channel.ProcessNewAPIPolicyWebSocketMessage(c, message)
 				info.SetFirstResponseTime()
 				realtimeEvent := &dto.RealtimeEvent{}

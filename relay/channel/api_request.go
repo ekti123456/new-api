@@ -446,6 +446,11 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		if verifiedPolicyDecision && policyResponse != nil {
 			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseStatusCode, policyResponse.StatusCode, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
+		if policyResponse != nil {
+			if _, verified := common2.GetCodexDispatchDiagnostic(c, requestContext.ChannelID, policyResponse.StatusCode); verified {
+				return nil, types.NewErrorWithStatusCode(errors.New("Request temporarily unavailable"), types.ErrorCodeBadResponseStatusCode, policyResponse.StatusCode)
+			}
+		}
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
 	// send request body

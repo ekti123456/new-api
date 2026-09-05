@@ -61,6 +61,12 @@ func RecordRelayError(c *gin.Context, info *relaycommon.RelayInfo, err *types.Ne
 		StatusCode:  err.StatusCode,
 		ErrorReason: truncatePerfMetricErrorText(err.MaskSensitiveErrorWithStatusCode()),
 	}
+	if diagnostic, ok := common.GetCodexDispatchDiagnostic(c, info.ChannelId, err.StatusCode); ok {
+		if payload, marshalErr := common.Marshal(diagnostic); marshalErr == nil {
+			item.ErrorCode = "codex_dispatch_" + diagnostic.Reason
+			item.ErrorReason = truncatePerfMetricErrorText(string(payload))
+		}
+	}
 	if item.Group == "" {
 		item.Group = info.TokenGroup
 	}
