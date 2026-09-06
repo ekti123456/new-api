@@ -208,6 +208,10 @@ Backend: `InjectTieredBillingInfo()` adds `billing_mode`, `expr_b64` (base64 exp
 
 Frontend: Detects `billing_mode === "tiered_expr"`, decodes `expr_b64`, parses tiers via shared `parseTiersFromExpr()`, and renders pricing breakdown.
 
+日志详情仅显示 `matched_tier` 对应的实际计费档位，不显示未命中的档位；无法唯一确定档位时显示状态未知，不猜测兜底价格。此过滤仅改变日志展示，不修改计费表达式或模型广场的规则展示。
+
+请求条件乘数在表达式执行过程中同步记录条件判断结果，结算通过 `request_rule_matches` 写入日志 `other`。每项包含规则表达式 `expression` 及布尔值 `matched`，不保存请求正文、请求头值，也不在展示时重算条件。新日志显示「已命中 / 未命中」；历史日志或结算失败而无记录时显示「未记录命中状态」，不能根据模型名称、最终倍率或当前时间推断历史命中。追踪不改变表达式的数值、短路行为和计费结果。
+
 ---
 
 ## Key Design Decisions

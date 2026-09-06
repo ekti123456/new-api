@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Type definitions for usage logs
  */
+import type { RequestRuleMatch } from '@/features/pricing/lib/billing-rule-match'
+
 import type { UsageLog } from './data/schema'
 
 // ============================================================================
@@ -197,6 +199,7 @@ export interface LogOtherData {
   billing_mode?: string
   expr_b64?: string
   matched_tier?: string
+  request_rule_matches?: RequestRuleMatch[]
   reasoning_effort?: string
   image?: boolean
   image_ratio?: number

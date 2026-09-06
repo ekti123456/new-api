@@ -33,8 +33,14 @@ type TokenParams struct {
 // during Expr execution. This replaces the old Breakdown mechanism —
 // the Expr itself is the single source of truth for billing logic.
 type TraceResult struct {
-	MatchedTier string  `json:"matched_tier"`
-	Cost        float64 `json:"cost"`
+	MatchedTier        string             `json:"matched_tier"`
+	Cost               float64            `json:"cost"`
+	RequestRuleMatches []RequestRuleMatch `json:"request_rule_matches,omitempty"`
+}
+
+type RequestRuleMatch struct {
+	Expression string `json:"expression"`
+	Matched    bool   `json:"matched"`
 }
 
 // BillingSnapshot captures billing state at pre-consume time. Expression and
@@ -59,10 +65,11 @@ type BillingSnapshot struct {
 
 // TieredResult holds everything needed after running tiered settlement.
 type TieredResult struct {
-	ActualQuotaBeforeGroup float64 `json:"actual_quota_before_group"`
-	ActualQuotaAfterGroup  int     `json:"actual_quota_after_group"`
-	MatchedTier            string  `json:"matched_tier"`
-	CrossedTier            bool    `json:"crossed_tier"`
+	ActualQuotaBeforeGroup float64            `json:"actual_quota_before_group"`
+	ActualQuotaAfterGroup  int                `json:"actual_quota_after_group"`
+	MatchedTier            string             `json:"matched_tier"`
+	CrossedTier            bool               `json:"crossed_tier"`
+	RequestRuleMatches     []RequestRuleMatch `json:"request_rule_matches,omitempty"`
 	// Clamp records an int32 saturation event during quota conversion so the
 	// caller can surface it on the consume log for admin auditing. Nil when no
 	// clamping occurred. Not serialized: the marker is attached separately via

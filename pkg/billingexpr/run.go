@@ -69,6 +69,13 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 			trace.Cost = value
 			return value
 		},
+		requestRuleTraceFunction: func(expression string, matched bool) bool {
+			trace.RequestRuleMatches = append(trace.RequestRuleMatches, RequestRuleMatch{
+				Expression: expression,
+				Matched:    matched,
+			})
+			return matched
+		},
 		"header": func(key string) string {
 			return headers[strings.ToLower(strings.TrimSpace(key))]
 		},

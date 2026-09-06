@@ -43,10 +43,16 @@ import {
   type RequestRuleGroup,
   type TierCondition,
 } from '../lib/billing-expr'
+import {
+  matchBillingRuleGroups,
+  type RequestRuleMatch,
+} from '../lib/billing-rule-match'
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
   hideTiers?: boolean
+  showMatchedTierOnly?: boolean
+  requestRuleMatches?: RequestRuleMatch[]
   /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
@@ -160,6 +166,8 @@ function describeGroup(
 export function DynamicPricingBreakdown({
   billingExpr,
   hideTiers = false,
+  showMatchedTierOnly = false,
+  requestRuleMatches,
   matchedTierLabel,
   hideCacheColumns = false,
   compact = false,
@@ -181,25 +189,46 @@ export function DynamicPricingBreakdown({
     return { symbol: '$', rate: 1 }
   }, [currency])
 
+  const normalizedMatchedTierLabel = normalizeTierLabel(
+    matchedTierLabel ?? undefined
+  )
   const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)
     const parsedTiers = parseTiersFromExpr(split.billingExpr)
     const parsedRules = tryParseRequestRuleExpr(split.requestRuleExpr || '')
-    return {
-      tiers: parsedTiers,
-      ruleGroups: parsedRules || [],
+    let visibleTiers = parsedTiers
+    if (showMatchedTierOnly) {
+      const exactMatches = parsedTiers.filter(
+        (tier) => tier.label === matchedTierLabel
+      )
+      const matches =
+        exactMatches.length > 0
+          ? exactMatches
+          : parsedTiers.filter(
+              (tier) =>
+                normalizedMatchedTierLabel !== '' &&
+                normalizeTierLabel(tier.label) === normalizedMatchedTierLabel
+            )
+      visibleTiers = matches.length === 1 ? matches : []
     }
-  }, [expr])
+    return {
+      tiers: visibleTiers,
+      ruleGroups: matchBillingRuleGroups(parsedRules || [], requestRuleMatches),
+    }
+  }, [
+    expr,
+    matchedTierLabel,
+    normalizedMatchedTierLabel,
+    requestRuleMatches,
+    showMatchedTierOnly,
+  ])
 
   const hasTiers = !hideTiers && tiers.length > 0
   const hasRules = ruleGroups.length > 0
-  const normalizedMatchedTierLabel = normalizeTierLabel(
-    matchedTierLabel ?? undefined
-  )
 
   if (!expr || (hideTiers && !hasRules)) return null
 
-  if (!hasTiers && !hideTiers) {
+  if (!hasTiers && !hideTiers && !showMatchedTierOnly) {
     return (
       <section className={cn('min-w-0', !compact && 'py-4')}>
         {!compact && (
@@ -265,15 +294,14 @@ export function DynamicPricingBreakdown({
             {t('Tiered price table')}
           </div>
           <div className='space-y-1.5 sm:hidden'>
-            {tiers.map((tier, i) => {
+            {tiers.map((tier) => {
               const condSummary = formatConditionSummary(tier.conditions, t)
               const isMatched =
-                matchedTierLabel != null &&
-                matchedTierLabel !== '' &&
-                tier.label === matchedTierLabel
+                normalizedMatchedTierLabel !== '' &&
+                normalizeTierLabel(tier.label) === normalizedMatchedTierLabel
               return (
                 <div
-                  key={`tier-mobile-${i}`}
+                  key={JSON.stringify(tier)}
                   className={cn(
                     'rounded-md border p-2',
                     isMatched && 'border-emerald-500/40 bg-emerald-500/10'
@@ -418,6 +446,12 @@ export function DynamicPricingBreakdown({
         </div>
       )}
 
+      {showMatchedTierOnly && !hasTiers && !hideTiers && (
+        <div className='text-muted-foreground text-xs'>
+          {t('Matched tier unavailable')}
+        </div>
+      )}
+
       {hasRules && (
         <div>
           <div
@@ -430,10 +464,13 @@ export function DynamicPricingBreakdown({
             {t('Conditional multipliers')}
           </div>
           <ul className='space-y-1.5'>
-            {ruleGroups.map((group, gi) => (
+            {ruleGroups.map((group) => (
               <li
-                key={`group-${gi}`}
-                className='bg-muted/50 flex items-center justify-between gap-3 rounded-md px-3 py-2'
+                key={group.key}
+                className={cn(
+                  'flex items-center justify-between gap-3 rounded-md px-3 py-2',
+                  group.matched === true ? 'bg-emerald-500/10' : 'bg-muted/50'
+                )}
               >
                 <span
                   className={cn(
@@ -443,12 +480,30 @@ export function DynamicPricingBreakdown({
                 >
                   {describeGroup(group, t)}
                 </span>
-                <Badge
-                  variant='secondary'
-                  className='shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
-                >
-                  {group.multiplier}x
-                </Badge>
+                <span className='flex shrink-0 flex-wrap items-center justify-end gap-1.5'>
+                  {group.matched === true && (
+                    <Badge
+                      variant='secondary'
+                      className='bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                    >
+                      {t('Matched')}
+                    </Badge>
+                  )}
+                  {group.matched === false && (
+                    <Badge variant='outline'>{t('Not matched')}</Badge>
+                  )}
+                  {compact && group.matched === undefined && (
+                    <Badge variant='outline'>
+                      {t('Match status not recorded')}
+                    </Badge>
+                  )}
+                  <Badge
+                    variant='secondary'
+                    className='bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300'
+                  >
+                    {group.multiplier}x
+                  </Badge>
+                </span>
               </li>
             ))}
           </ul>
