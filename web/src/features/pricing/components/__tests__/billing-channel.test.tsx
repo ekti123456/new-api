@@ -53,7 +53,7 @@ test('marketplace hides channel tiers while the administrator breakdown remains 
   assert.equal(hidden, '')
 })
 
-test('channel-dependent models keep base prices and priority multipliers without tier rows in marketplace cards and details', async () => {
+test('hidden channel tiers use one group table with base prices and preserve priority conditions', async () => {
   const i18n = createInstance()
   await i18n
     .use(initReactI18next)
@@ -67,8 +67,8 @@ test('channel-dependent models keep base prices and priority multipliers without
     model_ratio: 50,
     completion_ratio: 3,
     quota_type: 0,
-    enable_groups: ['default'],
-    group_ratio: { default: 1 },
+    enable_groups: ['default', 'gpt-pro'],
+    group_ratio: { default: 1, 'gpt-pro': 0.175 },
     billing_mode: 'tiered_expr',
     hide_tiered_pricing: true,
     billing_expr:
@@ -81,8 +81,11 @@ test('channel-dependent models keep base prices and priority multipliers without
           <ModelCard model={model} onClick={() => {}} />
           <ModelDetailsContent
             model={model}
-            groupRatio={{ default: 1 }}
-            usableGroup={{ default: { desc: 'Default', ratio: 1 } }}
+            groupRatio={{ default: 1, 'gpt-pro': 0.175 }}
+            usableGroup={{
+              default: { desc: 'Default', ratio: 1 },
+              'gpt-pro': { desc: 'GPT Pro', ratio: 0.175 },
+            }}
             endpointMap={{}}
             autoGroups={[]}
             priceRate={1}
@@ -105,6 +108,34 @@ test('channel-dependent models keep base prices and priority multipliers without
     assert.ok(!rendered.includes('Dynamic Pricing'))
     assert.ok(!rendered.includes('Channel ID'))
     assert.ok(!/>Tier<|>base</.test(rendered))
+    const content = domWindow.document.createElement('div')
+    content.innerHTML = rendered
+    const groupTables = [...content.querySelectorAll('table')].filter((table) =>
+      [...table.querySelectorAll('thead th')].some(
+        (heading) => heading.textContent === 'Group'
+      )
+    )
+    assert.equal(groupTables.length, 1)
+    const table = groupTables[0]
+    assert.deepEqual(
+      [...table.querySelectorAll('thead th')].map(
+        (heading) => heading.textContent
+      ),
+      ['Group', 'Ratio', 'Input', 'Output', 'Cache Read', 'Cache Write']
+    )
+    assert.equal(table.closest('section')?.querySelectorAll('table').length, 1)
+    const rows = [...table.querySelectorAll('tbody tr')]
+    assert.equal(rows.length, 2)
+    const discountedRow = rows.find((row) =>
+      row.textContent.includes('gpt-pro')
+    )
+    assert.ok(discountedRow)
+    assert.deepEqual(
+      [...discountedRow.querySelectorAll('td')]
+        .slice(1)
+        .map((cell) => cell.textContent),
+      ['0.175x', '$0.875', '$5.25', '$0.0875', '$1.0938']
+    )
   } finally {
     client.clear()
   }
