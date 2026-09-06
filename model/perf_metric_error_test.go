@@ -45,6 +45,33 @@ func TestListPerfMetricErrorsFiltersAndPaginates(test *testing.T) {
 	assert.Equal(test, "gpt-b", filtered.Items[0].ModelName)
 }
 
+func TestPerfMetricErrorsHideHistoricalWindowLimitsWithoutDeletingRecords(test *testing.T) {
+	setupPerfMetricErrorTest(test)
+	now := time.Now().Unix()
+	items := []PerfMetricError{
+		{CreatedAt: now, ModelName: "model", StatusCode: 400, ErrorCode: "session_creation_limit_exceeded"},
+		{CreatedAt: now, ModelName: "model", StatusCode: 429, ErrorCode: "account_session_capacity_exceeded"},
+		{CreatedAt: now, ModelName: "model", StatusCode: 400, ErrorCode: " SESSION_CREATION_LIMIT_EXCEEDED "},
+		{CreatedAt: now, ModelName: "model", StatusCode: 429, ErrorCode: "usage_limit_reached"},
+		{CreatedAt: now, ModelName: "model", StatusCode: 400, ErrorCode: "session_identity_conflict"},
+		{CreatedAt: now, ModelName: "model", StatusCode: 500, ErrorCode: "session_creation_limit_exceeded"},
+	}
+	require.NoError(test, DB.Create(&items).Error)
+	page, err := ListPerfMetricErrors(PerfMetricErrorQuery{ModelName: "model", PageSize: 2})
+	require.NoError(test, err)
+	assert.Equal(test, int64(3), page.Total)
+	require.Len(test, page.Items, 2)
+	assert.Equal(test, 500, page.Items[0].StatusCode)
+	assert.Equal(test, "session_identity_conflict", page.Items[1].ErrorCode)
+	filtered, err := ListPerfMetricErrors(PerfMetricErrorQuery{StatusCode: 400, ErrorCode: "session_creation_limit_exceeded"})
+	require.NoError(test, err)
+	assert.Zero(test, filtered.Total)
+	assert.Empty(test, filtered.Items)
+	var storedCount int64
+	require.NoError(test, DB.Model(&PerfMetricError{}).Count(&storedCount).Error)
+	assert.Equal(test, int64(6), storedCount)
+}
+
 func TestListPerfMetricErrorsExcludesExpiredRowsBeforeCleanup(test *testing.T) {
 	setupPerfMetricErrorTest(test)
 	now := time.Now()

@@ -1,8 +1,27 @@
 package model
 
-import "time"
+import (
+	"net/http"
+	"strings"
+	"time"
+)
 
 const perfMetricErrorRetention = 48 * time.Hour
+
+const perfMetricSessionCreationLimitCode = "session_creation_limit_exceeded"
+const perfMetricAccountSessionCapacityCode = "account_session_capacity_exceeded"
+
+func IsSessionWindowCapacityError(statusCode int, errorCode string) bool {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusTooManyRequests {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(errorCode)) {
+	case perfMetricSessionCreationLimitCode, perfMetricAccountSessionCapacityCode:
+		return true
+	default:
+		return false
+	}
+}
 
 // PerfMetricError stores one final failed relay request for the administrator
 // performance dashboard. It is deliberately separate from the user-facing log
@@ -67,7 +86,10 @@ func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, erro
 	}
 
 	tx := DB.Model(&PerfMetricError{}).
-		Where("created_at >= ?", time.Now().Add(-perfMetricErrorRetention).Unix())
+		Where("created_at >= ?", time.Now().Add(-perfMetricErrorRetention).Unix()).
+		Where("NOT (COALESCE(status_code, 0) IN ? AND LOWER(TRIM(COALESCE(error_code, ''))) IN ?)",
+			[]int{http.StatusBadRequest, http.StatusTooManyRequests},
+			[]string{perfMetricSessionCreationLimitCode, perfMetricAccountSessionCapacityCode})
 	if query.ModelName != "" {
 		tx = tx.Where("model_name = ?", query.ModelName)
 	}
@@ -113,7 +135,7 @@ func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, erro
 }
 
 func CreatePerfMetricError(item *PerfMetricError) error {
-	if item == nil || item.ModelName == "" {
+	if item == nil || item.ModelName == "" || IsSessionWindowCapacityError(item.StatusCode, item.ErrorCode) {
 		return nil
 	}
 	if item.CreatedAt <= 0 {

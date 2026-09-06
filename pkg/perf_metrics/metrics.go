@@ -29,6 +29,9 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if info == nil || info.ExcludeFromPerformanceMetrics {
 		return
 	}
+	if !success && info.LastError != nil && model.IsSessionWindowCapacityError(info.LastError.StatusCode, string(info.LastError.GetErrorCode())) {
+		return
+	}
 	now := time.Now()
 	hasTtft := info.IsStream && info.HasSendResponse()
 	ttftMs := int64(0)

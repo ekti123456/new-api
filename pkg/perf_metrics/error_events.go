@@ -49,6 +49,9 @@ func RecordRelayError(c *gin.Context, info *relaycommon.RelayInfo, err *types.Ne
 	if info == nil || err == nil || info.ExcludeFromPerformanceMetrics || !perf_metrics_setting.GetSetting().Enabled {
 		return
 	}
+	if model.IsSessionWindowCapacityError(err.StatusCode, string(err.GetErrorCode())) {
+		return
+	}
 
 	item := &model.PerfMetricError{
 		CreatedAt:   time.Now().Unix(),
