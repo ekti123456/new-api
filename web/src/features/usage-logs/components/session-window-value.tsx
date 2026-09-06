@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { toIntlLocale } from '@/i18n/languages'
 import { formatSessionWindowCountdown } from '@/lib/format'
 
 interface SessionWindowValueProps {
@@ -34,7 +35,7 @@ export function SessionWindowValue(props: SessionWindowValueProps) {
     recoveryTitle = t(
       'Estimated release: {{time}} (based on the latest request)',
       {
-        time: new Date(recoveryMs).toLocaleString(i18n.language),
+        time: new Date(recoveryMs).toLocaleString(toIntlLocale(i18n.language)),
       }
     )
   }

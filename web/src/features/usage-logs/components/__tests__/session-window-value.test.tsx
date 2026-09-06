@@ -27,6 +27,56 @@ const translations = createInstance()
 await translations.use(initReactI18next).init({ lng: 'en', resources: {} })
 after(() => domWindow.close())
 
+test('release tooltip supports Chinese interface codes and falls back safely for invalid locales when language changes', async () => {
+  const localizedTranslations = createInstance()
+  await localizedTranslations.use(initReactI18next).init({
+    lng: 'en',
+    resources: {},
+    interpolation: { escapeValue: false },
+  })
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  const nextRecoveryAt = Math.floor(Date.now() / 1000) + 65
+  try {
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={localizedTranslations}>
+          <SessionWindowValue
+            used={2}
+            limit={30}
+            nextRecoveryAt={nextRecoveryAt}
+          />
+        </I18nextProvider>
+      )
+    })
+    for (const scenario of [
+      { language: 'zhCN', locale: 'zh-CN' },
+      { language: 'zhTW', locale: 'zh-TW' },
+      { language: 'en-US', locale: 'en-US' },
+      { language: 'invalid_locale', locale: undefined },
+    ]) {
+      await act(async () => {
+        await localizedTranslations.changeLanguage(scenario.language)
+      })
+      const expectedTime = new Date(nextRecoveryAt * 1000).toLocaleString(
+        scenario.locale
+      )
+      const tooltip = container.querySelector('[title]')
+      assert.equal(
+        tooltip?.getAttribute('title'),
+        `Estimated release: ${expectedTime} (based on the latest request)`
+      )
+      assert.equal(
+        tooltip?.getAttribute('aria-label'),
+        tooltip?.getAttribute('title')
+      )
+      assert.ok(container.textContent?.includes('2/30'))
+    }
+  } finally {
+    await act(async () => root.unmount())
+  }
+})
+
 test('window usage shows unknown, pending, or no release without inventing availability', async () => {
   const container = document.createElement('div')
   const root = createRoot(container)
