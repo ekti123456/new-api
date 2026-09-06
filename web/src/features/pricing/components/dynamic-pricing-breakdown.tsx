@@ -46,6 +46,7 @@ import {
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
+  hideTiers?: boolean
   /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
@@ -103,8 +104,11 @@ function formatConditionSummary(
 ): string {
   return conditions
     .map((c) => {
+      if (c.var === 'channel_id') {
+        return `${t('Channel ID')} ${c.op} ${c.value}`
+      }
       const varLabel = t(VAR_LABELS[c.var] || c.var)
-      const hint = formatTokenHint(c.value)
+      const hint = formatTokenHint(Number(c.value))
       return `${varLabel} ${OP_LABELS[c.op] || c.op} ${hint || c.value}`
     })
     .filter(Boolean)
@@ -155,6 +159,7 @@ function describeGroup(
 
 export function DynamicPricingBreakdown({
   billingExpr,
+  hideTiers = false,
   matchedTierLabel,
   hideCacheColumns = false,
   compact = false,
@@ -192,7 +197,7 @@ export function DynamicPricingBreakdown({
     matchedTierLabel ?? undefined
   )
 
-  if (!expr) return null
+  if (!expr || hideTiers) return null
 
   if (!hasTiers) {
     return (

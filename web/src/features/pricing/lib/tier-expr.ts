@@ -17,16 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { BILLING_CACHE_VAR_MAP } from './billing-expr'
+import {
+  TIER_CONDITIONS_PATTERN,
+  parseTierConditions,
+  type TierConditionInput,
+} from './tier-conditions'
+
+export type { TierConditionInput } from './tier-conditions'
 
 export const CACHE_MODE_TIMED = 'timed'
 export const CACHE_MODE_GENERIC = 'generic'
 export type CacheMode = typeof CACHE_MODE_TIMED | typeof CACHE_MODE_GENERIC
-
-export type TierConditionInput = {
-  var: 'p' | 'c' | 'len'
-  op: '<' | '<=' | '>' | '>='
-  value: number | string
-}
 
 export type VisualTier = {
   label: string
@@ -107,8 +108,19 @@ export function normalizeVisualConfig(
 function buildConditionStr(conditions: TierConditionInput[]): string {
   if (!conditions || conditions.length === 0) return ''
   return conditions
-    .filter((c) => c.var && c.op && c.value != null && c.value !== '')
-    .map((c) => `${c.var} ${c.op} ${c.value}`)
+    .filter(
+      (condition) =>
+        condition.var &&
+        condition.op &&
+        condition.value != null &&
+        (condition.var === 'channel_id' || condition.value !== '')
+    )
+    .map((condition) => {
+      if (condition.var === 'channel_id') {
+        return `channel_id ${condition.op} ${Number(condition.value) || 0}`
+      }
+      return `${condition.var} ${condition.op} ${condition.value}`
+    })
     .join(' && ')
 }
 
@@ -193,30 +205,15 @@ export function tryParseVisualConfig(
       })
     }
 
-    const condGroup =
-      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
-      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*${bodyPat}\\)`,
+      `(?:${TIER_CONDITIONS_PATTERN}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*${bodyPat}\\)`,
       'g'
     )
     const tiers: VisualTier[] = []
     let match: RegExpExecArray | null
     while ((match = tierRe.exec(body)) !== null) {
       const condStr = match[1] || ''
-      const conditions: TierConditionInput[] = []
-      if (condStr) {
-        for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
-          if (cm) {
-            conditions.push({
-              var: cm[1] as TierConditionInput['var'],
-              op: cm[2] as TierConditionInput['op'],
-              value: Number(cm[3]),
-            })
-          }
-        }
-      }
+      const conditions = parseTierConditions(condStr)
       const tier: Record<string, unknown> = {
         conditions,
         input_unit_cost: Number(match[3]),
@@ -272,7 +269,8 @@ export function evalExprLocally(
   exprStr: string,
   promptTokens: number,
   completionTokens: number,
-  extraTokenValues: ExtraTokenValues
+  extraTokenValues: ExtraTokenValues,
+  channelID = 0
 ): EvalResult {
   try {
     if (!exprStr || !exprStr.trim()) {
@@ -292,6 +290,7 @@ export function evalExprLocally(
       p: promptTokens,
       c: completionTokens,
       len,
+      channel_id: channelID,
       tier: tierFn,
       max: Math.max,
       min: Math.min,

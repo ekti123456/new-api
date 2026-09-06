@@ -914,6 +914,7 @@ function GroupPricingSection(props: {
     const dynamicTiers = getDynamicPricingTiers(props.model)
 
     if (dynamicTiers.length === 0) {
+      if (props.model.hide_tiered_pricing) return null
       return (
         <section>
           <SectionTitle>{t('Pricing by Group')}</SectionTitle>
@@ -991,13 +992,18 @@ function GroupPricingSection(props: {
                     `${group}-${tier.label || tierIndex}`
                   }
                   columns={[
-                    {
-                      id: 'tier',
-                      header: t('Tier'),
-                      className: thClass,
-                      cellClassName: 'text-muted-foreground py-2.5',
-                      cell: (tier) => tier.label || t('Default'),
-                    },
+                    ...(!props.model.hide_tiered_pricing
+                      ? [
+                          {
+                            id: 'tier',
+                            header: t('Tier'),
+                            className: thClass,
+                            cellClassName: 'text-muted-foreground py-2.5',
+                            cell: (tier: DynamicPricingTier) =>
+                              tier.label || t('Default'),
+                          },
+                        ]
+                      : []),
                     ...priceFields.map((fieldEntry) => ({
                       id: fieldEntry.field,
                       header: t(fieldEntry.shortLabel),
@@ -1179,7 +1185,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               showRechargePrice={showRechargePrice}
             />
             {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+              <DynamicPricingBreakdown
+                billingExpr={props.model.billing_expr}
+                hideTiers={props.model.hide_tiered_pricing}
+              />
             )}
             <GroupPricingSection
               model={props.model}

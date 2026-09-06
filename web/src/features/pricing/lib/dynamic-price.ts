@@ -63,7 +63,10 @@ export type DynamicPricingSummary = {
 const PRIMARY_DYNAMIC_FIELDS = new Set(['inputPrice', 'outputPrice'])
 
 export function isDynamicPricingModel(model: PricingModel): boolean {
-  return model.billing_mode === 'tiered_expr' && Boolean(model.billing_expr)
+  return (
+    model.billing_mode === 'tiered_expr' &&
+    Boolean(model.billing_expr || model.hide_tiered_pricing)
+  )
 }
 
 export function getDynamicDisplayGroupRatio(
@@ -112,7 +115,12 @@ export function getDynamicPricingTiers(model: PricingModel): ParsedTier[] {
   const { billingExpr } = splitBillingExprAndRequestRules(
     model.billing_expr || ''
   )
-  return parseTiersFromExpr(billingExpr)
+  const tiers = parseTiersFromExpr(billingExpr)
+  if (model.hide_tiered_pricing) {
+    const fallback = tiers.at(-1)
+    return fallback && fallback.conditions.length === 0 ? [fallback] : []
+  }
+  return tiers
 }
 
 export function hasDynamicRequestRules(model: PricingModel): boolean {
@@ -167,7 +175,7 @@ export function getDynamicPricingSummary(
   return {
     tiers,
     tier,
-    tierCount: tiers.length,
+    tierCount: model.hide_tiered_pricing ? 0 : tiers.length,
     hasRequestRules: hasDynamicRequestRules(model),
     isSpecialExpression: rawExpression.trim().length > 0 && tiers.length === 0,
     rawExpression,

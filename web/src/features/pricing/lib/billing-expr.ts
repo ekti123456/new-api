@@ -32,6 +32,12 @@ For commercial licensing, please contact support@quantumnous.com
 // Variable registry
 // ---------------------------------------------------------------------------
 
+import {
+  TIER_CONDITIONS_PATTERN,
+  parseTierConditions,
+  type TierConditionInput,
+} from './tier-conditions'
+
 export type BillingVar = {
   key: string
   field: string | null
@@ -228,11 +234,7 @@ export type RequestRuleGroup = {
   multiplier: string
 }
 
-export type TierCondition = {
-  var: 'p' | 'c' | 'len'
-  op: '<' | '<=' | '>' | '>='
-  value: number
-}
+export type TierCondition = TierConditionInput
 
 export type ParsedTier = {
   label: string
@@ -269,30 +271,15 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
   if (!exprStr) return []
   try {
     const { body } = stripExprVersion(exprStr)
-    const condGroup =
-      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
-      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
+      `(?:${TIER_CONDITIONS_PATTERN}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
       'g'
     )
     const tiers: ParsedTier[] = []
     let m
     while ((m = tierRe.exec(body)) !== null) {
       const condStr = m[1] || ''
-      const conditions: TierCondition[] = []
-      if (condStr) {
-        for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
-          if (cm) {
-            conditions.push({
-              var: cm[1] as TierCondition['var'],
-              op: cm[2] as TierCondition['op'],
-              value: Number(cm[3]),
-            })
-          }
-        }
-      }
+      const conditions = parseTierConditions(condStr)
       const tier = parseTierBody(m[3]) as ParsedTier
       tier.label = m[2]
       tier.conditions = conditions

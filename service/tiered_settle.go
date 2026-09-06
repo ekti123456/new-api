@@ -94,7 +94,7 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 }
 
-func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
+func refreshTieredBillingRoute(relayInfo *relaycommon.RelayInfo, channelID int) (*billingexpr.BillingSnapshot, error) {
 	if relayInfo == nil {
 		return nil, nil
 	}
@@ -104,17 +104,41 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	if snap.GroupRatio == groupRatio {
+	channelChanged := snap.ChannelID != channelID
+	if snap.GroupRatio == groupRatio && !channelChanged {
 		return snap, nil
 	}
 
-	estimatedQuotaAfterGroup := snap.EstimatedQuotaBeforeGroup * groupRatio
+	request := billingexpr.RequestInput{ChannelID: channelID}
+	if relayInfo.BillingRequestInput != nil {
+		request = *relayInfo.BillingRequestInput
+		request.ChannelID = channelID
+	}
+	quotaBeforeGroup := snap.EstimatedQuotaBeforeGroup
+	estimatedTier := snap.EstimatedTier
+	if channelChanged && billingexpr.UsedVars(snap.ExprString)["channel_id"] {
+		cost, trace, err := billingexpr.RunExprByHashWithRequest(snap.ExprString, snap.ExprHash, billingexpr.TokenParams{
+			P:   float64(snap.EstimatedPromptTokens),
+			C:   float64(snap.EstimatedCompletionTokens),
+			Len: float64(snap.EstimatedPromptTokens),
+		}, request)
+		if err != nil {
+			return nil, err
+		}
+		quotaBeforeGroup = cost / 1_000_000 * snap.QuotaPerUnit
+		estimatedTier = trace.MatchedTier
+	}
+	estimatedQuotaAfterGroup := quotaBeforeGroup * groupRatio
 	estimatedQuota, err := billingexpr.QuotaRoundStrict(estimatedQuotaAfterGroup)
 	if err != nil {
 		return nil, err
 	}
 	snap.GroupRatio = groupRatio
+	snap.ChannelID = channelID
+	snap.EstimatedTier = estimatedTier
+	snap.EstimatedQuotaBeforeGroup = quotaBeforeGroup
 	snap.EstimatedQuotaAfterGroup = estimatedQuota
+	relayInfo.BillingRequestInput = &request
 	return snap, nil
 }
 
@@ -123,7 +147,13 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 // estimate before sending. If the initial group was free and skipped
 // pre-consume, switching to a paid group creates the session at that point.
 func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	snap, err := refreshTieredBillingGroup(relayInfo)
+	channelID := relayInfo.GetChannelID()
+	if c != nil {
+		if _, exists := c.Get("channel_id"); exists {
+			channelID = c.GetInt("channel_id")
+		}
+	}
+	snap, err := refreshTieredBillingRoute(relayInfo, channelID)
 	if err != nil {
 		return types.NewErrorWithStatusCode(
 			err,
@@ -170,6 +200,7 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	if relayInfo.BillingRequestInput != nil {
 		requestInput = *relayInfo.BillingRequestInput
 	}
+	requestInput.ChannelID = snap.ChannelID
 
 	tr, err := billingexpr.ComputeTieredQuotaWithRequest(snap, params, requestInput)
 	if err != nil {

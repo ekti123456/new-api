@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -57,6 +58,7 @@ func GetPricing(c *gin.Context) {
 
 	usableGroup = service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
+	pricing = preparePublicPricing(pricing)
 	// check groupRatio contains usableGroup
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {
@@ -74,6 +76,18 @@ func GetPricing(c *gin.Context) {
 		"auto_groups":        service.GetUserAutoGroup(group),
 		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",
 	})
+}
+
+func preparePublicPricing(pricing []model.Pricing) []model.Pricing {
+	public := make([]model.Pricing, len(pricing))
+	copy(public, pricing)
+	for index := range public {
+		if public[index].BillingMode != "tiered_expr" || public[index].BillingExpr == "" {
+			continue
+		}
+		public[index].BillingExpr, public[index].HideTieredPricing = billingexpr.PublicPricingExpr(public[index].BillingExpr)
+	}
+	return public
 }
 
 func ResetModelRatio(c *gin.Context) {

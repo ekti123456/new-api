@@ -54,6 +54,7 @@ export type PricingModel = {
   billing_mode?: string
   /** Raw expression describing dynamic / tiered billing */
   billing_expr?: string
+  hide_tiered_pricing?: boolean
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
   /**

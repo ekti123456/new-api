@@ -28,6 +28,7 @@ import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
   getDynamicDisplayGroupRatio,
   getDynamicPricingSummary,
+  isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
@@ -62,9 +63,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const modelIconKey = props.model.icon || props.model.vendor_icon
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
-  const isDynamicPricing =
-    props.model.billing_mode === 'tiered_expr' &&
-    Boolean(props.model.billing_expr)
+  const isDynamicPricing = isDynamicPricingModel(props.model)
   const hasCachedPrice = isTokenBased && props.model.cache_ratio != null
   const dynamicSummary = isDynamicPricing
     ? getDynamicPricingSummary(props.model, {

@@ -11,6 +11,12 @@ import (
 )
 
 func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.RelayInfo) (billingexpr.RequestInput, error) {
+	channelID := info.GetChannelID()
+	if c != nil {
+		if _, exists := c.Get("channel_id"); exists {
+			channelID = c.GetInt("channel_id")
+		}
+	}
 	if info != nil && info.BillingRequestInput != nil {
 		input := cloneRequestInput(*info.BillingRequestInput)
 		merged := cloneStringMap(info.RequestHeaders)
@@ -18,10 +24,11 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 			merged[k] = v
 		}
 		input.Headers = merged
+		input.ChannelID = channelID
 		return input, nil
 	}
 
-	input := billingexpr.RequestInput{}
+	input := billingexpr.RequestInput{ChannelID: channelID}
 	if info != nil {
 		input.Headers = cloneStringMap(info.RequestHeaders)
 	}
@@ -63,7 +70,8 @@ func readIncomingBillingExprBody(c *gin.Context) ([]byte, error) {
 
 func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	input := billingexpr.RequestInput{
-		Headers: cloneStringMap(src.Headers),
+		Headers:   cloneStringMap(src.Headers),
+		ChannelID: src.ChannelID,
 	}
 	if len(src.Body) > 0 {
 		input.Body = append([]byte(nil), src.Body...)

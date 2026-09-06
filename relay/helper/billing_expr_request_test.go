@@ -29,12 +29,21 @@ func TestResolveIncomingBillingExprRequestInput(t *testing.T) {
 
 	info := &relaycommon.RelayInfo{
 		RequestHeaders: map[string]string{"Content-Type": "application/json"},
+		ChannelMeta:    &relaycommon.ChannelMeta{ChannelId: 15},
 	}
+	ctx.Set("channel_id", 12)
 
 	input, err := ResolveIncomingBillingExprRequestInput(ctx, info)
 	require.NoError(t, err)
 	require.Equal(t, body, input.Body)
 	require.Equal(t, "application/json", input.Headers["Content-Type"])
+	require.Equal(t, 12, input.ChannelID)
+	info.BillingRequestInput = &input
+	ctx.Set("channel_id", 15)
+	updated, err := ResolveIncomingBillingExprRequestInput(ctx, info)
+	require.NoError(t, err)
+	require.Equal(t, 15, updated.ChannelID)
+	require.Equal(t, 12, input.ChannelID)
 }
 
 func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {

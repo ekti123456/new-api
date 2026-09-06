@@ -116,6 +116,7 @@ const CONDITION_INPUT_OPTIONS: {
   { value: 'len', labelKey: 'Full input length' },
   { value: 'p', labelKey: 'Billable input tokens' },
   { value: 'c', labelKey: 'Billable output tokens' },
+  { value: 'channel_id', labelKey: 'Channel ID' },
 ]
 const OPS: TierConditionInput['op'][] = ['<', '<=', '>', '>=']
 
@@ -432,6 +433,8 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
   const currentInputOption = CONDITION_INPUT_OPTIONS.find(
     (option) => option.value === condition.var
   )
+  const isChannel = condition.var === 'channel_id'
+  const operators: TierConditionInput['op'][] = isChannel ? ['==', '!='] : OPS
 
   return (
     <div className='flex items-center gap-2'>
@@ -443,9 +446,16 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
           })),
         ]}
         value={condition.var}
-        onValueChange={(value) =>
-          onChange({ ...condition, var: value as TierConditionInput['var'] })
-        }
+        onValueChange={(value) => {
+          const variable = value as TierConditionInput['var']
+          if (variable === 'channel_id') {
+            onChange({ var: variable, op: '==', value: 0 })
+          } else if (isChannel) {
+            onChange({ var: variable, op: '>', value: 272000 })
+          } else {
+            onChange({ ...condition, var: variable })
+          }
+        }}
       >
         <SelectTrigger className='w-32' size='sm'>
           <SelectValue>
@@ -465,7 +475,7 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
         </SelectContent>
       </Select>
       <Select
-        items={OPS.map((op) => ({ value: op, label: op }))}
+        items={operators.map((op) => ({ value: op, label: op }))}
         value={condition.op}
         onValueChange={(value) =>
           onChange({ ...condition, op: value as TierConditionInput['op'] })
@@ -476,7 +486,7 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
           <SelectGroup>
-            {OPS.map((op) => (
+            {operators.map((op) => (
               <SelectItem key={op} value={op}>
                 {op}
               </SelectItem>
@@ -484,16 +494,32 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
           </SelectGroup>
         </SelectContent>
       </Select>
-      <DraftNumberInput
-        min={0}
-        value={condition.value}
-        onValueChange={(value) => onChange({ ...condition, value })}
-        placeholder='tokens'
-        className='w-32'
-      />
-      <span className='text-muted-foreground text-xs'>
-        {formatTokenHint(condition.value)}
-      </span>
+      {isChannel ? (
+        <DraftNumberInput
+          min={1}
+          step={1}
+          value={condition.value}
+          onValueChange={(value) =>
+            onChange({ ...condition, value: Math.max(0, Math.trunc(value)) })
+          }
+          placeholder={t('Channel ID')}
+          aria-label={t('Channel ID condition')}
+          className='h-8 min-w-32 flex-1'
+        />
+      ) : (
+        <>
+          <DraftNumberInput
+            min={0}
+            value={condition.value}
+            onValueChange={(value) => onChange({ ...condition, value })}
+            placeholder='tokens'
+            className='w-32'
+          />
+          <span className='text-muted-foreground text-xs'>
+            {formatTokenHint(condition.value)}
+          </span>
+        </>
+      )}
       <Button
         variant='ghost'
         size='icon'
@@ -638,7 +664,7 @@ function VisualTierCard({
           variant='ghost'
           size='icon'
           onClick={onRemove}
-          disabled={total <= 1}
+          disabled={total <= 1 || index === total - 1}
           aria-label={t('Remove tier')}
         >
           <Trash2 className='text-destructive h-4 w-4' />
@@ -653,7 +679,7 @@ function VisualTierCard({
             variant='ghost'
             size='sm'
             onClick={onAddCondition}
-            disabled={tier.conditions.length >= 2}
+            disabled={tier.conditions.length >= 2 || index === total - 1}
             className='h-7 px-2 text-xs'
           >
             <Plus className='mr-1 h-3 w-3' />
@@ -817,7 +843,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
 
   const handleAddCondition = (index: number) => {
     const tier = config.tiers[index]
-    if (tier.conditions.length >= 2) return
+    if (tier.conditions.length >= 2 || index === config.tiers.length - 1) return
     // Prefer `len` (input length) over `p`/`c` for tier conditions because
     // `p` is subject to auto-exclusion when sub-categories like `cr` are
     // priced separately, which can misroute long-input requests into shorter
@@ -846,6 +872,14 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
         {t(
           'Each tier supports up to 2 conditions. The last tier without conditions is the fallback.'
         )}
+      </p>
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Channel conditions use the selected channel ID, not groups or client headers. Put channel surcharges before the unconditional base-price fallback.'
+        )}
+      </p>
+      <p className='text-muted-foreground text-xs'>
+        {t('Model marketplace hides tiers when channel conditions are used.')}
       </p>
       {config.tiers.map((tier, index) => (
         <VisualTierCard
@@ -1362,6 +1396,7 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
   const { t } = useTranslation()
   const [promptTokens, setPromptTokens] = useState(0)
   const [completionTokens, setCompletionTokens] = useState(0)
+  const [channelID, setChannelID] = useState(0)
   const [extras, setExtras] = useState<ExtraTokenValues>({
     cacheReadTokens: 0,
     cacheCreateTokens: 0,
@@ -1379,8 +1414,14 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
 
   const result = useMemo(
     () =>
-      evalExprLocally(effectiveExpr, promptTokens, completionTokens, extras),
-    [effectiveExpr, promptTokens, completionTokens, extras]
+      evalExprLocally(
+        effectiveExpr,
+        promptTokens,
+        completionTokens,
+        extras,
+        channelID
+      ),
+    [effectiveExpr, promptTokens, completionTokens, extras, channelID]
   )
 
   return (
@@ -1410,6 +1451,19 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
             onValueChange={setCompletionTokens}
           />
         </div>
+      </div>
+      <div className='space-y-1'>
+        <Label className='text-xs' htmlFor='tier-estimator-channel'>
+          {t('Channel ID')}
+        </Label>
+        <DraftNumberInput
+          id='tier-estimator-channel'
+          min={0}
+          step={1}
+          value={channelID}
+          onValueChange={setChannelID}
+          placeholder={t('Channel ID')}
+        />
       </div>
       {usesExtras && (
         <div className='grid grid-cols-2 gap-3'>
@@ -1484,6 +1538,7 @@ Expressions are based on standard arithmetic with ternary operators.
 Input side:
 - p — input token count (for pricing). Automatically excludes sub-categories priced separately (e.g., if cr is used, cache tokens are deducted from p)
 - len — total input context length (for condition checks). Not affected by auto-exclusion; always reflects the full input length. Use in tier conditions
+- channel_id — actual selected channel ID from the server; use channel_id == 12 or channel_id != 15 in tier conditions, never infer it from groups or client headers. Channel conditions hide tiers in the model marketplace; the last unconditional tier supplies its base price.
 - cr — cache-hit (read) token count
 - cc — cache-create token count (5-min TTL)
 - cc1h — cache-create token count (1-hour TTL, Claude-specific)
