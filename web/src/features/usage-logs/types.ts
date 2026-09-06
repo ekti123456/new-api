@@ -256,6 +256,7 @@ export interface LogStatistics {
   tpm: number
   session_window_used?: number
   session_window_limit?: number
+  session_window_next_recovery_at?: number
   current_concurrency?: number
   occupied_concurrency?: number
 }

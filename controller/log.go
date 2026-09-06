@@ -172,6 +172,7 @@ func GetLogsSelfStat(c *gin.Context) {
 	if sessionWindow, ok := model.GetUserSessionWindowStatus(userID); ok {
 		data["session_window_used"] = sessionWindow.Used
 		data["session_window_limit"] = sessionWindow.Limit
+		data["session_window_next_recovery_at"] = sessionWindow.NextRecoveryAt
 	}
 	c.JSON(200, gin.H{
 		"success": true,

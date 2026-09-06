@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -50,6 +51,37 @@ func TestUserSessionWindowAggregatesDistinctTargets(t *testing.T) {
 	}
 }
 
+func TestUserSessionWindowRecoveryUsesReportedUserDeadlines(test *testing.T) {
+	const userID = 12349
+	firstRecovery := time.Now().Add(90 * time.Second).Unix()
+	for _, sample := range []struct {
+		target   string
+		used     string
+		recovery string
+	}{
+		{"first", "2", strconv.FormatInt(firstRecovery, 10)},
+		{"later", "1", strconv.FormatInt(firstRecovery+60, 10)},
+		{"legacy", "1", ""},
+		{"invalid", "1", "not-a-timestamp"},
+		{"empty", "0", strconv.FormatInt(firstRecovery-30, 10)},
+	} {
+		header := http.Header{}
+		header.Set("X-Codex2API-Session-Limit", "5")
+		header.Set("X-Codex2API-Session-Used", sample.used)
+		header.Set("X-Codex2API-Session-Window-Seconds", "3600")
+		header.Set("X-Codex2API-Session-Next-Recovery-At", sample.recovery)
+		UpdateUserSessionWindowFromHeader(userID, sample.target, header)
+		UpdateUserSessionWindowFromHeader(userID, sample.target, header)
+	}
+	status, found := GetUserSessionWindowStatus(userID)
+	require.True(test, found)
+	require.Equal(test, firstRecovery, status.NextRecoveryAt)
+	require.Equal(test, 5, status.Used)
+	require.Equal(test, 25, status.Limit)
+	_, otherUserFound := GetUserSessionWindowStatus(987654321)
+	require.False(test, otherUserFound)
+}
+
 func TestListFullUserSessionWindowTargetsDoesNotUseAggregate(t *testing.T) {
 	userID := 12347
 	full := http.Header{}
@@ -95,6 +127,11 @@ func TestUserSessionWindowRestoresFromRedisAfterRuntimeRestart(t *testing.T) {
 	header.Set("X-Codex2API-Session-Limit", "5")
 	header.Set("X-Codex2API-Session-Used", "4")
 	header.Set("X-Codex2API-Session-Window-Seconds", "4800")
+	nextRecoveryAt := time.Now().Add(2 * time.Minute).Unix()
+	header.Set("X-Codex2API-Session-Next-Recovery-At", strconv.FormatInt(nextRecoveryAt, 10))
+	UpdateUserSessionWindowFromHeader(22345, "https://codex.example", header)
+	nextRecoveryAt += 60
+	header.Set("X-Codex2API-Session-Next-Recovery-At", strconv.FormatInt(nextRecoveryAt, 10))
 	UpdateUserSessionWindowFromHeader(22345, "https://codex.example", header)
 
 	resetUserSessionWindowRuntimeForTest()
@@ -109,6 +146,7 @@ func TestUserSessionWindowRestoresFromRedisAfterRuntimeRestart(t *testing.T) {
 	require.Equal(t, 4, status.Used)
 	require.Equal(t, 5, status.Limit)
 	require.Equal(t, 4800, status.WindowSeconds)
+	require.Equal(t, nextRecoveryAt, status.NextRecoveryAt)
 }
 
 func TestUserSessionWindowRedisRestoreDropsExpiredTargets(t *testing.T) {

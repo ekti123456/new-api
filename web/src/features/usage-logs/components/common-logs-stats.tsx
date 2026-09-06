@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
@@ -27,17 +28,14 @@ import { cn } from '@/lib/utils'
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
+import { SessionWindowValue } from './session-window-value'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 
-function StatBadge(props: {
-  label: string
-  value: string | number
-  accent: string
-}) {
+function StatBadge(props: { label: string; value: ReactNode; accent: string }) {
   return (
-    <span className='border-border/60 bg-muted/25 inline-flex h-7 items-center gap-2 rounded-md border px-2.5 text-xs shadow-xs'>
+    <span className='border-border/60 bg-muted/25 inline-flex min-h-7 items-center gap-2 rounded-md border px-2.5 py-1 text-xs shadow-xs'>
       <span className={cn('h-3.5 w-0.5 rounded-full', props.accent)} />
       <span className='text-muted-foreground'>{props.label}</span>
       <span className='text-foreground/85 font-mono font-semibold tabular-nums'>
@@ -73,6 +71,7 @@ export function CommonLogsStats() {
         : DEFAULT_LOG_STATS
     },
     placeholderData: (previousData) => previousData,
+    refetchInterval: isAdmin ? false : 30000,
   })
 
   if (isLoading) {
@@ -102,7 +101,13 @@ export function CommonLogsStats() {
       {!isAdmin && (stats?.session_window_limit ?? 0) > 0 && (
         <StatBadge
           label={t('Window')}
-          value={`${stats?.session_window_used ?? 0}/${stats?.session_window_limit}`}
+          value={
+            <SessionWindowValue
+              used={stats?.session_window_used ?? 0}
+              limit={stats?.session_window_limit ?? 0}
+              nextRecoveryAt={stats?.session_window_next_recovery_at}
+            />
+          }
           accent='bg-emerald-500/70'
         />
       )}

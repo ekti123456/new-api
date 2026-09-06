@@ -18,10 +18,11 @@ import (
 // Codex2API upstream. Redis persistence keeps this observational status across
 // NewAPI restarts; Codex2API remains the enforcement authority.
 type UserSessionWindowStatus struct {
-	Used          int       `json:"session_window_used"`
-	Limit         int       `json:"session_window_limit"`
-	WindowSeconds int       `json:"session_window_seconds"`
-	UpdatedAt     time.Time `json:"session_window_updated_at"`
+	Used           int       `json:"session_window_used"`
+	Limit          int       `json:"session_window_limit"`
+	WindowSeconds  int       `json:"session_window_seconds"`
+	UpdatedAt      time.Time `json:"session_window_updated_at"`
+	NextRecoveryAt int64     `json:"session_window_next_recovery_at,omitempty"`
 }
 
 // UserSessionWindowTargetStatus keeps one Codex2API target separate from the
@@ -248,10 +249,13 @@ func UpdateUserSessionWindowFromHeader(userID int, target string, header http.He
 	status := UserSessionWindowStatus{
 		Used: used, Limit: limit, WindowSeconds: window, UpdatedAt: now,
 	}
+	if nextRecoveryAt, parseErr := strconv.ParseInt(strings.TrimSpace(header.Get("X-Codex2API-Session-Next-Recovery-At")), 10, 64); parseErr == nil && used > 0 && nextRecoveryAt > 0 && nextRecoveryAt <= 253402300799 {
+		status.NextRecoveryAt = nextRecoveryAt
+	}
 	userSessionWindowRuntime.items[userID][target] = status
 	lastPersisted := userSessionWindowRuntime.lastPersisted[userID][target]
 	shouldPersist := !existed || evictedTarget != "" || previous.Used != used || previous.Limit != limit ||
-		previous.WindowSeconds != window || lastPersisted.IsZero() || now.Sub(lastPersisted) >= userSessionWindowRedisRefreshInterval
+		previous.WindowSeconds != window || previous.NextRecoveryAt != status.NextRecoveryAt || lastPersisted.IsZero() || now.Sub(lastPersisted) >= userSessionWindowRedisRefreshInterval
 	if shouldPersist {
 		userSessionWindowRuntime.lastPersisted[userID][target] = now
 	}
@@ -370,6 +374,9 @@ func GetUserSessionWindowStatus(userID int) (UserSessionWindowStatus, bool) {
 		}
 		aggregated.Used += status.Used
 		aggregated.Limit += status.Limit
+		if status.Used > 0 && status.NextRecoveryAt > 0 && (aggregated.NextRecoveryAt == 0 || status.NextRecoveryAt < aggregated.NextRecoveryAt) {
+			aggregated.NextRecoveryAt = status.NextRecoveryAt
+		}
 		if status.WindowSeconds > aggregated.WindowSeconds {
 			aggregated.WindowSeconds = status.WindowSeconds
 		}
