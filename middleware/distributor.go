@@ -48,12 +48,16 @@ func Distribute() func(c *gin.Context) {
 		// A Codex naming request belongs to the user root and must inherit that
 		// root's routing side. The initial thread_title is a fresh ephemeral thread,
 		// while description/reconsideration requests carry an explicit parent graph.
-		if !isCodexNamingRequest(rootSession) {
+		if !isCodexNamingRequest(rootSession) && !strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
 			service.PrepareUserAgentRoutingMode(c, usingGroup)
 		}
 		rootSession, passiveFeature, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
+			if strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": "background conversation is unavailable"}))
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}

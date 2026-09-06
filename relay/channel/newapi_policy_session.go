@@ -411,6 +411,14 @@ func ClassifyUnlinkedCodexThreadTitleRequest(resolution CodexRootSessionResoluti
 	return "related_internal", true
 }
 
+func ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution CodexRootSessionResolution) (string, bool) {
+	if !resolution.Resolved || resolution.Related || strings.TrimSpace(resolution.RootID) == "" ||
+		!strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "ambient_suggestions") {
+		return "", false
+	}
+	return "related_internal", true
+}
+
 // ClassifyUnlinkedCodexThreadSummaryRequest recognizes the fresh ephemeral
 // summary thread. Current Codex clients do not attach a parent/fork lineage, so
 // distribution keeps using the bounded recent-root bridge for this one source.

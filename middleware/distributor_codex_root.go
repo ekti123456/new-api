@@ -33,6 +33,7 @@ const (
 
 var (
 	codexUnlinkedPassiveRootWaitTimeout = 3 * time.Second
+	codexAmbientRootWaitTimeout         = 60 * time.Second
 	codexLinkedRootWaitTimeout          = 3 * time.Second
 	codexTurnRootWaitTimeout            = 3 * time.Second
 	codexThreadRootWaitTimeout          = 3 * time.Second
@@ -459,7 +460,8 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	var binding service.CodexRootChannelBinding
 	var found bool
 	var err error
-	if isLinkedCodexNamingRequest(resolution) {
+	if isLinkedCodexNamingRequest(resolution) ||
+		(resolution.Related && strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "ambient_suggestions")) {
 		binding, found, err = loadLinkedCodexNamingRootBinding(c, userID, resolution.RootID)
 		if found {
 			requestUARoutingOnly = binding.UARoutingOnly
@@ -976,11 +978,6 @@ func resolveForkedCodexNamingRoot(c *gin.Context, userID int, resolution relaych
 	return applyUnlinkedCodexPassiveRoot(c, resolution, sourceRoute.mapping.RootID, feature)
 }
 
-// resolveUnlinkedCodexPassiveRoot pins an explicitly related child to its exact
-// root. The independent system thread used for project metadata may recover a
-// sole candidate on its own routing side. A native thread_title has no parent
-// graph, so it uses a separate five-second candidate set that must be unique
-// across both routing sides. Other independent internal roots schedule normally.
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (relaychannel.CodexRootSessionResolution, string, bool, error) {
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	if resolution.IdentityConflict && (strings.TrimSpace(resolution.TurnID) != "" ||
@@ -1052,6 +1049,10 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		return resolution, feature, true, nil
 	}
 	feature, titleCandidate := relaychannel.ClassifyUnlinkedCodexThreadTitleRequest(resolution)
+	ambientFeature, ambientCandidate := relaychannel.ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution)
+	if ambientCandidate {
+		feature, titleCandidate = ambientFeature, true
+	}
 	classified := titleCandidate
 	if !classified {
 		feature, classified = relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
@@ -1060,6 +1061,9 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		feature, classified = relaychannel.ClassifyUnlinkedCodexThreadSummaryRequest(resolution)
 	}
 	if !classified {
+		if strings.EqualFold(strings.TrimSpace(resolution.ThreadSource), "ambient_suggestions") {
+			return resolution, "related_internal", true, errors.New("Codex ambient request identity is unavailable")
+		}
 		return resolution, "", false, nil
 	}
 	// The wider predecessor search is deliberately limited to the unlinked
@@ -1109,8 +1113,12 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		}
 	}
 
-	deadline := time.Now().Add(codexUnlinkedPassiveRootWaitTimeout)
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexUnlinkedPassiveRootWaitTimeout)
+	waitTimeout := codexUnlinkedPassiveRootWaitTimeout
+	if ambientCandidate {
+		waitTimeout = codexAmbientRootWaitTimeout
+	}
+	deadline := time.Now().Add(waitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
 	var soleCandidate *service.CodexRecentRootChannelCandidate
 	// Once the strict predecessor wait expires, an unlinked system request may
@@ -1176,6 +1184,12 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 					return resolution, feature, true, errors.New("recent Codex root channel binding is outside the current group")
 				}
 				soleCandidate = &candidate
+				if ambientCandidate {
+					if err := waitContext.Err(); err != nil {
+						return resolution, feature, true, fmt.Errorf("wait for ambient Codex root channel binding: %w", err)
+					}
+					return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, candidate, true, service.CodexRequestArrival{}, passiveScope)
+				}
 			}
 		} else {
 			candidate, candidateFound, loadErr := service.LoadLatestCodexRootChannelObservationBefore(

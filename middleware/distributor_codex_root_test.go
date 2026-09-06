@@ -69,6 +69,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalDB := model.DB
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
+	originalAmbientWaitTimeout := codexAmbientRootWaitTimeout
 	originalLinkedWaitTimeout := codexLinkedRootWaitTimeout
 	originalTurnWaitTimeout := codexTurnRootWaitTimeout
 	originalThreadWaitTimeout := codexThreadRootWaitTimeout
@@ -78,6 +79,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalWaitForTurnRootBindingUpdate := waitForCodexTurnRootBindingUpdate
 	originalWaitForThreadRootBindingUpdate := waitForCodexThreadRootBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
+	codexAmbientRootWaitTimeout = 25 * time.Millisecond
 	codexLinkedRootWaitTimeout = 25 * time.Millisecond
 	codexTurnRootWaitTimeout = 25 * time.Millisecond
 	codexThreadRootWaitTimeout = 25 * time.Millisecond
@@ -119,6 +121,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 
 	t.Cleanup(func() {
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
+		codexAmbientRootWaitTimeout = originalAmbientWaitTimeout
 		codexLinkedRootWaitTimeout = originalLinkedWaitTimeout
 		codexTurnRootWaitTimeout = originalTurnWaitTimeout
 		codexThreadRootWaitTimeout = originalThreadWaitTimeout
@@ -2197,7 +2200,6 @@ func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T
 	for _, tc := range []struct {
 		source, sessionID string
 	}{
-		{source: "ambient_suggestions", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb6"},
 		{source: "agent_created_thread", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb8"},
 	} {
 		t.Run(tc.source, func(t *testing.T) {
