@@ -191,15 +191,15 @@ export function DynamicPricingBreakdown({
     }
   }, [expr])
 
-  const hasTiers = tiers.length > 0
+  const hasTiers = !hideTiers && tiers.length > 0
   const hasRules = ruleGroups.length > 0
   const normalizedMatchedTierLabel = normalizeTierLabel(
     matchedTierLabel ?? undefined
   )
 
-  if (!expr || hideTiers) return null
+  if (!expr || (hideTiers && !hasRules)) return null
 
-  if (!hasTiers) {
+  if (!hasTiers && !hideTiers) {
     return (
       <section className={cn('min-w-0', !compact && 'py-4')}>
         {!compact && (
@@ -237,7 +237,7 @@ export function DynamicPricingBreakdown({
 
   return (
     <section className={cn('min-w-0', !compact && 'py-3 sm:py-4')}>
-      {!compact && (
+      {!compact && !hideTiers && (
         <div className='mb-3 flex items-start gap-2 sm:mb-4'>
           <span className='mt-0.5 inline-flex size-6 items-center justify-center rounded-lg bg-amber-100 text-amber-700 shadow-sm dark:bg-amber-500/20 dark:text-amber-300'>
             <TagIcon className='size-3.5' />

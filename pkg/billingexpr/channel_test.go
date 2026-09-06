@@ -43,3 +43,38 @@ func TestPublicPricingHidesChannelTiersAndPreservesOrdinaryTiers(test *testing.T
 		assert.Equal(test, sample.hidden, hidden, sample.expression)
 	}
 }
+
+func TestPublicPricingPreservesRequestMultipliers(test *testing.T) {
+	pricing := `len > 272000 && channel_id == 42 ? tier("gpt", p * 10 + c * 45 + cr * 1 + cc * 12.5) : tier("272k", p * 5 + c * 30 + cr * 0.5 + cc * 6.25)`
+	base := `tier("base", p * 5 + c * 30 + cr * 0.5 + cc * 6.25)`
+	priority := `param("service_tier") == "priority" ? 2 : 1`
+	for _, sample := range []struct {
+		name       string
+		expression string
+		public     string
+	}{
+		{"priority", "(" + pricing + ") * (" + priority + ")", base + " * (" + priority + ")"},
+		{"multiple rules", "v1:(" + pricing + ") * (" + priority + `) * (header("x-fast") == "on" ? 3 : 1)`, base + " * (" + priority + `) * (header("x-fast") == "on" ? 3 : 1)`},
+		{"reversed factors", "(" + priority + ") * (" + pricing + ")", "(" + priority + ") * " + base},
+		{"private multiplier", "(" + pricing + `) * (channel_id == 42 ? 2 : 1)`, ""},
+	} {
+		test.Run(sample.name, func(test *testing.T) {
+			public, hidden := PublicPricingExpr(sample.expression)
+			assert.True(test, hidden)
+			assert.Equal(test, sample.public, public)
+			assert.NotContains(test, public, "channel_id")
+			if public == "" {
+				return
+			}
+			for _, body := range []string{`{}`, `{"service_tier":"priority"}`} {
+				request := RequestInput{ChannelID: 22, Body: []byte(body)}
+				params := TokenParams{P: 300000, Len: 300000, C: 100, CR: 20000, CC: 10000}
+				actual, _, err := RunExprWithRequest(sample.expression, params, request)
+				require.NoError(test, err)
+				displayed, _, err := RunExprWithRequest(public, params, request)
+				require.NoError(test, err)
+				assert.Equal(test, actual, displayed)
+			}
+		})
+	}
+}

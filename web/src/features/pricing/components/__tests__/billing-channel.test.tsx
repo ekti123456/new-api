@@ -53,7 +53,7 @@ test('marketplace hides channel tiers while the administrator breakdown remains 
   assert.equal(hidden, '')
 })
 
-test('channel-dependent models show only base prices without tier rows or dynamic badges in marketplace cards and details', async () => {
+test('channel-dependent models keep base prices and priority multipliers without tier rows in marketplace cards and details', async () => {
   const i18n = createInstance()
   await i18n
     .use(initReactI18next)
@@ -71,7 +71,8 @@ test('channel-dependent models show only base prices without tier rows or dynami
     group_ratio: { default: 1 },
     billing_mode: 'tiered_expr',
     hide_tiered_pricing: true,
-    billing_expr: 'tier("base", p * 5 + c * 30)',
+    billing_expr:
+      'tier("base", p * 5 + c * 30 + cr * 0.5 + cc * 6.25) * (param("service_tier") == "priority" ? 2 : 1)',
   }
   try {
     const rendered = renderToStaticMarkup(
@@ -93,6 +94,12 @@ test('channel-dependent models show only base prices without tier rows or dynami
     )
     assert.match(rendered, />\$5</)
     assert.match(rendered, />\$30</)
+    assert.match(rendered, />\$0\.5</)
+    assert.match(rendered, />\$6\.25</)
+    assert.ok(rendered.includes('Conditional multipliers'))
+    assert.ok(rendered.includes('service_tier'))
+    assert.ok(rendered.includes('priority'))
+    assert.match(rendered, />2x</)
     assert.ok(rendered.includes('Pricing by Group'))
     assert.ok(!rendered.includes('Tiered price table'))
     assert.ok(!rendered.includes('Dynamic Pricing'))
