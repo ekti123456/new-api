@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -21,12 +22,7 @@ import (
 func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 
-	switch info.ChannelType {
-	case constant.ChannelTypeSub2API,
-		constant.ChannelTypeNewAPI,
-		constant.ChannelTypeCodex,
-		constant.ChannelTypeAdvancedCustom:
-	default:
+	if !supportsAlphaSearchChannel(info) {
 		// Allow retry onto another channel that may support this endpoint.
 		return types.NewError(
 			errors.New("channel does not support /v1/alpha/search"),
@@ -118,6 +114,21 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError
 	usage := &dto.Usage{}
 	service.PostTextConsumeQuota(c, info, usage, nil)
 	return nil
+}
+
+func supportsAlphaSearchChannel(info *relaycommon.RelayInfo) bool {
+	switch info.GetChannelType() {
+	case constant.ChannelTypeSub2API,
+		constant.ChannelTypeNewAPI,
+		constant.ChannelTypeCodex,
+		constant.ChannelTypeAdvancedCustom:
+		return true
+	case constant.ChannelTypeOpenAI:
+		requestURL := relaycommon.GetFullRequestURL(info.ChannelBaseUrl, info.RequestURLPath, info.ChannelType)
+		return relaychannel.IsCodex2APIPolicyDestination(requestURL, info.ApiKey)
+	default:
+		return false
+	}
 }
 
 // buildAlphaSearchRequestBody returns RawBody unchanged unless the model was

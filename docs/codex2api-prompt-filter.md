@@ -33,6 +33,16 @@ try { ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').T
 
 Codex2API 的 Prompt Filter 总开关、运行模式与绑定的 `require_signed_identity` 仍需在 Codex2API 侧按部署策略配置。NewAPI 发送的 `mode`、`profile` 只是已签名审计元数据，不覆盖 Codex2API 的全局 GuardPipeline 策略。
 
+## Codex 独立搜索接口
+
+`/v1/alpha/search` 是 Codex 独立搜索请求。除了原有 NewAPI、Sub2API、Codex 和 AdvancedCustom 渠道，普通 OpenAI 渠道在其最终请求地址和当前 Key 命中已启用的 Codex2API 策略绑定时也允许转发。路径前缀绑定检查使用 Base URL 拼接请求路径后的地址，因此绑定到 `/v1` 时也能正确识别。绑定沿用本页配置，不根据域名包含 `codex`、客户端请求头或分组名称猜测提供商。
+
+NewAPI 保留原始搜索正文及未知字段，仅按已有规则处理模型映射和参数覆盖；身份签名针对最终出站正文生成。URL 路径、认证、会话头、上游错误处理及成功后的搜索工具计费继续走原有链路。
+
+旧版的 `channel does not support /v1/alpha/search` 是 NewAPI 渠道类型检查在发出请求前产生的错误，不是 codex2api 返回。更新后若仍出现此错误，应检查实际选中渠道的类型、Base URL、Key 与绑定是否匹配，以及 `CODEX2API_POLICY_ENABLED`、`CODEX2API_POLICY_IDENTITY_FORWARD_ENABLED` 是否启用。没有有效绑定的普通 OpenAI 渠道仍然拒绝该接口，并保留原有换渠道重试行为；不为所有 OpenAI 提供商统一开放此私有接口。
+
+不要为了使用 codex2api 的 API Key 而把渠道类型改成 Codex：Codex 类型用于直接连接原生账号，其凭据格式与 codex2api 网关 Key 不同。Custom 渠道的 URL 语义也不同，本次不自动放行。
+
 ## 违规决策联动
 
 Codex2API 拒绝 Prompt 后会返回 `policy-decision-v1` HMAC 签名决策。NewAPI 仅接受 Request ID 与当前签名请求一致、且能用该目标和 Key 绑定密钥完成验签的决策。验签成功后会停止渠道重试，防止通过切换上游绕过 Prompt 检查，并只保存规则版本与 Prompt 证据的 SHA-256，不保存 Prompt 原文。
