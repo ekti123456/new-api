@@ -275,6 +275,9 @@ distributor.get_channel_failed: "获取分组 {{.Group}} 下模型 {{.Model}} �
 distributor.no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道（distributor）"
 distributor.invalid_midjourney_request: "无效的midjourney请求，{{.Error}}"
 distributor.invalid_request_parse_model: "无效的请求，无法解析模型"
+distributor.client_version_too_old: "{{.Client}} 当前版本 {{.Current}} 低于最低要求 {{.Minimum}}，请将 Codex 更新至 {{.Minimum}} 或更新版本后重启客户端。"
+distributor.client_version_missing: "无法识别 {{.Client}} 的有效版本号，请将 Codex 更新至 {{.Minimum}} 或更新版本后重启客户端，并保留原始 User-Agent。"
+distributor.codex_passive_model_restricted: "Codex 后台或子代理请求不允许使用 gpt-5.4，请更新并重启 Codex。网关不会自动替换模型。"
 
 # Custom OAuth provider messages
 custom_oauth.not_found: "自定义 OAuth 提供商不存在"

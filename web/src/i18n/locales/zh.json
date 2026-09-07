@@ -1,5 +1,13 @@
 {
   "translation": {
+    "User-Agent Management and Routing": "UA 管理和分流",
+    "Minimum client versions": "客户端最低版本",
+    "Enable minimum version requirements": "启用最低版本限制",
+    "Version requirements apply to all groups, independently of UA routing and its whitelist. Unknown clients are unaffected; matching clients without a valid version are rejected.": "版本限制适用于所有分组，独立于 UA 分流及其白名单。未识别的客户端不受影响；已匹配客户端缺少有效版本号时会被拒绝。",
+    "Minimum version for {{client}}": "{{client}} 最低版本",
+    "Leave blank for no minimum. Use major.minor.patch. Older clients receive HTTP 400 with an update reminder.": "留空表示不限制，格式为 主版本.次版本.补丁版本。低版本返回 HTTP 400 并提示更新。",
+    "Codex background and subagent requests using gpt-5.4 are blocked independently of this switch. Normal user requests are unchanged; models are never substituted.": "独立于此开关，Codex 后台及子代理请求禁止使用 gpt-5.4。正常用户请求不变，不会自动替换模型。",
+    "Invalid minimum version. Use major.minor.patch, for example 0.153.0.": "最低版本格式无效，请填写 主版本.次版本.补丁版本，例如 0.153.0。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

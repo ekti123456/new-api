@@ -84,6 +84,8 @@ const defaultModelSettings: ModelSettings = {
   'user_agent_routing_setting.user_agent_whitelist': '[]',
   'user_agent_routing_setting.channel_ids': '[]',
   'user_agent_routing_setting.group_names': '[]',
+  'user_agent_routing_setting.version_check_enabled': false,
+  'user_agent_routing_setting.minimum_versions': '{}',
   'model_deployment.ionet.api_key': '',
   'model_deployment.ionet.enabled': false,
 }

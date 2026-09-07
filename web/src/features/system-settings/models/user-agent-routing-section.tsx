@@ -35,6 +35,11 @@ import { getGroups } from '@/features/users/api'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { UserAgentVersionControls } from './user-agent-version-controls'
+import {
+  parseMinimumVersions,
+  validMinimumVersions,
+} from './user-agent-version-policy'
 
 type Props = {
   defaultValues: {
@@ -42,6 +47,8 @@ type Props = {
     whitelist: string
     channelIds: string
     groupNames: string
+    versionCheckEnabled: boolean
+    minimumVersions: string
   }
 }
 
@@ -71,6 +78,12 @@ export function UserAgentRoutingSection(props: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const [enabled, setEnabled] = useState(props.defaultValues.enabled)
+  const [versionCheckEnabled, setVersionCheckEnabled] = useState(
+    props.defaultValues.versionCheckEnabled
+  )
+  const [minimumVersions, setMinimumVersions] = useState(() =>
+    parseMinimumVersions(props.defaultValues.minimumVersions)
+  )
   const [whitelist, setWhitelist] = useState(props.defaultValues.whitelist)
   const [channelIds, setChannelIds] = useState<number[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
@@ -82,6 +95,10 @@ export function UserAgentRoutingSection(props: Props) {
 
   useEffect(() => {
     setEnabled(props.defaultValues.enabled)
+    setVersionCheckEnabled(props.defaultValues.versionCheckEnabled)
+    setMinimumVersions(
+      parseMinimumVersions(props.defaultValues.minimumVersions)
+    )
     setWhitelist(parseStringList(props.defaultValues.whitelist).join('\n'))
     setSelectedGroups(parseStringList(props.defaultValues.groupNames))
     try {
@@ -125,11 +142,36 @@ export function UserAgentRoutingSection(props: Props) {
   }, [t])
 
   const save = async () => {
+    if (!validMinimumVersions(minimumVersions)) {
+      toast.error(
+        t(
+          'Invalid minimum version. Use major.minor.patch, for example 0.153.0.'
+        )
+      )
+      return
+    }
     if (enabled && channelIds.length === 0) {
       toast.error(t('Please select at least one routing channel'))
       return
     }
     try {
+      const versionResult = await updateOption.mutateAsync({
+        key: 'user_agent_routing_setting.minimum_versions',
+        value: JSON.stringify(
+          Object.fromEntries(
+            Object.entries(minimumVersions).map(([family, minimum]) => [
+              family,
+              minimum.trim(),
+            ])
+          )
+        ),
+      })
+      if (!versionResult.success) return
+      const enabledResult = await updateOption.mutateAsync({
+        key: 'user_agent_routing_setting.version_check_enabled',
+        value: String(versionCheckEnabled),
+      })
+      if (!enabledResult.success) return
       await updateOption.mutateAsync({
         key: 'user_agent_routing_setting.user_agent_whitelist',
         value: JSON.stringify(normalizeWhitelist(whitelist)),
@@ -195,8 +237,15 @@ export function UserAgentRoutingSection(props: Props) {
   const whitelistItems = normalizeWhitelist(whitelist)
 
   return (
-    <SettingsSection title={t('User-Agent Routing')}>
+    <SettingsSection title={t('User-Agent Management and Routing')}>
       <div className='space-y-4'>
+        <UserAgentVersionControls
+          enabled={versionCheckEnabled}
+          minimumVersions={minimumVersions}
+          onEnabledChange={setVersionCheckEnabled}
+          onVersionsChange={setMinimumVersions}
+        />
+        <h3 className='text-sm font-semibold'>{t('User-Agent Routing')}</h3>
         <p className='text-muted-foreground text-sm'>
           {t(
             'For selected channel groups, whitelisted User-Agents keep normal dispatch and other traffic uses only the routing pool.'

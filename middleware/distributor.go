@@ -33,6 +33,14 @@ type ModelRequest struct {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		if rejection := service.CheckUserAgentVersionPolicy(c.Request.UserAgent()); rejection != nil {
+			messageKey := i18n.MsgClientVersionTooOld
+			if rejection.CurrentVersion == "" {
+				messageKey = i18n.MsgClientVersionMissing
+			}
+			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, messageKey, map[string]any{"Client": rejection.Family, "Current": rejection.CurrentVersion, "Minimum": rejection.MinimumVersion}), types.ErrorCode("client_version_unsupported"))
+			return
+		}
 		// Reserve the request's predecessor cutoff before body parsing, waiting,
 		// or channel selection. This is intentionally not the relay/FRT timer.
 		captureCodexRequestArrival(c)
@@ -45,6 +53,9 @@ func Distribute() func(c *gin.Context) {
 		}
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
+		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
+			return
+		}
 		// A Codex naming request belongs to the user root and must inherit that
 		// root's routing side. The initial thread_title is a fresh ephemeral thread,
 		// while description/reconsideration requests carry an explicit parent graph.
@@ -52,6 +63,9 @@ func Distribute() func(c *gin.Context) {
 			service.PrepareUserAgentRoutingMode(c, usingGroup)
 		}
 		rootSession, passiveFeature, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
+		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
+			return
+		}
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
 			if strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {

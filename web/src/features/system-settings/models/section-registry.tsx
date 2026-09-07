@@ -147,7 +147,7 @@ const MODELS_SECTIONS = [
   },
   {
     id: 'user-agent-routing',
-    titleKey: 'User-Agent Routing',
+    titleKey: 'User-Agent Management and Routing',
     build: (settings: ModelSettings) => (
       <UserAgentRoutingSection
         defaultValues={{
@@ -156,6 +156,10 @@ const MODELS_SECTIONS = [
             settings['user_agent_routing_setting.user_agent_whitelist'],
           channelIds: settings['user_agent_routing_setting.channel_ids'],
           groupNames: settings['user_agent_routing_setting.group_names'],
+          versionCheckEnabled:
+            settings['user_agent_routing_setting.version_check_enabled'],
+          minimumVersions:
+            settings['user_agent_routing_setting.minimum_versions'],
         }}
       />
     ),

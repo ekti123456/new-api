@@ -3,6 +3,12 @@ package i18n
 // Message keys for i18n translations
 // Use these constants instead of hardcoded strings
 
+const (
+	MsgClientVersionTooOld         = "distributor.client_version_too_old"
+	MsgClientVersionMissing        = "distributor.client_version_missing"
+	MsgCodexPassiveModelRestricted = "distributor.codex_passive_model_restricted"
+)
+
 // Common error messages
 const (
 	MsgInvalidParams     = "common.invalid_params"

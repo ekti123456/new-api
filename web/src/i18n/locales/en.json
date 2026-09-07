@@ -1,5 +1,13 @@
 {
   "translation": {
+    "User-Agent Management and Routing": "User-Agent Management and Routing",
+    "Minimum client versions": "Minimum client versions",
+    "Enable minimum version requirements": "Enable minimum version requirements",
+    "Version requirements apply to all groups, independently of UA routing and its whitelist. Unknown clients are unaffected; matching clients without a valid version are rejected.": "Version requirements apply to all groups, independently of UA routing and its whitelist. Unknown clients are unaffected; matching clients without a valid version are rejected.",
+    "Minimum version for {{client}}": "Minimum version for {{client}}",
+    "Leave blank for no minimum. Use major.minor.patch. Older clients receive HTTP 400 with an update reminder.": "Leave blank for no minimum. Use major.minor.patch. Older clients receive HTTP 400 with an update reminder.",
+    "Codex background and subagent requests using gpt-5.4 are blocked independently of this switch. Normal user requests are unchanged; models are never substituted.": "Codex background and subagent requests using gpt-5.4 are blocked independently of this switch. Normal user requests are unchanged; models are never substituted.",
+    "Invalid minimum version. Use major.minor.patch, for example 0.153.0.": "Invalid minimum version. Use major.minor.patch, for example 0.153.0.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

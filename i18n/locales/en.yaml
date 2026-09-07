@@ -274,6 +274,9 @@ distributor.get_channel_failed: "Failed to get available channel for model {{.Mo
 distributor.no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (distributor)"
 distributor.invalid_midjourney_request: "Invalid Midjourney request: {{.Error}}"
 distributor.invalid_request_parse_model: "Invalid request, unable to parse model"
+distributor.client_version_too_old: "{{.Client}} version {{.Current}} is below the required {{.Minimum}}. Please update Codex to {{.Minimum}} or later and restart the client."
+distributor.client_version_missing: "Unable to read a valid version from {{.Client}}. Please update Codex to {{.Minimum}} or later, restart the client, and preserve the original User-Agent."
+distributor.codex_passive_model_restricted: "gpt-5.4 is not allowed for Codex background or subagent requests. Please update and restart Codex. The gateway will not substitute another model."
 
 # Custom OAuth provider messages
 custom_oauth.not_found: "Custom OAuth provider not found"

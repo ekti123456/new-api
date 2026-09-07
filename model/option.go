@@ -219,6 +219,12 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == "user_agent_routing_setting.minimum_versions" {
+		return operation_setting.ValidateUserAgentMinimumVersions(value)
+	}
+	if key == "user_agent_routing_setting.version_check_enabled" && value != "true" && value != "false" {
+		return fmt.Errorf("version_check_enabled must be a boolean")
+	}
 	if key == "codex_unlinked_account_fallback_enabled" {
 		normalized := strings.ToLower(strings.TrimSpace(value))
 		if normalized != "true" && normalized != "false" && normalized != "1" && normalized != "0" {
