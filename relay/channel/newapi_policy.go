@@ -83,6 +83,7 @@ type newAPIPolicyRequestContextKey struct{}
 const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
+	WindowGrant      string `json:"window_grant,omitempty"`
 	PlatformID       string `json:"platform_id"`
 	UserName         string `json:"user_name,omitempty"`
 	UserEmail        string `json:"user_email,omitempty"`
@@ -143,10 +144,16 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		return err
 	}
 	if !cfg.Enabled || c == nil || info == nil || info.ChannelMeta == nil {
+		if info != nil && info.WindowBilling != nil {
+			return fmt.Errorf("window billing requires signed policy forwarding")
+		}
 		return nil
 	}
 	binding, found := matchNewAPIPolicyBinding(cfg.Bindings, req.URL, info.ApiKey)
 	if !found {
+		if info.WindowBilling != nil {
+			return fmt.Errorf("window billing requires the original signed destination")
+		}
 		return nil
 	}
 
@@ -215,6 +222,12 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		}
 	}
 	meta.PassiveFeature = codexPassiveRootSessionOverrideFeature(c)
+	if err := ValidateWindowBillingDestination(info, binding, meta.RootSessionFingerprint); err != nil {
+		return err
+	}
+	if info.WindowBilling != nil {
+		meta.WindowGrant = info.WindowBilling.Ticket
+	}
 	rootResolution := CodexRootSessionResolution{
 		RootID:       rootSession.rootID,
 		Resolved:     rootSession.state == newAPIPolicyRootSessionResolved,

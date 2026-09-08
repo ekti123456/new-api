@@ -128,7 +128,7 @@ func refreshTieredBillingRoute(relayInfo *relaycommon.RelayInfo, channelID int) 
 		quotaBeforeGroup = cost / 1_000_000 * snap.QuotaPerUnit
 		estimatedTier = trace.MatchedTier
 	}
-	estimatedQuotaAfterGroup := quotaBeforeGroup * groupRatio
+	estimatedQuotaAfterGroup := quotaBeforeGroup * groupRatio * relayInfo.WindowMultiplier()
 	estimatedQuota, err := billingexpr.QuotaRoundStrict(estimatedQuotaAfterGroup)
 	if err != nil {
 		return nil, err

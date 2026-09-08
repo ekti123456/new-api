@@ -181,12 +181,24 @@ func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	if userId == 0 {
 		return errors.New("id 为空！")
 	}
-	settingBytes, err := common.Marshal(setting)
+	var settingValue string
+	err := DB.Transaction(func(transaction *gorm.DB) error {
+		var current User
+		if err := lockForUpdate(transaction).Select("id", "setting").First(&current, userId).Error; err != nil {
+			return err
+		}
+		preferences := current.GetSetting()
+		setting.WindowExpansionEnabled = preferences.WindowExpansionEnabled
+		setting.WindowExpansionAcceptedRatio = preferences.WindowExpansionAcceptedRatio
+		setting.WindowExpansionJoined = preferences.WindowExpansionJoined
+		settingBytes, err := common.Marshal(setting)
+		if err != nil {
+			return err
+		}
+		settingValue = string(settingBytes)
+		return transaction.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error
+	})
 	if err != nil {
-		return err
-	}
-	settingValue := string(settingBytes)
-	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
 		return err
 	}
 	return updateUserSettingCache(userId, settingValue)

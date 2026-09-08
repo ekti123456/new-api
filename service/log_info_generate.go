@@ -41,6 +41,9 @@ func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, o
 	if relayInfo == nil {
 		return
 	}
+	if relayInfo.WindowBilling != nil && other != nil {
+		other["window_expansion"] = relayInfo.WindowBilling
+	}
 	clamp := relayInfo.QuotaClamp
 	if clamp == nil {
 		return

@@ -117,6 +117,7 @@ export interface ToolSurchargeItem {
 }
 
 export interface LogOtherData {
+  window_expansion?: { id: string; expanded: boolean; multiplier: number }
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number

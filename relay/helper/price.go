@@ -70,7 +70,20 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 	return groupRatioInfo
 }
 
-func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (hosttypes.PriceData, error) {
+func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (result hosttypes.PriceData, resultErr error) {
+	defer func() {
+		if resultErr != nil || info.WindowMultiplier() == 1 {
+			return
+		}
+		result.QuotaToPreConsume, resultErr = common.QuotaFromFloatStrict(float64(result.QuotaToPreConsume) * info.WindowMultiplier())
+		if resultErr != nil {
+			return
+		}
+		info.PriceData = result
+		if info.TieredBillingSnapshot != nil {
+			info.TieredBillingSnapshot.EstimatedQuotaAfterGroup = result.QuotaToPreConsume
+		}
+	}()
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)

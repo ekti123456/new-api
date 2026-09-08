@@ -105,6 +105,11 @@ export function useSidebarData(): SidebarData {
         title: t('Personal'),
         items: [
           {
+            title: t('Window management'),
+            url: '/windows',
+            icon: LayoutDashboard,
+          },
+          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,

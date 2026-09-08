@@ -1574,6 +1574,9 @@ func UpdateUserSetting(c *gin.Context) {
 
 	// 构建设置
 	settings := dto.UserSetting{
+		WindowExpansionEnabled:           existingSettings.WindowExpansionEnabled,
+		WindowExpansionAcceptedRatio:     existingSettings.WindowExpansionAcceptedRatio,
+		WindowExpansionJoined:            existingSettings.WindowExpansionJoined,
 		NotifyType:                       req.QuotaWarningType,
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,

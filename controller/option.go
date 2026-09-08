@@ -142,6 +142,9 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case "window_expansion_setting.policy":
+		common.ApiErrorMsg(c, "Use the window management policy editor")
+		return
 	case "ReferralBaseRate", "ReferralMaxRate":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)

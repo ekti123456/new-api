@@ -81,6 +81,7 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
+	WindowBilling     *WindowBillingGrant
 	TokenId           int
 	TokenKey          string
 	TokenGroup        string

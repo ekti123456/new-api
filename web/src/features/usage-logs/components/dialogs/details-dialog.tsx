@@ -1147,6 +1147,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
+        {other?.window_expansion && (
+          <DetailSection label={t('Window management')}>
+            <span>
+              {other.window_expansion.expanded
+                ? t('Expanded windows')
+                : t('Standard windows')}{' '}
+              · ×{other.window_expansion.multiplier}
+            </span>
+          </DetailSection>
+        )}
+
         {/* Tiered pricing breakdown (when billing_mode is tiered_expr) */}
         {isTieredBilling && other?.expr_b64 && (
           <DetailSection label={t('Dynamic Pricing')}>

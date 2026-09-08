@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -152,6 +153,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	relayInfo.SetEstimatePromptTokens(tokens)
+	finishWindowBilling, windowErr := relaychannel.PrepareWindowBilling(c, relayInfo)
+	if windowErr != nil {
+		var denied *relaychannel.WindowAdmissionDenied
+		if errors.As(windowErr, &denied) {
+			newAPIError = types.NewErrorWithStatusCode(windowErr, types.ErrorCode("session_creation_limit_exceeded"), http.StatusBadRequest, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		} else {
+			newAPIError = types.NewErrorWithStatusCode(windowErr, types.ErrorCode("window_service_unavailable"), http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+		}
+		return
+	}
+	if finishWindowBilling != nil {
+		defer func() { finishWindowBilling(newAPIError == nil) }()
+	}
 
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
@@ -339,6 +353,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	if c.GetBool("window_billing_pinned") {
+		return false
+	}
 	if openaiErr == nil {
 		return false
 	}

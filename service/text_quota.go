@@ -219,7 +219,7 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 	// MaxQuota and adding the surcharge could push the total past the int32
 	// quota policy bound (persisted quota columns are 32-bit).
 	total, clamp := common.QuotaFromDecimalChecked(
-		decimal.NewFromInt(int64(tieredQuota)).Add(summary.ToolCallSurchargeQuota),
+		decimal.NewFromInt(int64(tieredQuota)).Add(summary.ToolCallSurchargeQuota.Mul(decimal.NewFromFloat(relayInfo.WindowMultiplier()))),
 	)
 	noteQuotaClamp(relayInfo, clamp)
 	return total
@@ -422,6 +422,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		}
 	}
 
+	if !tieredBillingApplied || tieredResult != nil {
+		summary.Quota = applyWindowExpansionQuota(relayInfo, summary.Quota)
+	}
 	for _, item := range summary.ToolSurchargeItems {
 		q := decimal.NewFromFloat(item.Price).
 			Mul(decimal.NewFromInt(int64(item.Count))).
