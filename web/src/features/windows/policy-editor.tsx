@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 
 import { saveExpansionPolicy } from './api'
 import type { ExpansionPolicy } from './types'
@@ -42,7 +43,7 @@ export function WindowPolicyEditor(props: {
       client.invalidateQueries({ queryKey: ['personal-windows'] }),
   })
   return (
-    <details className='rounded-xl border p-4'>
+    <details className='bg-card rounded-xl border p-4 sm:p-5'>
       <summary className='cursor-pointer font-medium'>
         {t('Expansion policy')}
       </summary>
@@ -57,11 +58,22 @@ export function WindowPolicyEditor(props: {
           })
         )}
       >
-        <label className='sm:col-span-3'>
-          <input type='checkbox' {...form.register('enabled')} />{' '}
-          {t('Enable expansion')}
-        </label>
-        <label>
+        <div className='bg-muted/30 flex items-center justify-between gap-4 rounded-lg border p-3 sm:col-span-3'>
+          <span className='text-sm font-medium'>{t('Enable expansion')}</span>
+          <Controller
+            name='enabled'
+            control={form.control}
+            render={({ field }) => (
+              <Switch
+                aria-label={t('Enable expansion')}
+                checked={field.value}
+                onCheckedChange={field.onChange}
+                disabled={mutation.isPending}
+              />
+            )}
+          />
+        </div>
+        <label className='space-y-2 text-sm'>
           {t('Additional windows')}
           <Input
             type='number'
@@ -70,7 +82,7 @@ export function WindowPolicyEditor(props: {
             {...form.register('extra_limit', { valueAsNumber: true })}
           />
         </label>
-        <label>
+        <label className='space-y-2 text-sm'>
           {t('Expansion multiplier')}
           <Input
             type='number'
@@ -80,7 +92,7 @@ export function WindowPolicyEditor(props: {
             {...form.register('multiplier', { valueAsNumber: true })}
           />
         </label>
-        <label>
+        <label className='space-y-2 text-sm'>
           {t('Codex2API channel IDs')}
           <Input placeholder='22,23' {...form.register('channels')} />
         </label>

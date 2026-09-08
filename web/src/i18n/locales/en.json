@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Window expansion": "Window expansion",
+    "Expansion enabled": "Expansion enabled",
+    "Not enabled": "Not enabled",
+    "Price confirmation required": "Price confirmation required",
+    "More room when your standard windows are full": "More room when your standard windows are full",
+    "Only additional windows cost more": "Only additional windows cost more",
+    "Standard windows first, no surcharge for enabling": "Standard windows first, no surcharge for enabling",
+    "Window prices stay fixed until expiry, even after disabling. Creation cooldown and account restrictions still apply.": "Window prices stay fixed until expiry, even after disabling. Creation cooldown and account restrictions still apply.",
+    "Track your windows, recovery times and expansion charges": "Track your windows, recovery times and expansion charges",
+    "Current windows": "Current windows",
     "Created at": "Created at",
     "Load more": "Load more",
     "Last updated": "Last updated",

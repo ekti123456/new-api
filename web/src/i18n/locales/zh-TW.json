@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Window expansion": "窗口擴容",
+    "Expansion enabled": "已開啟擴容",
+    "Not enabled": "未開啟",
+    "Price confirmation required": "待確認新價格",
+    "More room when your standard windows are full": "普通窗口滿額時，按需使用額外窗口",
+    "Only additional windows cost more": "僅擴容窗口加價",
+    "Standard windows first, no surcharge for enabling": "優先使用普通窗口，開啟本身不收費",
+    "Window prices stay fixed until expiry, even after disabling. Creation cooldown and account restrictions still apply.": "窗口倍率固定至到期，關閉擴容也不會改變已有窗口的價格。建立冷卻與帳號限制仍然生效。",
+    "Track your windows, recovery times and expansion charges": "查看窗口佔用、恢復時間與擴容費用",
+    "Current windows": "目前窗口",
     "Created at": "建立時間",
     "Load more": "載入更多",
     "Last updated": "更新於",

@@ -1,7 +1,10 @@
+import { Clock3, Layers, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 import { remainingWindowTime } from './remaining-window-time'
 import type { WindowPool } from './types'
@@ -30,10 +33,10 @@ export function WindowPoolCard(props: {
   }
   return (
     <section
-      className='min-w-0 space-y-3 rounded-xl border p-4'
+      className='bg-card min-w-0 space-y-4 rounded-xl border p-4 shadow-sm sm:p-5'
       aria-label={props.pool.name}
     >
-      <h2 className='font-semibold break-all'>{props.pool.name}</h2>
+      <h3 className='text-sm font-semibold break-all'>{props.pool.name}</h3>
       {!props.pool.available ? (
         <p role='alert' className='text-destructive'>
           {t('Window service unavailable')} ·{' '}
@@ -41,21 +44,48 @@ export function WindowPoolCard(props: {
         </p>
       ) : (
         <>
-          <div className='flex flex-wrap gap-4 text-sm'>
-            <span>
-              {t('Standard windows')}: {props.pool.status.truncated && '≥'}
-              {windows.length - expanded}/{props.pool.status.limit || '—'}
-            </span>
-            <span>
-              {t('Expanded windows')}: {props.pool.status.truncated && '≥'}
-              {expanded}
-            </span>
-            <span>
-              {t('Creation cooldown')}: {cooldown}
-            </span>
-          </div>
+          <dl className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
+            <div
+              aria-label={t('Standard windows')}
+              className='bg-muted/40 space-y-2 rounded-lg p-3'
+            >
+              <dt className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+                <Layers className='size-3.5' aria-hidden='true' />
+                {t('Standard windows')}
+              </dt>
+              <dd className='text-xl font-semibold tabular-nums'>
+                {props.pool.status.truncated && '≥'}
+                {windows.length - expanded}
+                <span className='text-muted-foreground text-sm font-normal'>
+                  /{props.pool.status.limit || '—'}
+                </span>
+              </dd>
+            </div>
+            <div
+              aria-label={t('Expanded windows')}
+              className='bg-primary/5 space-y-2 rounded-lg p-3'
+            >
+              <dt className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+                <Sparkles className='size-3.5' aria-hidden='true' />
+                {t('Expanded windows')}
+              </dt>
+              <dd className='text-xl font-semibold tabular-nums'>
+                {props.pool.status.truncated && '≥'}
+                {expanded}
+              </dd>
+            </div>
+            <div className='bg-muted/40 col-span-2 space-y-2 rounded-lg p-3 sm:col-span-1'>
+              <dt className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+                <Clock3 className='size-3.5' aria-hidden='true' />
+                {t('Creation cooldown')}
+              </dt>
+              <dd className='text-sm font-medium tabular-nums'>{cooldown}</dd>
+            </div>
+          </dl>
           {windows.length === 0 && (
-            <p className='text-muted-foreground'>{t('No active windows')}</p>
+            <p className='text-muted-foreground rounded-lg border border-dashed px-4 py-8 text-center text-sm'>
+              {t('No active windows')}
+            </p>
           )}
           {props.pool.status.truncated && (
             <p role='status'>
@@ -67,34 +97,59 @@ export function WindowPoolCard(props: {
             {windows.slice(0, visible).map((window) => (
               <article
                 key={window.id}
-                className='bg-muted/40 min-w-0 space-y-2 rounded-lg p-3 text-sm'
+                aria-label={window.id}
+                className={cn(
+                  'min-w-0 space-y-3 rounded-lg border p-4 text-sm',
+                  window.expanded && 'border-primary/25 bg-primary/5'
+                )}
               >
-                <div className='flex flex-wrap justify-between gap-2'>
-                  <code className='truncate' title={window.id}>
+                <div className='flex flex-wrap items-center justify-between gap-2'>
+                  <code
+                    className='text-muted-foreground min-w-0 truncate text-xs'
+                    title={window.id}
+                  >
                     {window.id.slice(0, 16)}
                   </code>
-                  <span>
+                  <Badge variant={window.expanded ? 'default' : 'secondary'}>
                     {window.expanded
                       ? t('Expanded windows')
                       : t('Standard windows')}{' '}
                     · ×{window.multiplier}
-                  </span>
+                  </Badge>
                 </div>
-                <p>
-                  {t('Created at')}:{' '}
-                  {new Date(window.created_at).toLocaleString()}
-                </p>
-                <p>
-                  {t('Recovery time')}:{' '}
-                  {new Date(window.expires_at).toLocaleString()}
-                </p>
-                <p>
-                  {t('Remaining')}:{' '}
-                  <span className='tabular-nums'>
+                <div className='flex flex-wrap items-baseline justify-between gap-2'>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Remaining')}
+                  </span>
+                  <span className='font-mono text-lg font-semibold tabular-nums'>
                     {remainingWindowTime(window.expires_at, props.now)}
                   </span>
-                </p>
-                {window.model && <p className='break-all'>{window.model}</p>}
+                </div>
+                <dl className='space-y-2 border-t pt-3 text-xs'>
+                  <div className='flex flex-wrap justify-between gap-x-3 gap-y-1'>
+                    <dt className='text-muted-foreground'>{t('Created at')}</dt>
+                    <dd>
+                      <time dateTime={window.created_at}>
+                        {new Date(window.created_at).toLocaleString()}
+                      </time>
+                    </dd>
+                  </div>
+                  <div className='flex flex-wrap justify-between gap-x-3 gap-y-1'>
+                    <dt className='text-muted-foreground'>
+                      {t('Recovery time')}
+                    </dt>
+                    <dd>
+                      <time dateTime={window.expires_at}>
+                        {new Date(window.expires_at).toLocaleString()}
+                      </time>
+                    </dd>
+                  </div>
+                </dl>
+                {window.model && (
+                  <p className='text-muted-foreground text-xs break-all'>
+                    {window.model}
+                  </p>
+                )}
               </article>
             ))}
           </div>
