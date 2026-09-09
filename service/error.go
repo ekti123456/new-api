@@ -177,6 +177,8 @@ func isCodex2APINonRetryableSessionError(resp *http.Response, openAIError *types
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "session_model_unavailable":
+		return resp.StatusCode == http.StatusBadRequest
 	case "account_session_capacity_exceeded":
 		return resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusTooManyRequests
 	case "session_creation_limit_exceeded":

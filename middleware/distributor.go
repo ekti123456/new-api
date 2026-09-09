@@ -127,6 +127,10 @@ func Distribute() func(c *gin.Context) {
 			}
 			if rootErr != nil {
 				logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
+				if errors.Is(rootErr, errCodexRootModelUnavailable) {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, "当前会话绑定的上游渠道不支持所选模型，请新开对话后使用该模型。", types.ErrorCode("session_model_unavailable"))
+					return
+				}
 				if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root channel is unavailable. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
 					return

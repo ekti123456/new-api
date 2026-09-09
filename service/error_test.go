@@ -172,6 +172,20 @@ func TestRelayErrorHandlerKeepsAccountSessionCapacityMessage(t *testing.T) {
 	require.True(t, types.IsSkipRetryError(newAPIError))
 }
 
+func TestRelayErrorHandlerKeepsSessionModelUnavailableMessage(test *testing.T) {
+	const message = "当前会话绑定的上游账号不支持所选模型，请新开对话后使用该模型。"
+	response := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"session_model_unavailable"}}`)),
+	}
+	requestError := RelayErrorHandler(test.Context(), response, false)
+	require.NotNil(test, requestError)
+	require.Equal(test, http.StatusBadRequest, requestError.StatusCode)
+	require.Equal(test, message, requestError.Error())
+	require.Equal(test, types.ErrorCode("session_model_unavailable"), requestError.GetErrorCode())
+	require.True(test, types.IsSkipRetryError(requestError))
+}
+
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	withDebugEnabled(t, true)
 

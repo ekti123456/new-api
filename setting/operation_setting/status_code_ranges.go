@@ -34,6 +34,7 @@ var alwaysSkipRetryStatusCodes = map[int]struct{}{
 }
 
 var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
+	types.ErrorCode("session_model_unavailable"):         {},
 	types.ErrorCodeBadResponseBody:                       {},
 	types.ErrorCode("codex_root_account_wait_timeout"):   {},
 	types.ErrorCode("codex_background_root_unavailable"): {},

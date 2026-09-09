@@ -32,6 +32,7 @@ const (
 )
 
 var (
+	errCodexRootModelUnavailable        = errors.New("root channel does not support the requested model")
 	codexUnlinkedPassiveRootWaitTimeout = 3 * time.Second
 	codexAmbientRootWaitTimeout         = relaychannel.CodexRootAccountWaitTimeout
 	codexTitleRootWaitTimeout           = relaychannel.CodexRootAccountWaitTimeout
@@ -500,11 +501,11 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 	if channel.UARoutingOnly && !service.IsUserAgentRoutingChannelConfigured(c, binding.SelectedGroup, channel.Id) {
 		return nil, "", true, errors.New("root channel is outside the current UA routing pool")
 	}
+	if !passiveInternal && !model.IsChannelEnabledForGroupModel(binding.SelectedGroup, modelName, channel.Id) {
+		return nil, "", true, errCodexRootModelUnavailable
+	}
 	if !channelSupportsRequestPath(channel, c.Request.URL.Path, modelName) {
 		return nil, "", true, errors.New("root channel does not support this request path")
-	}
-	if !passiveInternal && !model.IsChannelEnabledForGroupModel(binding.SelectedGroup, modelName, channel.Id) {
-		return nil, "", true, errors.New("root channel does not support the requested model")
 	}
 
 	key, keyErr := channel.GetEnabledKeyAt(binding.KeyIndex)
@@ -533,7 +534,7 @@ func prepareCodexRootChannelRoute(c *gin.Context, resolution relaychannel.CodexR
 // fail-closed when it disagrees with the root binding.
 func codexRootBindingFallbackAllowed(c *gin.Context, resolution relaychannel.CodexRootSessionResolution, rootBindingFound bool, rootErr error) bool {
 	if c == nil || rootErr == nil || !rootBindingFound || !resolution.Resolved ||
-		resolution.Related || resolution.IdentityConflict {
+		resolution.Related || resolution.IdentityConflict || errors.Is(rootErr, errCodexRootModelUnavailable) {
 		return false
 	}
 	return strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyTokenSpecificChannelId)) == ""
