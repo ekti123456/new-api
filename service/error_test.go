@@ -157,7 +157,7 @@ func TestRelayErrorHandlerDoesNotTrustSessionLimitCodeWithoutFullWindowHeaders(t
 }
 
 func TestRelayErrorHandlerKeepsAccountSessionCapacityMessage(t *testing.T) {
-	const message = "上游账号的活跃会话容量已满，请复用已有会话或稍后再试"
+	const message = "上游账号的模型活跃会话容量已满，请使用其他模型，或者扩容窗口"
 	resp := &http.Response{
 		StatusCode: http.StatusTooManyRequests,
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"account_session_capacity_exceeded"}}`)),
