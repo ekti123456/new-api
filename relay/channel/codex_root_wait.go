@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const CodexRootAccountWaitTimeout = 30 * time.Second
+const CodexRootAccountWaitTimeout = 60 * time.Second
 const codexRootAccountWaitDeadlineKey = "codex_root_account_wait_deadline"
 
 type CodexRootAssociation struct {

@@ -23,7 +23,7 @@ func abortCodexBackgroundRootFailure(requestContext *gin.Context, resolution rel
 	if errors.Is(failure, errCodexBackgroundRootAmbiguous) {
 		message = "同一范围内存在多个主会话，无法确定后台请求归属。请求已停止，未选择其他账号。"
 	} else if errors.Is(failure, context.DeadlineExceeded) {
-		message = "等待主会话绑定超过30秒，请先发起主请求。请求已停止，未选择其他账号。"
+		message = "等待主会话绑定超过60秒，请先发起主请求。请求已停止，未选择其他账号。"
 	}
 	abortWithOpenAiMessage(requestContext, http.StatusBadRequest, message, types.ErrorCode("codex_background_root_unavailable"))
 	return true

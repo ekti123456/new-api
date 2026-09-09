@@ -50,7 +50,7 @@ func TestCodexSessionPolicyErrorsNeverRetry(test *testing.T) {
 	previousRanges := operation_setting.AutomaticRetryStatusCodeRanges
 	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 400, End: 599}}
 	test.Cleanup(func() { operation_setting.AutomaticRetryStatusCodeRanges = previousRanges })
-	for _, code := range []types.ErrorCode{"codex_root_account_wait_timeout", "codex_background_root_unavailable", "session_model_unavailable"} {
+	for _, code := range []types.ErrorCode{"codex_root_account_wait_timeout", "codex_background_root_unavailable", "session_model_unavailable", "codex_root_already_named", "window_billing_refresh_required"} {
 		requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 		requestError := types.NewErrorWithStatusCode(errors.New("background root unavailable"), code, 400)
 		require.False(test, shouldRetry(requestContext, requestError, 5), string(code))

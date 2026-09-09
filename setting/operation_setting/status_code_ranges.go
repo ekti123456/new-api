@@ -38,6 +38,8 @@ var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
 	types.ErrorCodeBadResponseBody:                       {},
 	types.ErrorCode("codex_root_account_wait_timeout"):   {},
 	types.ErrorCode("codex_background_root_unavailable"): {},
+	types.ErrorCode("codex_root_already_named"):          {},
+	types.ErrorCode("window_billing_refresh_required"):   {},
 }
 
 func AutomaticDisableStatusCodesToString() string {

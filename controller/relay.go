@@ -163,9 +163,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
-	if finishWindowBilling != nil {
-		defer func() { finishWindowBilling(newAPIError == nil) }()
-	}
+	defer func() {
+		if finishWindowBilling != nil {
+			finishWindowBilling(newAPIError == nil)
+		}
+	}()
 
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
@@ -204,6 +206,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	windowRenewed := false
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		common.ClearCodexDispatchDiagnostic(c)
@@ -252,6 +255,42 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		if !windowRenewed && c.GetBool("window_billing_checked") && !c.Writer.Written() && newAPIError.StatusCode == http.StatusBadRequest && newAPIError.GetErrorCode() == types.ErrorCode("window_billing_refresh_required") {
+			windowRenewed = true
+			refreshedFinish, refreshErr := relaychannel.RefreshWindowBilling(c, relayInfo)
+			if refreshErr != nil {
+				statusCode := http.StatusServiceUnavailable
+				code := types.ErrorCode("window_service_unavailable")
+				var denied *relaychannel.WindowAdmissionDenied
+				if errors.As(refreshErr, &denied) {
+					statusCode, code = http.StatusBadRequest, types.ErrorCode("session_creation_limit_exceeded")
+				}
+				newAPIError = types.NewErrorWithStatusCode(refreshErr, code, statusCode, types.ErrOptionWithSkipRetry())
+				break
+			}
+			finishWindowBilling = refreshedFinish
+			priceData, err = helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+			if err != nil {
+				newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				break
+			}
+			if !priceData.FreeModel {
+				if relayInfo.Billing == nil {
+					newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+				} else if reserveErr := relayInfo.Billing.Reserve(priceData.QuotaToPreConsume); reserveErr != nil {
+					newAPIError = types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+				} else {
+					newAPIError = nil
+				}
+				if newAPIError != nil {
+					break
+				}
+			}
+			c.Set("window_billing_retry_request_id", common.NewRequestId())
+			relayInfo.LastError = nil
+			retryParam.ResetRetryNextTry()
+			continue
+		}
 		relayInfo.LastError = newAPIError
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)

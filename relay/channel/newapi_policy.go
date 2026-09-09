@@ -179,6 +179,9 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	if requestID == "" {
 		requestID = common2.NewRequestId()
 	}
+	if retryID := c.GetString("window_billing_retry_request_id"); retryID != "" && !strings.HasSuffix(req.URL.Path, "/session-windows") {
+		requestID = retryID
+	}
 
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	path := req.URL.EscapedPath()

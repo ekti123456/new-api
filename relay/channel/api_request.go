@@ -365,6 +365,10 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
 	model.UpdateUserSessionWindowFromHeader(info.UserId, req.URL.Scheme+"://"+req.URL.Host, resp.Header)
+	if err := acceptWindowAuthorizationResponse(c, resp, info); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
 	processNewAPIPolicyResponse(c, resp)
 	return resp, nil
 }

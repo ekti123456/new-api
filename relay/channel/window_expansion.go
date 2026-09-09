@@ -34,6 +34,7 @@ type WindowControlInput struct {
 	ExtraLimit     int     `json:"extra_limit"`
 	Multiplier     float64 `json:"multiplier"`
 	GrantID        string  `json:"grant_id,omitempty"`
+	ReservationID  string  `json:"reservation_id,omitempty"`
 }
 
 type WindowAdmissionDenied struct{ Message string }
@@ -171,20 +172,22 @@ func verifyWindowBillingTicket(binding newAPIPolicyBinding, key string, userID i
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
 	var envelope struct {
-		Version     int                            `json:"version"`
-		Platform    string                         `json:"platform"`
-		UserID      string                         `json:"user_id"`
-		Fingerprint string                         `json:"root_fingerprint"`
-		Grant       relaycommon.WindowBillingGrant `json:"grant"`
+		Version       int                            `json:"version"`
+		Platform      string                         `json:"platform"`
+		UserID        string                         `json:"user_id"`
+		Fingerprint   string                         `json:"root_fingerprint"`
+		Grant         relaycommon.WindowBillingGrant `json:"grant"`
+		ReservationID string                         `json:"reservation_id,omitempty"`
 	}
 	if err != nil || common.Unmarshal(raw, &envelope) != nil {
 		return nil, errors.New("invalid billing grant")
 	}
 	grant := envelope.Grant
-	if envelope.Version != 1 || envelope.Platform != binding.PlatformID || envelope.UserID != strconv.Itoa(userID) || envelope.Fingerprint != fingerprint || grant.ID == "" || !grant.ExpiresAt.After(time.Now()) || grant.Multiplier < 1 || grant.Multiplier > 10 || math.IsNaN(grant.Multiplier) || math.IsInf(grant.Multiplier, 0) || (!grant.Expanded && grant.Multiplier != 1) {
+	if envelope.Version != 1 || envelope.Platform != binding.PlatformID || envelope.UserID != strconv.Itoa(userID) || envelope.Fingerprint != fingerprint || grant.ID == "" || len(envelope.ReservationID) > 64 || (grant.NoWindow && grant.Expanded) || !grant.ExpiresAt.After(time.Now()) || grant.Multiplier < 1 || grant.Multiplier > 10 || math.IsNaN(grant.Multiplier) || math.IsInf(grant.Multiplier, 0) || (!grant.Expanded && grant.Multiplier != 1) {
 		return nil, errors.New("window billing scope or tariff mismatch")
 	}
 	grant.Ticket, grant.BindingHash, grant.Fingerprint = ticket, windowBindingHash(binding, key), fingerprint
+	grant.ReservationID = envelope.ReservationID
 	return &grant, nil
 }
 
@@ -243,13 +246,13 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 		return nil, nil
 	}
 	policy := operation_setting.GetWindowExpansionPolicy()
-	if !policy.Enabled && !info.UserSetting.WindowExpansionJoined {
+	if !policy.Enabled && !info.UserSetting.WindowExpansionJoined && !requestContext.GetBool("window_billing_checked") {
 		return nil, nil
 	}
 	shadow := *info
 	shadow.InitChannelMeta(requestContext)
 	configured := slices.Contains(policy.ChannelIDs, shadow.ChannelId)
-	if !configured && !info.UserSetting.WindowExpansionJoined {
+	if !configured && !info.UserSetting.WindowExpansionJoined && !requestContext.GetBool("window_billing_checked") {
 		return nil, nil
 	}
 	_, binding, err := windowControlDestination(&shadow)
@@ -265,33 +268,29 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 	}
 	fingerprint := newAPIPolicyRootSessionFingerprint(binding.PlatformID, strconv.Itoa(info.UserId), root.rootID)
 	cacheKey := windowBindingHash(binding, shadow.ApiKey) + ":" + strconv.Itoa(info.UserId) + ":" + fingerprint
+	if expected := requestContext.GetString("window_billing_scope"); expected != "" && expected != cacheKey {
+		return nil, errors.New("window renewal cannot change its root or destination")
+	}
+	requestContext.Set("window_billing_checked", true)
+	requestContext.Set("window_billing_scope", cacheKey)
 	windowBillingCache.Lock()
 	cached, found := windowBillingCache.getLocked(cacheKey)
 	windowBillingCache.Unlock()
-	if found && cached.until.After(time.Now()) && (cached.grant.ID == "" || cached.grant.ExpiresAt.After(time.Now())) {
+	if found && cached.until.After(time.Now()) && (cached.grant.ID == "" || (cached.grant.Confirmed && cached.grant.ExpiresAt.After(time.Now()))) {
 		if cached.grant.ID == "" {
 			return nil, nil
 		}
 		copy := cached.grant
 		info.WindowBilling = &copy
 		requestContext.Set("window_billing_pinned", true)
-		return func(success bool) {
-			if success {
-				return
-			}
-			windowBillingCache.Lock()
-			if current := windowBillingCache.items[cacheKey]; current.grant.ID == copy.ID {
-				windowBillingCache.deleteLocked(cacheKey)
-			}
-			windowBillingCache.Unlock()
-		}, nil
+		return func(success bool) { finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success) }, nil
 	}
 	preferences, err := model.GetUserSetting(info.UserId, true)
 	if err != nil {
 		return nil, errors.New("窗口扩容设置暂时无法确认，请稍后重试")
 	}
 	allow := configured && policy.Enabled && preferences.WindowExpansionEnabled && preferences.WindowExpansionAcceptedRatio >= policy.Multiplier
-	result, err := RequestUserWindows(requestContext, &shadow, WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier})
+	result, err := RequestUserWindows(requestContext, &shadow, WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, ReservationID: common.GetUUID()})
 	if err != nil {
 		return nil, err
 	}
@@ -309,22 +308,78 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 	}
 	info.WindowBilling = grant
 	requestContext.Set("window_billing_pinned", true)
-	return func(success bool) {
-		if success {
-			windowBillingCache.Lock()
-			windowBillingCache.putLocked(cacheKey, cachedWindowGrant{grant: *grant, until: grant.ExpiresAt})
-			windowBillingCache.Unlock()
-			return
-		}
-		windowBillingCache.Lock()
+	return func(success bool) { finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success) }, nil
+}
+
+func finishWindowAuthorization(request *gin.Context, info, destination *relaycommon.RelayInfo, cacheKey string, success bool) {
+	grant := info.WindowBilling
+	if grant == nil {
+		return
+	}
+	windowBillingCache.Lock()
+	if grant.Confirmed && success && grant.ExpiresAt.After(time.Now()) {
+		windowBillingCache.putLocked(cacheKey, cachedWindowGrant{grant: *grant, until: grant.ExpiresAt})
+	} else if current := windowBillingCache.items[cacheKey]; current.grant.ID == grant.ID && (!current.grant.Confirmed || grant.Confirmed) {
 		windowBillingCache.deleteLocked(cacheKey)
-		windowBillingCache.Unlock()
-		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(requestContext.Request.Context()), time.Second)
-		defer cancel()
-		cleanup := requestContext.Copy()
-		cleanup.Request = requestContext.Request.Clone(cleanupContext)
-		_, _ = RequestUserWindows(cleanup, &shadow, WindowControlInput{Operation: "release", GrantID: grant.ID, Multiplier: 1})
-	}, nil
+	}
+	windowBillingCache.Unlock()
+	if grant.Confirmed || grant.ReservationID == "" {
+		return
+	}
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(request.Request.Context()), time.Second)
+	defer cancel()
+	cleanup := request.Copy()
+	cleanup.Request = request.Request.Clone(cleanupContext)
+	_, _ = RequestUserWindows(cleanup, destination, WindowControlInput{Operation: "release", GrantID: grant.ID, ReservationID: grant.ReservationID, Multiplier: 1})
+}
+
+func acceptWindowAuthorizationResponse(request *gin.Context, response *http.Response, info *relaycommon.RelayInfo) error {
+	ticket := response.Header.Get("X-Codex2API-Window-Grant")
+	response.Header.Del("X-Codex2API-Window-Grant")
+	if ticket == "" || info.WindowBilling == nil {
+		return nil
+	}
+	_, binding, err := windowControlDestination(info)
+	if err != nil {
+		return err
+	}
+	previous := info.WindowBilling
+	grant, err := verifyWindowBillingTicket(binding, info.ApiKey, info.UserId, previous.Fingerprint, ticket)
+	if err != nil {
+		return err
+	}
+	if !grant.Confirmed || grant.BindingHash != previous.BindingHash || grant.ID != previous.ID || grant.Root != previous.Root || grant.Expanded != previous.Expanded || grant.Multiplier != previous.Multiplier || !grant.ExpiresAt.Equal(previous.ExpiresAt) {
+		return errors.New("window confirmation does not match the authorized tariff")
+	}
+	info.WindowBilling = grant
+	return nil
+}
+
+func RefreshWindowBilling(request *gin.Context, info *relaycommon.RelayInfo) (func(bool), error) {
+	if info == nil || !request.GetBool("window_billing_checked") {
+		return nil, errors.New("window authorization is missing")
+	}
+	previous := info.WindowBilling
+	cacheKey := request.GetString("window_billing_scope")
+	destination := *info
+	destination.InitChannelMeta(request)
+	finishWindowAuthorization(request, info, &destination, cacheKey, false)
+	windowBillingCache.Lock()
+	if current := windowBillingCache.items[cacheKey]; previous == nil || current.grant.ID == previous.ID {
+		windowBillingCache.deleteLocked(cacheKey)
+	}
+	windowBillingCache.Unlock()
+	info.WindowBilling = nil
+	finish, err := PrepareWindowBilling(request, info)
+	if err != nil {
+		info.WindowBilling = previous
+		return nil, err
+	}
+	if previous != nil && info.WindowBilling != nil && (info.WindowBilling.BindingHash != previous.BindingHash || info.WindowBilling.Fingerprint != previous.Fingerprint) {
+		info.WindowBilling = previous
+		return nil, errors.New("window renewal cannot change its root or destination")
+	}
+	return finish, nil
 }
 
 func ValidateWindowBillingDestination(info *relaycommon.RelayInfo, binding newAPIPolicyBinding, fingerprint string) error {

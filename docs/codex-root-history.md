@@ -24,7 +24,11 @@ Codex2API 的同名错误码和提示会原样保留，并强制停止 NewAPI �
 
 ## 被动请求的主根等待
 
-- 非 `user` 后台来源统一使用 30 秒等待预算。渠道/根标识可用不代表 Codex2API 的上游账号已绑定：NewAPI 将剩余毫秒数放入签名元数据 `root_account_wait_millis`，Codex2API 不再重新等满 30 秒。
+- 非 `user` 后台来源统一使用 60 秒等待预算。渠道/根标识可用不代表 Codex2API 的上游账号已绑定：NewAPI 将剩余毫秒数放入签名元数据 `root_account_wait_millis`，Codex2API 不再重新等满 60 秒。现有 5 秒标题候选标记和普通候选有效期不随等待预算延长。
+
+命名次数由 Codex2API 在账号/窗口准入后按最终主根原子认领，`thread_title` / `thread_title_reconsideration` / `thread_description` 共用一次机会，重复返回 400 `codex_root_already_named`，不重选根或渠道。认领前的等待超时不占命名次数。记录从升级后开始，不反查历史日志。
+
+窗口扩容只长期缓存经签名确认的正式授权；30 秒预留票即使请求返回成功也不会被当作正式授权缓存。预留引用按请求隔离，后台不新建预留。Codex2API 返回 `window_billing_refresh_required` 且下游未输出时，NewAPI 最多内部续票一次，保持同根/同渠道，重新校验扩容偏好、倍率与预扣额度，再用新的签名请求 ID 重发；不能沿普通失败策略无限重试。已正式确认窗口的倍率和到期时间保持不变。先升级全部 Codex2API 实例，再升级 NewAPI；两者需使用各自共享的数据库/缓存才能跨实例协调。
 - NewAPI 复用按根/范围的事件通知及每秒缓存检查；同键并发候选查询合并，空结果短暂缓存并在主候选发布时失效。查询范围有界，无全账号扫描或历史用量查询。等待注册有数量限制，客户端取消立即退出。
 - Codex2API 在账号/API Key 并发准入之前等待主根账号，同根等待共享缓存查询。后台只沿用确认的主账号，不自行决定主请求用哪个号，不通过重试换号。
 - 无法解析的根、冲突的身份或超时返回 400；Codex2API 超时错误码为 `codex_root_account_wait_timeout`，NewAPI 根解析失败为 `codex_background_root_unavailable`。WS 已升级连接使用对应错误帧。主根绑定存在后的模型、账号可用性、权限等限制仍生效。

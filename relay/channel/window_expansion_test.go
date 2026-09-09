@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -33,6 +34,7 @@ func TestWindowControlUsesUniqueSignedRequestIDsAndDoesNotReuseGrant(test *testi
 	request.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	request.Request.RemoteAddr = "203.0.113.9:1234"
 	info := &relaycommon.RelayInfo{UserId: 42, RequestId: "original-relay", WindowBilling: &relaycommon.WindowBillingGrant{Ticket: "must-not-forward-to-control"}, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "test-key"}}
+	request.Set("window_billing_retry_request_id", "fresh-window-retry")
 	for range 2 {
 		_, err := RequestUserWindows(request, info, WindowControlInput{Operation: "list", Multiplier: 1})
 		require.NoError(test, err)
@@ -47,6 +49,14 @@ func TestWindowControlUsesUniqueSignedRequestIDsAndDoesNotReuseGrant(test *testi
 	var meta newAPIPolicyMeta
 	require.NoError(test, common.Unmarshal(metadata, &meta))
 	require.Empty(test, meta.WindowGrant)
+	require.Equal(test, "original-relay", info.RequestId)
+	require.NotEqual(test, "fresh-window-retry", first.Get("X-NewAPI-Request-ID"))
+	info.WindowBilling = nil
+	body := []byte(`{"model":"test","input":"hello"}`)
+	outbound, err := http.NewRequest(http.MethodPost, server.URL+"/v1/responses", bytes.NewReader(body))
+	require.NoError(test, err)
+	require.NoError(test, applyNewAPIPolicyHeaders(request, outbound, info, bytes.NewReader(body)))
+	require.Equal(test, "fresh-window-retry", outbound.Header.Get("X-NewAPI-Request-ID"))
 	require.Equal(test, "original-relay", info.RequestId)
 }
 
@@ -66,7 +76,7 @@ func TestWindowBillingWarmRootAvoidsControlRequestAndFailureInvalidatesCache(tes
 	fingerprint := newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID)
 	cacheKey := windowBindingHash(binding, "test-key") + ":42:" + fingerprint
 	windowBillingCache.Lock()
-	windowBillingCache.putLocked(cacheKey, cachedWindowGrant{grant: relaycommon.WindowBillingGrant{ID: "confirmed", Expanded: true, Multiplier: 1.5, ExpiresAt: time.Now().Add(time.Hour)}, until: time.Now().Add(time.Hour)})
+	windowBillingCache.putLocked(cacheKey, cachedWindowGrant{grant: relaycommon.WindowBillingGrant{ID: "confirmed", Confirmed: true, Expanded: true, Multiplier: 1.5, ExpiresAt: time.Now().Add(time.Hour)}, until: time.Now().Add(time.Hour)})
 	windowBillingCache.Unlock()
 	test.Cleanup(func() {
 		windowBillingCache.Lock()
