@@ -143,6 +143,17 @@ func TestRelayErrorHandlerSkipsRetryForFullCodex2APISessionWindow(t *testing.T) 
 	require.True(t, types.IsSkipRetryError(newAPIError))
 }
 
+func TestRelayErrorHandlerStopsUnassociatedBackgroundRequests(test *testing.T) {
+	for _, code := range []string{"codex_background_root_unavailable", "codex_root_account_wait_timeout"} {
+		response := &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"主会话不可用，未选择其他账号","type":"invalid_request_error","code":"` + code + `"}}`))}
+		result := RelayErrorHandler(test.Context(), response, false)
+		require.Equal(test, http.StatusBadRequest, result.StatusCode)
+		require.Equal(test, types.ErrorCode(code), result.GetErrorCode())
+		require.True(test, types.IsSkipRetryError(result))
+		require.Equal(test, "主会话不可用，未选择其他账号", result.Error())
+	}
+}
+
 func TestRelayErrorHandlerDoesNotTrustSessionLimitCodeWithoutFullWindowHeaders(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusTooManyRequests,

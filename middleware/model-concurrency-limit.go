@@ -357,7 +357,8 @@ func codexUserConcurrencyPolicy(c *gin.Context) (bool, bool) {
 	}
 	_, title := relaychannel.ClassifyUnlinkedCodexThreadTitleRequest(resolution)
 	_, ambient := relaychannel.ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution)
-	if !linked && !title && !ambient {
+	_, independent := relaychannel.ClassifyCodexSessionAccountingBypass(resolution)
+	if !linked && !title && !ambient && !independent {
 		return protected, false
 	}
 	relaychannel.StartCodexRootAccountWait(c, resolution.ThreadSource)

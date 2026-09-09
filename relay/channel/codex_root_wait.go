@@ -10,13 +10,37 @@ import (
 const CodexRootAccountWaitTimeout = 30 * time.Second
 const codexRootAccountWaitDeadlineKey = "codex_root_account_wait_deadline"
 
-func CodexRequestNeedsRootAccountWait(source string) bool {
-	switch strings.ToLower(strings.TrimSpace(source)) {
-	case "thread_title", "ambient_suggestions":
-		return true
-	default:
-		return false
+type CodexRootAssociation struct {
+	OriginalRootID string
+	Basis          string
+	Candidates     int
+}
+
+func RecordCodexRootAssociation(requestContext *gin.Context, originalRootID, basis string, candidates int) {
+	if requestContext == nil {
+		return
 	}
+	association := CodexRequestRootAssociation(requestContext)
+	if association.OriginalRootID == "" {
+		association.OriginalRootID = strings.TrimSpace(originalRootID)
+	}
+	association.Basis = basis
+	association.Candidates = candidates
+	requestContext.Set("codex_root_association", association)
+}
+
+func CodexRequestRootAssociation(requestContext *gin.Context) CodexRootAssociation {
+	if requestContext == nil {
+		return CodexRootAssociation{}
+	}
+	value, _ := requestContext.Get("codex_root_association")
+	association, _ := value.(CodexRootAssociation)
+	return association
+}
+
+func CodexRequestNeedsRootAccountWait(source string) bool {
+	source = strings.TrimSpace(source)
+	return source != "" && !strings.EqualFold(source, "user")
 }
 
 func StartCodexRootAccountWait(requestContext *gin.Context, source string) {

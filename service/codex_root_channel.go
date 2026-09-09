@@ -27,7 +27,7 @@ const (
 	// revalidate the binding fingerprint and fail closed if this route expires.
 	codexProvisionalRootChannelCacheTTL = 3 * time.Minute
 	codexRootChannelRedisTimeout        = 500 * time.Millisecond
-	codexRootChannelPollInterval        = 200 * time.Millisecond
+	codexRootChannelPollInterval        = time.Second
 )
 
 var ErrCodexRootChannelBindingConflict = errors.New("Codex root channel binding conflict")
@@ -446,6 +446,10 @@ func WaitForCodexRootChannelBindingUpdate(ctx context.Context, userID int, rootI
 	}
 	codexRootChannelWaiters.Lock()
 	waiter := codexRootChannelWaiters.items[waiterKey]
+	if (waiter == nil && len(codexRootChannelWaiters.items) >= 4096) || (waiter != nil && waiter.count >= 128) {
+		codexRootChannelWaiters.Unlock()
+		return errors.New("too many pending background root requests")
+	}
 	if waiter == nil {
 		waiter = &codexRootChannelWaiter{updates: make(chan struct{})}
 		codexRootChannelWaiters.items[waiterKey] = waiter

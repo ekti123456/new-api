@@ -68,8 +68,7 @@ func Distribute() func(c *gin.Context) {
 		}
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
-			if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root is unavailable, ambiguous or invalid. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
+			if abortCodexBackgroundRootFailure(c, rootSession, passiveRootErr) {
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
@@ -131,8 +130,7 @@ func Distribute() func(c *gin.Context) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, "当前会话绑定的上游渠道不支持所选模型，请新开对话后使用该模型。", types.ErrorCode("session_model_unavailable"))
 					return
 				}
-				if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
-					abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root channel is unavailable. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
+				if abortCodexBackgroundRootFailure(c, rootSession, rootErr) {
 					return
 				}
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
@@ -141,8 +139,7 @@ func Distribute() func(c *gin.Context) {
 		}
 		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) && !recognizedRootPassThrough {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
-			if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root channel is unavailable. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
+			if abortCodexBackgroundRootFailure(c, rootSession, nil) {
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
@@ -346,16 +343,30 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
-			if turnBindingErr != nil {
-				logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
+			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
+				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
+				if abortCodexBackgroundRootFailure(c, rootSession, aliasErr) {
+					return
+				}
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			threadClaim, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+			turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
+			if turnBindingErr != nil {
+				logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
+				if abortCodexBackgroundRootFailure(c, rootSession, turnBindingErr) {
+					return
+				}
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
 			if threadBindingErr != nil {
 				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
 				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
+				if abortCodexBackgroundRootFailure(c, rootSession, threadBindingErr) {
+					return
+				}
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
@@ -367,12 +378,6 @@ func Distribute() func(c *gin.Context) {
 					common.GetContextKeyInt(c, constant.ContextKeyUserId),
 					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
-			}
-			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
-				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "claim", turnClaim, threadClaim)
-				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
 			}
 		}
 		c.Next()

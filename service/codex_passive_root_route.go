@@ -39,7 +39,7 @@ const (
 	codexPassiveRootAliasTTL             = 24 * time.Hour
 	codexRecentRootChannelCandidateLimit = 32
 	codexPassiveRootRedisTimeout         = 500 * time.Millisecond
-	codexRecentRootPollInterval          = 200 * time.Millisecond
+	codexRecentRootPollInterval          = time.Second
 	codexTitleRootCandidateTTL           = 5 * time.Second
 	codexRootObservationWindow           = 30 * time.Second
 	// Keep observations long enough for the maximum operator-configured
@@ -117,6 +117,12 @@ type CodexPassiveRootScope struct {
 	UserID         int
 	TokenID        int
 	InstallationID string
+}
+
+type codexPassiveRootScopeContextKey struct{}
+
+func WithCodexPassiveRootScope(ctx context.Context, scope CodexPassiveRootScope) context.Context {
+	return context.WithValue(ctx, codexPassiveRootScopeContextKey{}, scope)
 }
 
 func normalizeCodexPassiveRootScope(userID, tokenID int, scopes []CodexPassiveRootScope) CodexPassiveRootScope {
@@ -1260,6 +1266,16 @@ func redisResultString(value any) string {
 }
 
 func WaitForRecentCodexRootChannelUpdate(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, maxWait time.Duration) error {
+	scope := CodexPassiveRootScope{UserID: userID, TokenID: tokenID}
+	if ctx != nil {
+		if scoped, ok := ctx.Value(codexPassiveRootScopeContextKey{}).(CodexPassiveRootScope); ok {
+			scope = scoped
+		}
+	}
+	return WaitForScopedRecentCodexRootChannelUpdate(ctx, userID, tokenID, uaRoutingOnly, maxWait, scope)
+}
+
+func WaitForScopedRecentCodexRootChannelUpdate(ctx context.Context, userID, tokenID int, uaRoutingOnly bool, maxWait time.Duration, scope CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1269,12 +1285,16 @@ func WaitForRecentCodexRootChannelUpdate(ctx context.Context, userID, tokenID in
 	if maxWait <= 0 {
 		return nil
 	}
-	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly)
+	scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scope)
 	if scopeKey == "" {
 		return nil
 	}
 	codexRecentRootWaiters.Lock()
 	waiter := codexRecentRootWaiters.items[scopeKey]
+	if (waiter == nil && len(codexRecentRootWaiters.items) >= 4096) || (waiter != nil && waiter.count >= 128) {
+		codexRecentRootWaiters.Unlock()
+		return errors.New("too many pending background root requests")
+	}
 	if waiter == nil {
 		waiter = &codexRecentRootWaiter{updates: make(chan struct{})}
 		codexRecentRootWaiters.items[scopeKey] = waiter
@@ -1308,6 +1328,8 @@ func WaitForRecentCodexRootChannelUpdate(ctx context.Context, userID, tokenID in
 }
 
 func notifyCodexRecentRootChannelUpdate(scopeKey string) {
+	baseScope, _, _ := strings.Cut(scopeKey, ":")
+	codexEmptyPassiveCandidateScopes.Delete("recent:" + baseScope)
 	codexRecentRootWaiters.Lock()
 	waiter := codexRecentRootWaiters.items[scopeKey]
 	if waiter != nil {
@@ -1318,6 +1340,16 @@ func notifyCodexRecentRootChannelUpdate(scopeKey string) {
 }
 
 func WaitForCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int, maxWait time.Duration) error {
+	scope := CodexPassiveRootScope{UserID: userID, TokenID: tokenID}
+	if ctx != nil {
+		if scoped, ok := ctx.Value(codexPassiveRootScopeContextKey{}).(CodexPassiveRootScope); ok {
+			scope = scoped
+		}
+	}
+	return WaitForScopedCodexTitleRootChannelUpdate(ctx, userID, tokenID, maxWait, scope)
+}
+
+func WaitForScopedCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int, maxWait time.Duration, scope CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1327,12 +1359,16 @@ func WaitForCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int
 	if maxWait <= 0 {
 		return nil
 	}
-	scopeKey := codexPassiveRootScopeKey(userID, tokenID)
+	scopeKey := codexPassiveRootScopeKey(userID, tokenID, scope)
 	if scopeKey == "" {
 		return nil
 	}
 	codexTitleRootWaiters.Lock()
 	waiter := codexTitleRootWaiters.items[scopeKey]
+	if (waiter == nil && len(codexTitleRootWaiters.items) >= 4096) || (waiter != nil && waiter.count >= 128) {
+		codexTitleRootWaiters.Unlock()
+		return errors.New("too many pending background root requests")
+	}
 	if waiter == nil {
 		waiter = &codexRecentRootWaiter{updates: make(chan struct{})}
 		codexTitleRootWaiters.items[scopeKey] = waiter
@@ -1366,6 +1402,7 @@ func WaitForCodexTitleRootChannelUpdate(ctx context.Context, userID, tokenID int
 }
 
 func notifyCodexTitleRootChannelUpdate(scopeKey string) {
+	codexEmptyPassiveCandidateScopes.Delete("title:" + scopeKey)
 	codexTitleRootWaiters.Lock()
 	waiter := codexTitleRootWaiters.items[scopeKey]
 	if waiter != nil {
@@ -1379,6 +1416,14 @@ func notifyCodexTitleRootChannelUpdate(scopeKey string) {
 // when the fresh-title/recent-candidate intersection contains exactly the
 // requested root across both routing sides.
 func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
+	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, titleRootID, alias, true, scopes...)
+}
+
+func ClaimCodexStrictPassiveRootAlias(ctx context.Context, userID, tokenID int, sourceRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
+	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, sourceRootID, alias, false, scopes...)
+}
+
+func claimCodexUniquePassiveRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, title bool, scopes ...CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1418,9 +1463,13 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 		baseScope := codexPassiveRootScopeKey(userID, tokenID, scope)
 		normalScope := codexRecentRootChannelScopeKey(userID, tokenID, false, scope)
 		uaScope := codexRecentRootChannelScopeKey(userID, tokenID, true, scope)
+		normalCandidates, uaCandidates := codexRecentRootChannelRedisKey(normalScope), codexRecentRootChannelRedisKey(uaScope)
+		if title {
+			normalCandidates, uaCandidates = codexTitleRootCandidateRedisKey(normalScope), codexTitleRootCandidateRedisKey(uaScope)
+		}
 		stored, err := claimCodexTitleRootAliasScript.Run(claimContext, common.RDB, []string{
 			codexPassiveRootAliasRedisKey(baseScope, cacheKey),
-			codexTitleRootCandidateRedisKey(normalScope), codexTitleRootCandidateRedisKey(uaScope),
+			normalCandidates, uaCandidates,
 			codexRecentRootChannelRedisKey(normalScope), codexRecentRootChannelRedisKey(uaScope),
 		}, string(payload), member, int64(codexPassiveRootAliasProvisionalTTL/time.Second)).Int()
 		if err != nil {
@@ -1452,7 +1501,11 @@ func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRoo
 	activeCount := 0
 	for _, side := range []bool{false, true} {
 		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, side, scope)
-		fresh, freshFound, freshErr := getCodexTitleRootMemory().Get(scopeKey)
+		freshCache := getCodexRecentRootMemory()
+		if title {
+			freshCache = getCodexTitleRootMemory()
+		}
+		fresh, freshFound, freshErr := freshCache.Get(scopeKey)
 		if freshErr != nil {
 			return freshErr
 		}

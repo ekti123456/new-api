@@ -75,11 +75,13 @@ func TestRootWaitingMiddlewareDoesNotBlockMainRequest(test *testing.T) {
 		setting.UserConcurrencyCooldownSeconds = previousCooldown
 		resetLocalUserConcurrencyForTest()
 	})
-	for _, source := range []string{"thread_title", "ambient_suggestions"} {
+	for _, source := range []string{"thread_title", "ambient_suggestions", "agent_created_thread", "memory_consolidation", "guardian_review"} {
 		test.Run(source, func(test *testing.T) {
 			background, _ := codexUnlinkedNativeTitleContext(42, 7, "01a04915-6f27-7f10-b723-88683446062f")
 			if source == "ambient_suggestions" {
 				background, _ = codexAmbientSuggestionContext(42, 7)
+			} else {
+				background.Request.Header.Set("X-Codex-Turn-Metadata", strings.ReplaceAll(background.GetHeader("X-Codex-Turn-Metadata"), "thread_title", source))
 			}
 			_, backgroundWait := codexUserConcurrencyPolicy(background)
 			require.True(test, backgroundWait)

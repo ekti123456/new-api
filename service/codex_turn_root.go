@@ -669,6 +669,10 @@ func waitForCodexLineageRootBindingUpdate(ctx context.Context, waiterKey string,
 	}
 	codexTurnRootWaiters.Lock()
 	waiter := codexTurnRootWaiters.items[waiterKey]
+	if (waiter == nil && len(codexTurnRootWaiters.items) >= 4096) || (waiter != nil && waiter.count >= 128) {
+		codexTurnRootWaiters.Unlock()
+		return errors.New("too many pending background root requests")
+	}
 	if waiter == nil {
 		waiter = &codexRootChannelWaiter{updates: make(chan struct{})}
 		codexTurnRootWaiters.items[waiterKey] = waiter

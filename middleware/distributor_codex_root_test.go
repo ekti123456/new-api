@@ -390,7 +390,7 @@ func TestConcurrentNewCodexTitlesUseMatchingRootInsteadOfLatestRoot(t *testing.T
 	require.NotEqual(t, newerOtherRoot, resolved.RootID)
 }
 
-func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndUsesLatestRoot(t *testing.T) {
+func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndRejectsAmbiguity(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	const (
 		userID  = 42
@@ -417,11 +417,11 @@ func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndUsesLatestRoot(t *testing
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 
 	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, errCodexBackgroundRootAmbiguous)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
-	require.True(t, resolved.Related)
-	require.Equal(t, latestRootID, resolved.RootID)
+	require.False(t, resolved.Related)
+	require.NotEqual(t, latestRootID, resolved.RootID)
 }
 
 func TestUnlinkedCodexSystemRejectsLatestCandidateOutsideRequestGroup(t *testing.T) {
@@ -439,154 +439,33 @@ func TestUnlinkedCodexSystemRejectsLatestCandidateOutsideRequestGroup(t *testing
 	c, _ := codexUnlinkedTitleContext(userID, tokenID, "01a04000-0000-7000-8000-000000000734")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
 	_, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-	require.ErrorContains(t, err, "outside the current group")
+	require.ErrorIs(t, err, errCodexBackgroundRootAmbiguous)
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
 	_, pending := c.Get(codexPendingPassiveRootAliasContextKey)
 	require.False(t, pending)
 }
 
-func TestUnlinkedCodexSystemIgnoresCandidateObservedAfterRequestArrival(t *testing.T) {
-	const (
-		userID        = 181
-		tokenID       = 1739
-		precedingRoot = "01a04000-0000-7000-8000-000000000737"
-		laterRoot     = "01a04000-0000-7000-8000-000000000738"
-		systemRootID  = "01a04000-0000-7000-8000-000000000739"
-	)
-	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
-	server, client := useCodexRecentRootRedisFixture(t, now)
-	binding := service.CodexRootChannelBinding{
-		ChannelID: 98101, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "abcdef0123456789",
-	}
-	requestArrival := now
-	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, precedingRoot, binding, requestArrival.Add(-time.Second))
-
-	systemContext, recorder := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
-	server.SetTime(requestArrival)
-	captureCodexRequestArrival(systemContext)
-	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
-	require.False(t, resolution.Related)
-	require.Empty(t, systemContext.Request.Header.Get("X-Codex-Parent-Thread-Id"))
-	require.Empty(t, resolution.ForkedFromID)
-	require.Empty(t, resolution.ParentTurnID)
-	require.Empty(t, resolution.RootTurnID)
-
-	hook := &blockFirstCodexCandidateLoadHook{started: make(chan struct{}), release: make(chan struct{})}
-	client.AddHook(hook)
-	type routeResult struct {
-		resolution relaychannel.CodexRootSessionResolution
-		feature    string
-		strict     bool
-		err        error
-	}
-	resultChannel := make(chan routeResult, 1)
-	go func() {
-		resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
-		resultChannel <- routeResult{resolution: resolved, feature: feature, strict: strict, err: err}
-	}()
-	select {
-	case <-hook.started:
-		storeCodexRecentRootCandidateAt(t, server, userID, tokenID, laterRoot, binding, requestArrival.Add(time.Second))
-		close(hook.release)
-	case got := <-resultChannel:
-		require.FailNow(t, "candidate load did not start", "route returned early: %v", got.err)
-	case <-time.After(time.Second):
-		require.FailNow(t, "candidate load did not start")
-	}
-	got := <-resultChannel
-
-	require.NoError(t, got.err)
-	require.True(t, got.strict)
-	require.Equal(t, "system_passive", got.feature)
-	require.True(t, got.resolution.Related)
-	require.Equal(t, precedingRoot, got.resolution.RootID)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.NoError(t, commitCodexPassiveRootAlias(systemContext))
-	alias, found, aliasErr := service.LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
-	require.NoError(t, aliasErr)
-	require.True(t, found)
-	require.Equal(t, precedingRoot, alias.RootID)
+func TestPassiveRootRejectsExpiredCandidates(test *testing.T) {
+	channel, _, fingerprint := setupCodexRootDistributorTest(test)
+	const userID, tokenID = 993401, 993411
+	const rootID = "01a08502-0000-7000-8000-000000000401"
+	server, _ := useCodexRecentRootRedisFixture(test, time.Now())
+	binding := service.CodexRootChannelBinding{ChannelID: channel.Id, SelectedGroup: "pro", KeyFingerprint: fingerprint}
+	require.NoError(test, service.StoreCodexRootChannelBinding(userID, rootID, binding))
+	require.NoError(test, service.StoreRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
+	server.FastForward(3 * time.Minute)
+	_, found, err := service.LoadCodexRootChannelBinding(userID, rootID)
+	require.NoError(test, err)
+	require.True(test, found)
+	requestContext, recorder := codexUnlinkedTitleContext(userID, tokenID, "01a08502-0000-7000-8000-000000000402")
+	Distribute()(requestContext)
+	require.Equal(test, http.StatusBadRequest, recorder.Code)
+	require.True(test, requestContext.IsAborted())
+	require.Contains(test, recorder.Body.String(), "codex_background_root_unavailable")
 }
 
-func TestUnlinkedCodexSystemUsesLatestArrivalOrderBeforeRequest(t *testing.T) {
-	const (
-		userID        = 182
-		tokenID       = 1740
-		olderRootID   = "01a04000-0000-7000-8000-000000000740"
-		closestRootID = "01a04000-0000-7000-8000-000000000741"
-		systemRootID  = "01a04000-0000-7000-8000-000000000742"
-	)
-	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
-	server, _ := useCodexRecentRootRedisFixture(t, now)
-	binding := service.CodexRootChannelBinding{
-		ChannelID: 98101, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: "abcdef0123456789",
-	}
-	requestArrival := now.Add(3 * time.Second)
-	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, olderRootID, binding, requestArrival.Add(-time.Second))
-	storeCodexRecentRootCandidateAt(t, server, userID, tokenID, closestRootID, binding, requestArrival.Add(-time.Second))
-
-	systemContext, _ := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
-	server.SetTime(requestArrival)
-	captureCodexRequestArrival(systemContext)
-	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
-	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
-
-	require.NoError(t, err)
-	require.True(t, strict)
-	require.Equal(t, "system_passive", feature)
-	require.True(t, resolved.Related)
-	require.Equal(t, closestRootID, resolved.RootID)
-}
-
-func TestUnlinkedCodexSystemRequiresPredecessorWithinThirtySeconds(t *testing.T) {
-	tests := []struct {
-		name    string
-		age     time.Duration
-		allowed bool
-	}{
-		{name: "exact boundary", age: 30 * time.Second, allowed: true},
-		{name: "one millisecond too old", age: 30*time.Second + time.Millisecond, allowed: false},
-	}
-	for index, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Keep this regression focused on the strict 30-second contract; the
-			// separate extended-window coverage exercises the production fallback.
-			originalFallbackWindow := codexUnlinkedPassiveRootFallbackWindow
-			codexUnlinkedPassiveRootFallbackWindow = 30 * time.Second
-			t.Cleanup(func() { codexUnlinkedPassiveRootFallbackWindow = originalFallbackWindow })
-			channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
-			userID := 183 + index
-			tokenID := 1741 + index
-			rootID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 743+index*2)
-			systemRootID := fmt.Sprintf("01a04000-0000-7000-8000-%012d", 744+index*2)
-			rootArrival := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
-			server, _ := useCodexRecentRootRedisFixture(t, rootArrival)
-			binding := service.CodexRootChannelBinding{
-				ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
-			}
-			storeCodexRecentRootCandidateAt(t, server, userID, tokenID, rootID, binding, rootArrival)
-
-			c, _ := codexUnlinkedTitleContext(userID, tokenID, systemRootID)
-			server.SetTime(rootArrival.Add(test.age))
-			captureCodexRequestArrival(c)
-			resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-			resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-
-			require.True(t, strict)
-			require.Equal(t, "system_passive", feature)
-			if test.allowed {
-				require.NoError(t, err)
-				require.Equal(t, rootID, resolved.RootID)
-				return
-			}
-			require.ErrorContains(t, err, "unavailable")
-			require.Equal(t, systemRootID, resolved.RootID)
-		})
-	}
-}
-
-func TestUnlinkedCodexSystemExtendedPredecessorIsTemporary(t *testing.T) {
+func TestUnlinkedCodexSystemDoesNotUseLegacyHistoryFallback(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	if common.OptionMap == nil {
 		common.OptionMap = make(map[string]string)
@@ -622,27 +501,15 @@ func TestUnlinkedCodexSystemExtendedPredecessorIsTemporary(t *testing.T) {
 	captureCodexRequestArrival(systemContext)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
 	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "unavailable")
 	require.True(t, strict)
 	require.Equal(t, "system_passive", feature)
-	require.True(t, resolved.Related)
-	require.Equal(t, rootID, resolved.RootID)
-
-	rawPending, foundPending := systemContext.Get(codexPendingPassiveRootAliasContextKey)
-	pending, pendingOK := rawPending.(codexPendingPassiveRootAlias)
-	require.True(t, foundPending && pendingOK)
-	require.True(t, pending.temporaryOnly)
-	require.True(t, pending.alias.Temporary)
-
-	// Commit the provisional alias, then run the normal promotion hook. The
-	// temporary marker must keep it on the short TTL instead of upgrading it to
-	// the durable 24-hour alias.
-	require.NoError(t, commitCodexPassiveRootAlias(systemContext))
-	require.NoError(t, promoteCodexPassiveRootAlias(systemContext))
-	stored, found, err := service.LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.True(t, stored.Temporary)
+	require.Equal(t, systemRootID, resolved.RootID)
+	_, pending := systemContext.Get(codexPendingPassiveRootAliasContextKey)
+	require.False(t, pending)
+	_, found, loadErr := service.LoadCodexPassiveRootAlias(context.Background(), userID, tokenID, systemRootID)
+	require.NoError(t, loadErr)
+	require.False(t, found)
 }
 
 func TestUnlinkedCodexTitleNeverUsesThirtySecondPredecessorBridge(t *testing.T) {
@@ -673,8 +540,8 @@ func TestUnlinkedCodexTitleNeverUsesThirtySecondPredecessorBridge(t *testing.T) 
 	require.False(t, pending)
 }
 
-func TestRecognizedCodexChildrenPassThroughWithoutRootBindingOrRecentOverride(t *testing.T) {
-	channel, key, keyFingerprint := setupCodexRootDistributorTest(t)
+func TestRecognizedCodexChildrenRejectWithoutParentBinding(t *testing.T) {
+	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id))
 	tests := []struct {
 		name         string
@@ -712,10 +579,10 @@ func TestRecognizedCodexChildrenPassThroughWithoutRootBindingOrRecentOverride(t 
 
 			Distribute()(c)
 
-			require.Less(t, recorder.Code, http.StatusBadRequest)
-			require.False(t, c.IsAborted())
-			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
-			require.Equal(t, key, common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.True(t, c.IsAborted())
+			require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+			require.Contains(t, recorder.Body.String(), "codex_background_root_unavailable")
 			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
 			resolved := relaychannel.ResolveCodexRootSessionForDistribution(c)
 			require.True(t, resolved.Related)
@@ -782,7 +649,7 @@ func TestRecognizedCodexChildDoesNotGuessAcrossMultipleNormalChannels(t *testing
 	c, recorder := codexGuardianApprovalContext(190, 1748, "01a04000-0000-7000-8000-000000000760")
 	Distribute()(c)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
@@ -853,12 +720,9 @@ func TestLinkedCodexRootBindingFollowsUserAcrossOwnAPIKeysOnly(t *testing.T) {
 	otherUserContext := codexRootDistributorContext(ownerUserID + 1)
 	common.SetContextKey(otherUserContext, constant.ContextKeyTokenId, 99903)
 	resolved, _, strict, err = resolveUnlinkedCodexPassiveRoot(otherUserContext, linked)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.True(t, strict)
-	selected, _, found, err = prepareCodexRootChannelRoute(otherUserContext, resolved, "gpt-5.6-luna", "pro")
-	require.NoError(t, err)
-	require.False(t, found)
-	require.Nil(t, selected)
+	require.Zero(t, common.GetContextKeyInt(otherUserContext, constant.ContextKeyChannelId))
 }
 
 func TestPrepareCodexRootChannelRouteRejectsDirectAndUnlistedOrdinaryModels(t *testing.T) {
@@ -982,7 +846,7 @@ func TestDistributorRelatedRootKeepsUnavailableBindingStrict(t *testing.T) {
 	c, recorder := codexRootDistributorRequestContext(42, 0, rootID, childID)
 	Distribute()(c)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 	stored, found, err := service.LoadCodexRootChannelBinding(42, rootID)
 	require.NoError(t, err)
@@ -1479,7 +1343,7 @@ func TestDistributorGuardianNeverBorrowsConcurrentRecentRootAcrossUARoutingBound
 	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyChannelAffinityUserAgentRouted))
 	Distribute()(guardianContext)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, guardianContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
@@ -1584,7 +1448,7 @@ func TestLinkedPassiveRequestDoesNotFallBackAcrossUARoutingBoundary(t *testing.T
 	guardianContext.Request.Header.Set("User-Agent", "multica-agent-sdk/1.0")
 	common.SetContextKey(guardianContext, constant.ContextKeyTokenModelLimitEnabled, false)
 	Distribute()(guardianContext)
-	require.Equal(t, http.StatusServiceUnavailable, guardianRecorder.Code)
+	require.Equal(t, http.StatusBadRequest, guardianRecorder.Code)
 	require.True(t, guardianContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 }
@@ -1982,8 +1846,8 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
 
-func TestDistributorGuardianUsesUniqueNormalChannelForRootlessMainAndDifferentToken(t *testing.T) {
-	channel, key, _ := setupCodexRootDistributorTest(t)
+func TestDistributorGuardianRejectsUnboundMainDespiteUniqueChannel(t *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(t)
 	const (
 		userID         = 64
 		mainTokenID    = 720
@@ -1996,7 +1860,7 @@ func TestDistributorGuardianUsesUniqueNormalChannelForRootlessMainAndDifferentTo
 		mainContext.Request.Header.Del(header)
 	}
 	before := relaychannel.ResolveCodexRootSessionForDistribution(mainContext)
-	require.False(t, before.Resolved, "the fallback must cover clients that do not forward a stable Codex graph")
+	require.False(t, before.Resolved, "the test requires a main request without a stable graph")
 	Distribute()(mainContext)
 	require.Less(t, mainRecorder.Code, http.StatusBadRequest)
 	require.False(t, mainContext.IsAborted())
@@ -2005,10 +1869,9 @@ func TestDistributorGuardianUsesUniqueNormalChannelForRootlessMainAndDifferentTo
 	guardianContext, recorder := codexGuardianApprovalContext(userID, reviewerToken, reviewedRootID)
 	Distribute()(guardianContext)
 
-	require.Less(t, recorder.Code, http.StatusBadRequest)
-	require.False(t, guardianContext.IsAborted())
-	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
-	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.True(t, guardianContext.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
 
 	// Knowing the reviewed root must not turn an ordinary user-authored Luna
@@ -2093,23 +1956,22 @@ func TestInspectSelectedCodexChannelBindingReportsPolicyKeyMismatch(t *testing.T
 	require.Equal(t, "channel_key_not_bound", reason)
 }
 
-func TestDistributorGuardianShapeUsesUniqueNormalChannelWithoutReviewedRootBinding(t *testing.T) {
-	channel, key, _ := setupCodexRootDistributorTest(t)
+func TestDistributorGuardianShapeRejectsMissingReviewedRootBinding(t *testing.T) {
+	setupCodexRootDistributorTest(t)
 	guardianContext, recorder := codexGuardianApprovalContext(43, 711, "01a03816-3b42-78d1-a818-65fdcb9e8a74")
 
 	Distribute()(guardianContext)
 
-	require.Less(t, recorder.Code, http.StatusBadRequest)
-	require.False(t, guardianContext.IsAborted())
-	require.Equal(t, channel.Id, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
-	require.Equal(t, key, common.GetContextKeyString(guardianContext, constant.ContextKeyChannelKey))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.True(t, guardianContext.IsAborted())
+	require.Zero(t, common.GetContextKeyInt(guardianContext, constant.ContextKeyChannelId))
 	require.False(t, common.GetContextKeyBool(guardianContext, constant.ContextKeyCodexRootChannelPinned))
 }
 
 func TestDistributorMainThenTitleEndToEndKeepsChannelAndKey(t *testing.T) {
 	channel, key, _ := setupCodexRootDistributorTest(t)
 	const (
-		userID  = 42
+		userID  = 993701
 		tokenID = 709
 	)
 	rootID := "01a03786-1743-7151-a307-c1c0f1615bb5"
@@ -2165,11 +2027,11 @@ func TestUnlinkedCodexTitleFailsClosedWithoutSameTokenBinding(t *testing.T) {
 	binding := service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
 	}
-	storeRecentCodexTitleBinding(t, 42, 703, rootID, binding)
+	storeRecentCodexTitleBinding(t, 993702, 703, rootID, binding)
 
-	titleContext, recorder := codexUnlinkedTitleContext(42, 704, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	titleContext, recorder := codexUnlinkedTitleContext(993702, 704, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	Distribute()(titleContext)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, titleContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
@@ -2197,8 +2059,8 @@ func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
 	require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
 
-func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T) {
-	channel, _, _ := setupCodexRootDistributorTest(t)
+func TestIndependentInternalSourcesRejectLegacyUnassociatedBinding(t *testing.T) {
+	setupCodexRootDistributorTest(t)
 
 	for _, tc := range []struct {
 		source, sessionID string
@@ -2206,8 +2068,6 @@ func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T
 		{source: "agent_created_thread", sessionID: "01a03787-1743-7151-a307-c1c0f1615bb8"},
 	} {
 		t.Run(tc.source, func(t *testing.T) {
-			// A stale binding left by the retired implementation must not keep the
-			// request pinned or turn an otherwise schedulable request into a 503.
 			require.NoError(t, service.StoreCodexRootChannelBinding(42, tc.sessionID, service.CodexRootChannelBinding{
 				ChannelID: 999999, SelectedGroup: "pro", KeyFingerprint: "stale-key",
 			}))
@@ -2222,13 +2082,13 @@ func TestIndependentInternalSourcesScheduleWithoutRecentRootBinding(t *testing.T
 			require.True(t, resolution.Resolved)
 			require.False(t, resolution.Related)
 			_, _, strict, err := resolveUnlinkedCodexPassiveRoot(c, resolution)
-			require.NoError(t, err)
-			require.False(t, strict, "independent internal roots must use ordinary scheduling")
+			require.Error(t, err)
+			require.True(t, strict)
 
 			Distribute()(c)
-			require.Less(t, recorder.Code, http.StatusBadRequest)
-			require.False(t, c.IsAborted())
-			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.True(t, c.IsAborted())
+			require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 			require.False(t, common.GetContextKeyBool(c, constant.ContextKeyCodexRootChannelPinned))
 		})
 	}
@@ -2266,7 +2126,7 @@ func TestUnlinkedCodexTitleDoesNotFallBackAfterPinnedKeyChange(t *testing.T) {
 
 	titleContext, recorder := codexUnlinkedTitleContext(42, 706, "01a03787-1743-7151-a307-c1c0f1615bb6")
 	Distribute()(titleContext)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, titleContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
@@ -2352,7 +2212,7 @@ func TestUnlinkedSystemWithUnknownRootTurnDoesNotUseRecentCandidate(t *testing.T
 	c, recorder := codexSystemTurnContext(userID, tokenID, systemID, systemTurn, "", unknownTurn)
 
 	Distribute()(c)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 }
@@ -2405,7 +2265,7 @@ func TestDistributorRejectsConflictingRootAndParentTurnBindings(t *testing.T) {
 		turnB, turnA,
 	)
 	Distribute()(c)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 }
 
@@ -2429,7 +2289,7 @@ func TestDistributorRejectsTurnBindingThatConflictsWithExplicitChildRoot(t *test
 	c, recorder := codexRootDistributorRequestContext(userID, 0, rootB, leafB)
 	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+rootB+`","thread_id":"`+leafB+`","window_id":"`+leafB+`:1","parent_thread_id":"`+rootB+`","turn_id":"01a06020-0000-7000-8000-000000000036","root_turn_id":"`+turnA+`","thread_source":"subagent","request_kind":"turn"}`)
 	Distribute()(c)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 }
 
@@ -3048,7 +2908,7 @@ func TestCodexUserRootTurnCannotChangeItsRecordedSourceRole(t *testing.T) {
 			c.Request.Header.Set("X-Codex-Turn-Metadata", metadata+`}`)
 			Distribute()(c)
 
-			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
 			require.True(t, c.IsAborted())
 			require.Zero(t, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 		})

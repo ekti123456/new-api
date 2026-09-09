@@ -13,7 +13,7 @@ import (
 )
 
 func TestCodexRootWaitBudgetIsSharedAndNotRenewed(test *testing.T) {
-	for _, source := range []string{"thread_title", "ambient_suggestions"} {
+	for _, source := range []string{"thread_title", "ambient_suggestions", "agent_created_thread", "guardian_review", "memory_consolidation", "subagent", "thread_summary", "thread_description"} {
 		test.Run(source, func(test *testing.T) {
 			synctest.Test(test, func(test *testing.T) {
 				requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -41,8 +41,8 @@ func TestCodexRootWaitBudgetIsSharedAndNotRenewed(test *testing.T) {
 	}
 }
 
-func TestCodexRootWaitDoesNotAffectOtherSources(test *testing.T) {
-	for _, source := range []string{"", "user", "memory_consolidation", "thread_description", "thread_title_reconsideration", "guardian_review"} {
+func TestCodexRootWaitDoesNotAffectUserRequests(test *testing.T) {
+	for _, source := range []string{"", "user"} {
 		requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 		StartCodexRootAccountWait(requestContext, source)
 		require.Nil(test, codexRootAccountWaitMillis(requestContext), source)

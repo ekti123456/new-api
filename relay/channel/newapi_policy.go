@@ -127,6 +127,9 @@ type newAPIPolicyMeta struct {
 	// Codex2API prefer the source account without merging the fork's root/window.
 	ForkedFromSessionFingerprint string `json:"forked_from_session_fingerprint,omitempty"`
 	RootAccountWaitMillis        *int64 `json:"root_account_wait_millis,omitempty"`
+	OriginalRootFingerprint      string `json:"original_root_fingerprint,omitempty"`
+	RootAssociation              string `json:"root_association,omitempty"`
+	RootCandidateCount           *int   `json:"root_candidate_count,omitempty"`
 }
 
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
@@ -207,6 +210,11 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		RootSessionVersion: 1,
 	}
 	meta.RootAccountWaitMillis = codexRootAccountWaitMillis(c)
+	if association := CodexRequestRootAssociation(c); association.OriginalRootID != "" {
+		meta.OriginalRootFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, association.OriginalRootID)
+		meta.RootAssociation = association.Basis
+		meta.RootCandidateCount = &association.Candidates
+	}
 	sessionID := newAPIPolicyStableSessionID(c, info)
 	if sessionID != "" {
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
