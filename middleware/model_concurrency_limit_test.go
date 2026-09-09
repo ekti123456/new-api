@@ -21,6 +21,7 @@ func resetLocalUserConcurrencyForTest() {
 	localUserConcurrency.mu.Lock()
 	localUserConcurrency.active = make(map[int]map[string]struct{})
 	localUserConcurrency.cooling = make(map[int]map[string]time.Time)
+	localUserConcurrency.background = make(map[int]map[string]struct{})
 	localUserConcurrency.mu.Unlock()
 }
 

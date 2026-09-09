@@ -68,8 +68,8 @@ func Distribute() func(c *gin.Context) {
 		}
 		if passiveRootErr != nil {
 			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
-			if strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": "background conversation is unavailable"}))
+			if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root is unavailable, ambiguous or invalid. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
@@ -127,12 +127,20 @@ func Distribute() func(c *gin.Context) {
 			}
 			if rootErr != nil {
 				logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
+				if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root channel is unavailable. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
+					return
+				}
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
 		}
 		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) && !recognizedRootPassThrough {
 			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
+			if relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, "Background conversation root channel is unavailable. Request stopped without fallback.", types.ErrorCode("codex_background_root_unavailable"))
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}

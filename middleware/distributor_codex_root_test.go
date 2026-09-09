@@ -70,6 +70,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout
 	originalAmbientWaitTimeout := codexAmbientRootWaitTimeout
+	originalTitleWaitTimeout := codexTitleRootWaitTimeout
 	originalLinkedWaitTimeout := codexLinkedRootWaitTimeout
 	originalTurnWaitTimeout := codexTurnRootWaitTimeout
 	originalThreadWaitTimeout := codexThreadRootWaitTimeout
@@ -80,6 +81,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	originalWaitForThreadRootBindingUpdate := waitForCodexThreadRootBindingUpdate
 	codexUnlinkedPassiveRootWaitTimeout = 25 * time.Millisecond
 	codexAmbientRootWaitTimeout = 25 * time.Millisecond
+	codexTitleRootWaitTimeout = 25 * time.Millisecond
 	codexLinkedRootWaitTimeout = 25 * time.Millisecond
 	codexTurnRootWaitTimeout = 25 * time.Millisecond
 	codexThreadRootWaitTimeout = 25 * time.Millisecond
@@ -122,6 +124,7 @@ func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string
 	t.Cleanup(func() {
 		codexUnlinkedPassiveRootWaitTimeout = originalPassiveWaitTimeout
 		codexAmbientRootWaitTimeout = originalAmbientWaitTimeout
+		codexTitleRootWaitTimeout = originalTitleWaitTimeout
 		codexLinkedRootWaitTimeout = originalLinkedWaitTimeout
 		codexTurnRootWaitTimeout = originalTurnWaitTimeout
 		codexThreadRootWaitTimeout = originalThreadWaitTimeout
@@ -1893,7 +1896,7 @@ func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
 	titleContext, titleRecorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
 	Distribute()(titleContext)
 
-	require.Equal(t, 2, waitCalls)
+	require.Equal(t, 1, waitCalls, "dispatch must continue as soon as a unique root appears")
 	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
 	require.False(t, titleContext.IsAborted())
 	require.Equal(t, channel.Id, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
@@ -1948,7 +1951,7 @@ func TestUnlinkedCodexTitleFailsClosedWithoutFreshRoot(t *testing.T) {
 	titleContext, recorder := codexUnlinkedNativeTitleContext(178, 1736, "01a04915-6f27-7f10-b723-88683446062f")
 	Distribute()(titleContext)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, titleContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
@@ -1974,7 +1977,7 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a04918-6f27-7f10-b723-886834460632")
 	Distribute()(titleContext)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, titleContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
@@ -2469,7 +2472,7 @@ func TestForkedCodexNamingFailsClosedWhenExactSourceBindingIsMissing(t *testing.
 	)
 
 	Distribute()(c)
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, c.IsAborted())
 }
 

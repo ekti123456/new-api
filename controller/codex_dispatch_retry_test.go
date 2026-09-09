@@ -7,8 +7,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCodexDispatchRetryRequiresCurrentTrustedDiagnostic(test *testing.T) {
@@ -41,5 +43,16 @@ func TestCodexDispatchRetryRequiresCurrentTrustedDiagnostic(test *testing.T) {
 			apiError := types.NewErrorWithStatusCode(errors.New("temporarily unavailable"), types.ErrorCodeBadResponseStatusCode, 503)
 			assert.Equal(test, scenario.retry, shouldRetry(ctx, apiError, 2))
 		})
+	}
+}
+
+func TestCodexRootWaitTimeoutNeverRetries(test *testing.T) {
+	previousRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 400, End: 599}}
+	test.Cleanup(func() { operation_setting.AutomaticRetryStatusCodeRanges = previousRanges })
+	for _, code := range []types.ErrorCode{"codex_root_account_wait_timeout", "codex_background_root_unavailable"} {
+		requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+		requestError := types.NewErrorWithStatusCode(errors.New("background root unavailable"), code, 400)
+		require.False(test, shouldRetry(requestContext, requestError, 5), string(code))
 	}
 }

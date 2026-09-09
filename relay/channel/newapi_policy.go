@@ -126,6 +126,7 @@ type newAPIPolicyMeta struct {
 	// ForkedFromSessionFingerprint is a signed account-affinity hint. It lets
 	// Codex2API prefer the source account without merging the fork's root/window.
 	ForkedFromSessionFingerprint string `json:"forked_from_session_fingerprint,omitempty"`
+	RootAccountWaitMillis        *int64 `json:"root_account_wait_millis,omitempty"`
 }
 
 func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader) error {
@@ -205,6 +206,7 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		InstallationID:     newAPIPolicyInstallationID(c, info),
 		RootSessionVersion: 1,
 	}
+	meta.RootAccountWaitMillis = codexRootAccountWaitMillis(c)
 	sessionID := newAPIPolicyStableSessionID(c, info)
 	if sessionID != "" {
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)

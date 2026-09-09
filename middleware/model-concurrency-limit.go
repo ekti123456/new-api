@@ -102,16 +102,20 @@ return 1
 `)
 
 var countUserConcurrencyScript = redis.NewScript(`
-local key = KEYS[1]
 local now = tonumber(redis.call('TIME')[1])
-redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
-return redis.call('ZCARD', key)
+local total = 0
+for _, key in ipairs(KEYS) do
+  redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+  total = total + redis.call('ZCARD', key)
+end
+return total
 `)
 
 type localUserConcurrencyState struct {
-	mu      sync.Mutex
-	active  map[int]map[string]struct{}
-	cooling map[int]map[string]time.Time
+	mu         sync.Mutex
+	active     map[int]map[string]struct{}
+	cooling    map[int]map[string]time.Time
+	background map[int]map[string]struct{}
 }
 
 var localUserConcurrency = localUserConcurrencyState{
@@ -131,8 +135,12 @@ func EffectiveUserConcurrencyLimit(rawLimit int) (limit int, source string) {
 	return rawLimit, "user"
 }
 
-func userConcurrencyKey(userID int) string {
-	return userConcurrencyKeyPrefix + strconv.Itoa(userID)
+func userConcurrencyKey(userID int, background ...bool) string {
+	key := userConcurrencyKeyPrefix + strconv.Itoa(userID)
+	if len(background) > 0 && background[0] {
+		key += ":root-wait"
+	}
+	return key
 }
 
 func activeUserConcurrencyKey(userID int) string {
@@ -151,7 +159,7 @@ func pruneLocalCoolingLocked(userID int, now time.Time) {
 	}
 }
 
-func acquireLocalUserConcurrency(userID, limit int, requestID string) bool {
+func acquireLocalUserConcurrency(userID, limit int, requestID string, background ...bool) bool {
 	localUserConcurrency.mu.Lock()
 	defer localUserConcurrency.mu.Unlock()
 	pruneLocalCoolingLocked(userID, time.Now())
@@ -160,8 +168,22 @@ func acquireLocalUserConcurrency(userID, limit int, requestID string) bool {
 		slots = make(map[string]struct{})
 		localUserConcurrency.active[userID] = slots
 	}
-	if limit > 0 && len(slots)+len(localUserConcurrency.cooling[userID]) >= limit {
+	backgroundRequest := len(background) > 0 && background[0]
+	occupied := len(slots) - len(localUserConcurrency.background[userID]) + len(localUserConcurrency.cooling[userID])
+	if backgroundRequest {
+		occupied = len(localUserConcurrency.background[userID])
+	}
+	if limit > 0 && occupied >= limit {
 		return false
+	}
+	if backgroundRequest {
+		if localUserConcurrency.background == nil {
+			localUserConcurrency.background = make(map[int]map[string]struct{})
+		}
+		if localUserConcurrency.background[userID] == nil {
+			localUserConcurrency.background[userID] = make(map[string]struct{})
+		}
+		localUserConcurrency.background[userID][requestID] = struct{}{}
 	}
 	slots[requestID] = struct{}{}
 	return true
@@ -169,6 +191,10 @@ func acquireLocalUserConcurrency(userID, limit int, requestID string) bool {
 
 func releaseLocalUserConcurrency(userID int, requestID string, cooldown time.Duration) {
 	localUserConcurrency.mu.Lock()
+	delete(localUserConcurrency.background[userID], requestID)
+	if len(localUserConcurrency.background[userID]) == 0 {
+		delete(localUserConcurrency.background, userID)
+	}
 	slots := localUserConcurrency.active[userID]
 	delete(slots, requestID)
 	if len(slots) == 0 {
@@ -239,26 +265,26 @@ func totalConcurrencyRequestID(userID int, requestID string) string {
 	return strconv.Itoa(userID) + ":" + requestID
 }
 
-func acquireUserConcurrency(ctx context.Context, userID, limit int, requestID string) (bool, error) {
+func acquireUserConcurrency(ctx context.Context, userID, limit int, requestID string, background ...bool) (bool, error) {
 	if !common.RedisEnabled {
-		return acquireLocalUserConcurrency(userID, limit, requestID), nil
+		return acquireLocalUserConcurrency(userID, limit, requestID, background...), nil
 	}
-	return acquireUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, limit, int(userConcurrencySlotTTL.Seconds()), requestID, totalConcurrencyRequestID(userID, requestID)).Bool()
+	return acquireUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID, background...), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, limit, int(userConcurrencySlotTTL.Seconds()), requestID, totalConcurrencyRequestID(userID, requestID)).Bool()
 }
 
-func releaseUserConcurrency(userID int, requestID string, cooldown time.Duration) {
+func releaseUserConcurrency(userID int, requestID string, cooldown time.Duration, background ...bool) {
 	if !common.RedisEnabled {
 		releaseLocalUserConcurrency(userID, requestID, cooldown)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := releaseUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, requestID, totalConcurrencyRequestID(userID, requestID), int(cooldown.Seconds())).Int(); err != nil {
+	if _, err := releaseUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID, background...), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, requestID, totalConcurrencyRequestID(userID, requestID), int(cooldown.Seconds())).Int(); err != nil {
 		common.SysLog(fmt.Sprintf("failed to release user concurrency slot for user %d: %v", userID, err))
 	}
 }
 
-func keepUserConcurrencyAlive(userID int, requestID string, done <-chan struct{}, stopped chan<- struct{}) {
+func keepUserConcurrencyAlive(userID int, requestID string, done <-chan struct{}, stopped chan<- struct{}, background ...bool) {
 	ticker := time.NewTicker(userConcurrencyHeartbeat)
 	defer ticker.Stop()
 	defer close(stopped)
@@ -268,7 +294,7 @@ func keepUserConcurrencyAlive(userID int, requestID string, done <-chan struct{}
 			return
 		case <-ticker.C:
 			refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err := refreshUserConcurrencyScript.Run(refreshCtx, common.RDB, []string{userConcurrencyKey(userID), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, int(userConcurrencySlotTTL.Seconds()), requestID, totalConcurrencyRequestID(userID, requestID)).Int()
+			_, err := refreshUserConcurrencyScript.Run(refreshCtx, common.RDB, []string{userConcurrencyKey(userID, background...), totalConcurrencyKey, activeUserConcurrencyKey(userID), activeTotalConcurrencyKey}, int(userConcurrencySlotTTL.Seconds()), requestID, totalConcurrencyRequestID(userID, requestID)).Int()
 			cancel()
 			if err != nil && !errors.Is(err, redis.Nil) {
 				common.SysLog(fmt.Sprintf("failed to refresh user concurrency slot for user %d: %v", userID, err))
@@ -289,7 +315,7 @@ func GetUserOccupiedConcurrency(ctx context.Context, userID int) (int, error) {
 	if !common.RedisEnabled {
 		return getLocalUserOccupiedConcurrency(userID), nil
 	}
-	return countUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID)}).Int()
+	return countUserConcurrencyScript.Run(ctx, common.RDB, []string{userConcurrencyKey(userID), userConcurrencyKey(userID, true)}).Int()
 }
 
 // GetTotalCurrentConcurrency returns the active model request count across all
@@ -310,19 +336,32 @@ func GetTotalOccupiedConcurrency(ctx context.Context) (int, error) {
 }
 
 func codexProtectedUserConcurrency(c *gin.Context) bool {
+	protected, _ := codexUserConcurrencyPolicy(c)
+	return protected
+}
+
+func codexUserConcurrencyPolicy(c *gin.Context) (bool, bool) {
 	if c == nil {
-		return false
+		return false, false
 	}
 	request, _, err := getModelRequest(c)
 	if err != nil || strings.TrimSpace(request.Model) == "" {
-		return false
+		return false, false
 	}
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	if _, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution); linked {
-		return true
-	}
+	_, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution)
 	_, internal := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
-	return internal
+	protected := linked || internal
+	if !relaychannel.CodexRequestNeedsRootAccountWait(resolution.ThreadSource) || resolution.IdentityConflict || resolution.TurnLineageConflict {
+		return protected, false
+	}
+	_, title := relaychannel.ClassifyUnlinkedCodexThreadTitleRequest(resolution)
+	_, ambient := relaychannel.ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution)
+	if !linked && !title && !ambient {
+		return protected, false
+	}
+	relaychannel.StartCodexRootAccountWait(c, resolution.ThreadSource)
+	return protected, true
 }
 
 // ModelRequestConcurrencyLimit limits active model requests per authenticated user.
@@ -348,19 +387,28 @@ func ModelRequestConcurrencyLimit() gin.HandlerFunc {
 		if requestID == "" {
 			requestID = common.NewRequestId()
 		}
-		protectedInternal := codexProtectedUserConcurrency(c)
+		protectedInternal, backgroundWait := codexUserConcurrencyPolicy(c)
 		effectiveLimit := limit
-		if protectedInternal && effectiveLimit > 0 {
+		if backgroundWait {
+			if effectiveLimit > 0 {
+				effectiveLimit = 2
+			}
+			cooldown = 0
+		} else if protectedInternal && effectiveLimit > 0 {
 			effectiveLimit++
 			cooldown = 0
 		}
-		acquired, err := acquireUserConcurrency(c.Request.Context(), userID, effectiveLimit, requestID)
+		acquired, err := acquireUserConcurrency(c.Request.Context(), userID, effectiveLimit, requestID, backgroundWait)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "并发限制服务暂时不可用，请稍后重试")
 			return
 		}
 		if !acquired {
 			c.Header("Retry-After", "1")
+			if backgroundWait {
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("后台请求并发已达到上限（%d），主请求并发不受此等待占用", effectiveLimit), types.ErrorCode("user_concurrency_limit_exceeded"))
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("当前并发请求已达到上限（%d），请稍后重试", limit), types.ErrorCode("user_concurrency_limit_exceeded"))
 			return
 		}
@@ -368,14 +416,14 @@ func ModelRequestConcurrencyLimit() gin.HandlerFunc {
 		done := make(chan struct{})
 		stopped := make(chan struct{})
 		if common.RedisEnabled {
-			go keepUserConcurrencyAlive(userID, requestID, done, stopped)
+			go keepUserConcurrencyAlive(userID, requestID, done, stopped, backgroundWait)
 		} else {
 			close(stopped)
 		}
 		defer func() {
 			close(done)
 			<-stopped
-			releaseUserConcurrency(userID, requestID, cooldown)
+			releaseUserConcurrency(userID, requestID, cooldown, backgroundWait)
 		}()
 		c.Next()
 	}

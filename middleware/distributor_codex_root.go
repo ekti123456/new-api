@@ -33,7 +33,8 @@ const (
 
 var (
 	codexUnlinkedPassiveRootWaitTimeout = 3 * time.Second
-	codexAmbientRootWaitTimeout         = 60 * time.Second
+	codexAmbientRootWaitTimeout         = relaychannel.CodexRootAccountWaitTimeout
+	codexTitleRootWaitTimeout           = relaychannel.CodexRootAccountWaitTimeout
 	codexLinkedRootWaitTimeout          = 3 * time.Second
 	codexTurnRootWaitTimeout            = 3 * time.Second
 	codexThreadRootWaitTimeout          = 3 * time.Second
@@ -336,7 +337,8 @@ func loadLinkedCodexNamingRootBinding(c *gin.Context, userID int, rootID string)
 		return binding, found, err
 	}
 
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexLinkedRootWaitTimeout)
+	waitTimeout := codexRootRouteWaitTimeout(c, codexLinkedRootWaitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
 	for {
 		waitErr := waitForCodexRootChannelBindingUpdate(waitContext, userID, rootID, codexLinkedRootWaitTimeout)
@@ -383,9 +385,10 @@ func loadRecognizedCodexRootBinding(
 	if err != nil || found || codexLinkedRootWaitTimeout <= 0 {
 		return binding, found, err
 	}
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexLinkedRootWaitTimeout)
+	waitTimeout := codexRootRouteWaitTimeout(c, codexLinkedRootWaitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
-	deadline := time.Now().Add(codexLinkedRootWaitTimeout)
+	deadline := time.Now().Add(waitTimeout)
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -791,7 +794,8 @@ func loadCodexTurnRootRoute(c *gin.Context, userID int, resolution relaychannel.
 	if waitTurnID == "" {
 		waitTurnID = strings.TrimSpace(resolution.ParentTurnID)
 	}
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexTurnRootWaitTimeout)
+	waitTimeout := codexRootRouteWaitTimeout(c, codexTurnRootWaitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
 	for {
 		waitErr := waitForCodexTurnRootBindingUpdate(waitContext, userID, waitTurnID, codexTurnRootWaitTimeout)
@@ -894,7 +898,8 @@ func loadCodexThreadRootRoute(c *gin.Context, userID int, threadID string) (code
 	if err != nil || found || codexThreadRootWaitTimeout <= 0 {
 		return route, found, err
 	}
-	waitContext, cancelWait := context.WithTimeout(requestContext, codexThreadRootWaitTimeout)
+	waitTimeout := codexRootRouteWaitTimeout(c, codexThreadRootWaitTimeout)
+	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
 	for {
 		waitErr := waitForCodexThreadRootBindingUpdate(waitContext, userID, threadID, codexThreadRootWaitTimeout)
@@ -978,7 +983,16 @@ func resolveForkedCodexNamingRoot(c *gin.Context, userID int, resolution relaych
 	return applyUnlinkedCodexPassiveRoot(c, resolution, sourceRoute.mapping.RootID, feature)
 }
 
+func codexRootRouteWaitTimeout(requestContext *gin.Context, legacyTimeout time.Duration) time.Duration {
+	deadline := relaychannel.CodexRootAccountWaitDeadline(requestContext)
+	if deadline.IsZero() {
+		return legacyTimeout
+	}
+	return min(max(time.Until(deadline), 0), max(codexTitleRootWaitTimeout, codexAmbientRootWaitTimeout))
+}
+
 func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.CodexRootSessionResolution) (relaychannel.CodexRootSessionResolution, string, bool, error) {
+	relaychannel.StartCodexRootAccountWait(c, resolution.ThreadSource)
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	if resolution.IdentityConflict && (strings.TrimSpace(resolution.TurnID) != "" ||
 		strings.TrimSpace(resolution.RootTurnID) != "" || strings.TrimSpace(resolution.ParentTurnID) != "" ||
@@ -1116,6 +1130,11 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	waitTimeout := codexUnlinkedPassiveRootWaitTimeout
 	if ambientCandidate {
 		waitTimeout = codexAmbientRootWaitTimeout
+	} else if titleCandidate {
+		waitTimeout = codexTitleRootWaitTimeout
+	}
+	if sharedDeadline := relaychannel.CodexRootAccountWaitDeadline(c); !sharedDeadline.IsZero() {
+		waitTimeout = min(waitTimeout, max(time.Until(sharedDeadline), 0))
 	}
 	deadline := time.Now().Add(waitTimeout)
 	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
@@ -1184,12 +1203,10 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 					return resolution, feature, true, errors.New("recent Codex root channel binding is outside the current group")
 				}
 				soleCandidate = &candidate
-				if ambientCandidate {
-					if err := waitContext.Err(); err != nil {
-						return resolution, feature, true, fmt.Errorf("wait for ambient Codex root channel binding: %w", err)
-					}
-					return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, candidate, true, service.CodexRequestArrival{}, passiveScope)
+				if err := waitContext.Err(); err != nil {
+					return resolution, feature, true, fmt.Errorf("wait for background Codex root channel binding: %w", err)
 				}
+				return applyUnlinkedCodexPassiveCandidate(c, resolution, feature, userID, tokenID, sourceRootID, candidate, true, service.CodexRequestArrival{}, passiveScope)
 			}
 		} else {
 			candidate, candidateFound, loadErr := service.LoadLatestCodexRootChannelObservationBefore(
