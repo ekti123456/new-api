@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	globalconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -108,6 +110,31 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if info.RelayMode == constant.RelayModeResponses || info.RelayMode == constant.RelayModeChatCompletions {
+		maxMB := globalconstant.MaxRequestBodyMB
+		if maxMB <= 0 {
+			maxMB = 128
+		}
+		maxBytes := int64(maxMB) << 20
+		jsonData, err := io.ReadAll(io.LimitReader(requestBody, maxBytes+1))
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		if int64(len(jsonData)) > maxBytes {
+			return nil, types.NewErrorWithStatusCode(common.ErrRequestBodyTooLarge, types.ErrorCodeInvalidRequest, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+		}
+		jsonData, err = normalizeXAIRequestBody(jsonData)
+		if err != nil {
+			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeConvertRequestFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		if err != nil {
+			return nil, err
+		}
+		defer closer.Close()
+		info.UpstreamRequestBodySize = size
+		requestBody = body
+	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
