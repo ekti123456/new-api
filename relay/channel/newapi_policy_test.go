@@ -176,6 +176,7 @@ func TestApplyNewAPIPolicyHeadersSeparatesGuardianLeafFromRoot(t *testing.T) {
 	require.Equal(t, "guardian", meta.SubagentKind)
 	require.Equal(t, newAPIPolicySessionFingerprint(secret, binding.PlatformID, "42", childID), meta.SessionFingerprint)
 	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", rootID), meta.RootSessionFingerprint)
+	require.Equal(t, rootID, meta.RootSessionID)
 	require.NotEqual(t, meta.SessionFingerprint, meta.RootSessionFingerprint)
 }
 
