@@ -106,7 +106,16 @@ export function PersonalWindows(): React.JSX.Element {
                   {t('No window services configured')}
                 </p>
               )}
-              <WindowPoolList pools={data.pools} offset={offset} />
+              <WindowPoolList
+                pools={data.pools}
+                offset={offset}
+                expansionEnabled={
+                  data.enabled &&
+                  data.policy.enabled &&
+                  data.accepted_multiplier >= data.policy.multiplier
+                }
+                expansionMultiplier={data.policy.multiplier}
+              />
               {(user?.role || 0) >= ROLE.ADMIN && (
                 <WindowPolicyEditor
                   key={JSON.stringify(data.policy)}

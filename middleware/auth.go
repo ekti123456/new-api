@@ -19,7 +19,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
-	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -508,19 +507,12 @@ func writeUserErrorRateLockResponse(c *gin.Context, status perfmetrics.UserError
 	if retryAfter < 1 {
 		retryAfter = 1
 	}
-	accessURL := strings.TrimSpace(status.AccessURL)
-	if accessURL == "" && c.Request != nil {
-		accessURL = common.GetRequestOrigin(c.Request)
-	}
-	if accessURL == "" {
-		accessURL = "未知"
-	}
-	apiInfoSummary := console_setting.FormatAPIInfoSummary()
-	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
+	c.Header("Retry-After", "")
+	c.Header("X-Should-Retry", "false")
 	abortWithOpenAiMessage(
 		c,
-		http.StatusTooManyRequests,
-		fmt.Sprintf("检测到你最近 %d 次请求中的错误率为 %.1f%%，请检查客户端网络环境。\n本次访问 URL：%s\n\n可用访问地址：\n%s\n\nAPI 调用已临时暂停，请在 %d 秒后重试", status.RequestCount, status.ErrorRate, accessURL, apiInfoSummary, retryAfter),
+		http.StatusBadRequest,
+		fmt.Sprintf("近期请求错误率过高（最近 %d 次请求，错误率 %.1f%%），API 调用已临时暂停。请等待 %d 秒后手动重试，请勿连续重试；若问题持续，请联系管理员排查。", status.RequestCount, status.ErrorRate, retryAfter),
 		types.ErrorCode("user_error_rate_temporarily_locked"),
 	)
 }

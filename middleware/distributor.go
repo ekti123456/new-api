@@ -77,6 +77,10 @@ func Distribute() func(c *gin.Context) {
 		recognizedRootFallbackEligible := canPassThroughRecognizedCodexRoot(c, rootSession)
 		recognizedRootPassThrough := false
 		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+		initialTitleRoot := rootErr == nil && !rootBindingFound && rootSession.Resolved && !rootSession.Related &&
+			!rootSession.TurnLineageConflict && strings.EqualFold(rootSession.ThreadSource, "user") &&
+			strings.EqualFold(rootSession.RequestKind, "turn") && rootSession.ForkedFromID == "" &&
+			rootSession.ThreadID == rootSession.RootID && rootSession.WindowID == rootSession.ThreadID+":0"
 		if recognizedRootFallbackEligible && rootErr == nil && !rootBindingFound && rootChannel == nil {
 			fallbackChannel, fallbackGroup, fallbackKey, fallbackKeyIndex, fallbackFound, fallbackErr := loadUniqueRecognizedCodexPassThroughChannel(c, usingGroup, modelRequest.Model)
 			if fallbackErr != nil {
@@ -360,7 +364,7 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+			threadClaim, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
 			if threadBindingErr != nil {
 				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
 				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
@@ -378,6 +382,21 @@ func Distribute() func(c *gin.Context) {
 					common.GetContextKeyInt(c, constant.ContextKeyUserId),
 					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
+			}
+			if initialTitleRoot && threadClaim.kind != "" {
+				userID, tokenID, rootID, binding, selected := selectedCodexRootChannelBinding(c, rootSession)
+				if selected {
+					if candidateErr := service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, codexPassiveRootScope(c)); candidateErr != nil {
+						common.SysError(fmt.Sprintf("Codex initial title candidate unavailable: user=%d root=%s reason=%v", userID, rootID, candidateErr))
+					}
+				}
+			}
+			if isCodexNamingRequest(rootSession) && !strings.EqualFold(rootSession.RequestKind, "compaction") {
+				userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
+				if namingErr := service.MarkCodexInitialTitleRootNamed(c.Request.Context(), userID, rootSession.RootID); namingErr != nil {
+					abortCodexBackgroundRootFailure(c, rootSession, namingErr)
+					return
+				}
 			}
 		}
 		c.Next()

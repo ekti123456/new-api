@@ -17,6 +17,7 @@ import (
 )
 
 type personalWindowPool struct {
+	Reference string                           `json:"reference,omitempty"`
 	ID        int                              `json:"id"`
 	Name      string                           `json:"name"`
 	Available bool                             `json:"available"`
@@ -135,6 +136,7 @@ func fetchPersonalWindowPools(requestContext *gin.Context, userID int, channelID
 				continue
 			}
 			seen[identity] = true
+			item.pool.Reference, _ = relaychannel.WindowServiceReference(item.info)
 		}
 		targets = append(targets, item)
 	}

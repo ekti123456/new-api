@@ -35,3 +35,15 @@ export async function saveExpansionPolicy(
     throw new Error(response.data.message || 'Failed to save settings')
   }
 }
+
+export async function upgradeWindow(input: {
+  pool_reference: string
+  root: string
+  grant_id: string
+  accepted_multiplier: number
+}): Promise<void> {
+  const response = await api.post('/api/user/windows/upgrade', input)
+  if (!response.data.success) {
+    throw new Error(response.data.message || 'Window expansion failed')
+  }
+}

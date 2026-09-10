@@ -1750,7 +1750,7 @@ func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
 		if waitCalls == 1 {
 			require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 			require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-			require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+			require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
 			return nil
 		}
 		<-ctx.Done()
@@ -1784,7 +1784,7 @@ func TestUnlinkedCodexTitleWithUnknownTurnLineageFallsBackToFreshRoot(t *testing
 	}
 	require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 	require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-	require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+	require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
 
 	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
 	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","turn_id":"`+titleTurnID+`","parent_turn_id":"`+parentTurnID+`","root_turn_id":"`+rootTurnID+`","turn_trigger":"thread_title","thread_source":"thread_title","request_kind":"turn"}`)
@@ -1835,7 +1835,7 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	} {
 		require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 		require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-		require.NoError(t, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding))
+		require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
 	}
 
 	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a04918-6f27-7f10-b723-886834460632")
@@ -1844,6 +1844,7 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.True(t, titleContext.IsAborted())
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
+	require.Contains(t, recorder.Body.String(), "多个主会话")
 }
 
 func TestDistributorGuardianRejectsUnboundMainDespiteUniqueChannel(t *testing.T) {

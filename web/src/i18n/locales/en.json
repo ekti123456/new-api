@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Expand this window on the same account": "Expand this window on the same account",
+    "Enable expansion first": "Enable expansion first",
+    "Confirm this window upgrade": "Confirm this window upgrade",
+    "After the reserved slot is secured, subsequent requests use the new multiplier. In-flight and past requests keep their original price.": "After the reserved slot is secured, subsequent requests use the new multiplier. In-flight and past requests keep their original price.",
+    "One expansion allowance is used. The account and expiry stay unchanged.": "One expansion allowance is used. The account and expiry stay unchanged.",
+    "Window or price changed. Close and confirm again.": "Window or price changed. Close and confirm again.",
+    "Expansion effective from": "Expansion effective from",
+    "Window expansion failed": "Window expansion failed",
+    "Prices stay fixed unless you separately confirm a window upgrade. Disabling expansion does not revert prices. Cooldown and account restrictions still apply.": "Prices stay fixed unless you separately confirm a window upgrade. Disabling expansion does not revert prices. Cooldown and account restrictions still apply.",
     "Window expansion": "Window expansion",
     "Expansion enabled": "Expansion enabled",
     "Not enabled": "Not enabled",

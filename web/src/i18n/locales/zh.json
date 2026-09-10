@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Expand this window on the same account": "扩容此窗口，保留原账号",
+    "Enable expansion first": "请先开启窗口扩容",
+    "Confirm this window upgrade": "确认此窗口扩容加价",
+    "After the reserved slot is secured, subsequent requests use the new multiplier. In-flight and past requests keep their original price.": "成功占用保留位后，后续请求立即按新倍率收费；进行中及历史请求保持原价。",
+    "One expansion allowance is used. The account and expiry stay unchanged.": "占用一份扩容额度，账号及原到期时间不变。",
+    "Window or price changed. Close and confirm again.": "窗口状态或价格已变化，请关闭并重新确认。",
+    "Expansion effective from": "扩容计费生效时间",
+    "Window expansion failed": "窗口扩容失败",
+    "Prices stay fixed unless you separately confirm a window upgrade. Disabling expansion does not revert prices. Cooldown and account restrictions still apply.": "除非单独确认此窗口中途扩容，否则倍率保持不变。关闭扩容不回退已确认价格；冷却与账号限制仍生效。",
     "Window expansion": "窗口扩容",
     "Expansion enabled": "已开启扩容",
     "Not enabled": "未开启",

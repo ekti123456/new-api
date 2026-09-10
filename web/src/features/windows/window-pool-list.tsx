@@ -6,6 +6,8 @@ import { WindowPoolCard } from './window-pool-card'
 export function WindowPoolList(props: {
   pools: WindowPool[]
   offset: number
+  expansionEnabled?: boolean
+  expansionMultiplier?: number
 }): React.JSX.Element {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -22,7 +24,13 @@ export function WindowPoolList(props: {
   return (
     <div className='space-y-4'>
       {props.pools.map((pool) => (
-        <WindowPoolCard key={pool.id} pool={pool} now={now + props.offset} />
+        <WindowPoolCard
+          key={pool.id}
+          pool={pool}
+          now={now + props.offset}
+          expansionEnabled={props.expansionEnabled}
+          expansionMultiplier={props.expansionMultiplier}
+        />
       ))}
     </div>
   )

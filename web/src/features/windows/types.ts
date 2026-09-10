@@ -12,11 +12,15 @@ export interface PersonalWindow {
   model?: string
   expanded: boolean
   multiplier: number
+  grant_id?: string
+  can_upgrade?: boolean
+  upgraded_at?: string
 }
 
 export interface WindowPool {
   id: number
   name: string
+  reference?: string
   available: boolean
   error?: string
   status: {

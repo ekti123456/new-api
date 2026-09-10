@@ -824,6 +824,10 @@ func StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID int, rootID
 // StoreProvisionalCodexTitleRootChannelCandidate marks one already-published
 // recent root as eligible for a title request arriving in the next few seconds.
 func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, scopes ...CodexPassiveRootScope) error {
+	return storeCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding, false, scopes...)
+}
+
+func storeCodexTitleRootChannelCandidate(userID, tokenID int, rootID string, binding CodexRootChannelBinding, initial bool, scopes ...CodexPassiveRootScope) error {
 	rootID = strings.TrimSpace(rootID)
 	fingerprint := CodexRootChannelBindingFingerprint(binding)
 	member := codexRecentRootCandidateMember(rootID, fingerprint)
@@ -846,21 +850,28 @@ func StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID int, rootID 
 		return ErrCodexRecentRootBindingUnavailable
 	}
 	expiresAt := time.Now().UTC().Add(codexTitleRootCandidateTTL)
+	redisKey, memory := codexTitleRootCandidateRedisKey(scopeKey), getCodexTitleRootMemory()
+	if initial {
+		redisKey, memory = codexInitialTitleRootCandidateRedisKey(scopeKey), codexInitialTitleRootMemory
+	}
 	if common.RedisEnabled && common.RDB != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), codexPassiveRootRedisTimeout)
 		defer cancel()
 		_, err = storeCodexRecentRootCandidateScript.Run(ctx, common.RDB,
-			[]string{codexTitleRootCandidateRedisKey(scopeKey)}, int64(codexTitleRootCandidateTTL/time.Millisecond),
+			[]string{redisKey}, int64(codexTitleRootCandidateTTL/time.Millisecond),
 			member, codexRecentRootChannelCandidateLimit, int64(codexTitleRootCandidateTTL/time.Second), 0).Result()
 		if err != nil {
 			return err
 		}
 	} else {
 		codexRecentRootMemoryMu.Lock()
-		storeCodexCandidateMemory(getCodexTitleRootMemory(), scopeKey, member, expiresAt, codexTitleRootCandidateTTL)
+		storeCodexCandidateMemory(memory, scopeKey, member, expiresAt, codexTitleRootCandidateTTL)
 		codexRecentRootMemoryMu.Unlock()
 	}
 	notifyCodexTitleRootChannelUpdate(codexPassiveRootScopeKey(userID, tokenID, scopes...))
+	if initial {
+		codexEmptyPassiveCandidateScopes.Delete("initial-title:" + codexPassiveRootScopeKey(userID, tokenID, scopes...))
+	}
 	return nil
 }
 
@@ -1096,6 +1107,10 @@ func LoadRecentCodexRootChannelCandidates(ctx context.Context, userID, tokenID i
 // normal recent-candidate set and the five-second title marker, across both
 // routing sides.
 func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID int, scopes ...CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
+	return loadCodexTitleRootChannelCandidates(ctx, userID, tokenID, false, scopes...)
+}
+
+func loadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID int, initial bool, scopes ...CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1109,7 +1124,11 @@ func LoadCodexTitleRootChannelCandidates(ctx context.Context, userID, tokenID in
 			return nil, err
 		}
 		scopeKey := codexRecentRootChannelScopeKey(userID, tokenID, uaRoutingOnly, scopes...)
-		fresh, err := loadCodexCandidateTimes(ctx, scopeKey, codexTitleRootCandidateRedisKey(scopeKey), getCodexTitleRootMemory(), time.Now().UTC())
+		redisKey, memory := codexTitleRootCandidateRedisKey(scopeKey), getCodexTitleRootMemory()
+		if initial {
+			redisKey, memory = codexInitialTitleRootCandidateRedisKey(scopeKey), codexInitialTitleRootMemory
+		}
+		fresh, err := loadCodexCandidateTimes(ctx, scopeKey, redisKey, memory, time.Now().UTC())
 		if err != nil {
 			return nil, err
 		}
@@ -1416,14 +1435,14 @@ func notifyCodexTitleRootChannelUpdate(scopeKey string) {
 // when the fresh-title/recent-candidate intersection contains exactly the
 // requested root across both routing sides.
 func ClaimCodexTitleRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
-	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, titleRootID, alias, true, scopes...)
+	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, titleRootID, alias, true, false, scopes...)
 }
 
 func ClaimCodexStrictPassiveRootAlias(ctx context.Context, userID, tokenID int, sourceRootID string, alias CodexPassiveRootAlias, scopes ...CodexPassiveRootScope) error {
-	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, sourceRootID, alias, false, scopes...)
+	return claimCodexUniquePassiveRootAlias(ctx, userID, tokenID, sourceRootID, alias, false, false, scopes...)
 }
 
-func claimCodexUniquePassiveRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, title bool, scopes ...CodexPassiveRootScope) error {
+func claimCodexUniquePassiveRootAlias(ctx context.Context, userID, tokenID int, titleRootID string, alias CodexPassiveRootAlias, title, initial bool, scopes ...CodexPassiveRootScope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1467,6 +1486,9 @@ func claimCodexUniquePassiveRootAlias(ctx context.Context, userID, tokenID int, 
 		if title {
 			normalCandidates, uaCandidates = codexTitleRootCandidateRedisKey(normalScope), codexTitleRootCandidateRedisKey(uaScope)
 		}
+		if initial {
+			normalCandidates, uaCandidates = codexInitialTitleRootCandidateRedisKey(normalScope), codexInitialTitleRootCandidateRedisKey(uaScope)
+		}
 		stored, err := claimCodexTitleRootAliasScript.Run(claimContext, common.RDB, []string{
 			codexPassiveRootAliasRedisKey(baseScope, cacheKey),
 			normalCandidates, uaCandidates,
@@ -1504,6 +1526,9 @@ func claimCodexUniquePassiveRootAlias(ctx context.Context, userID, tokenID int, 
 		freshCache := getCodexRecentRootMemory()
 		if title {
 			freshCache = getCodexTitleRootMemory()
+		}
+		if initial {
+			freshCache = codexInitialTitleRootMemory
 		}
 		fresh, freshFound, freshErr := freshCache.Get(scopeKey)
 		if freshErr != nil {

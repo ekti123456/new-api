@@ -200,6 +200,7 @@ type newAPIPolicyRootSessionEvidence struct {
 	threads        newAPIPolicySessionEvidence
 	clientRequests newAPIPolicySessionEvidence
 	windows        newAPIPolicySessionEvidence
+	windowIDs      newAPIPolicySessionEvidence
 	turns          newAPIPolicyTurnEvidence
 	parentTurns    newAPIPolicyTurnEvidence
 	rootTurns      newAPIPolicyTurnEvidence
@@ -213,6 +214,7 @@ type newAPIPolicyRootSessionEvidence struct {
 type newAPIPolicyRootSessionResolution struct {
 	rootID              string
 	threadID            string
+	windowID            string
 	forkedFromID        string
 	turnID              string
 	parentTurnID        string
@@ -233,6 +235,7 @@ type newAPIPolicyRootSessionResolution struct {
 type CodexRootSessionResolution struct {
 	RootID              string
 	ThreadID            string
+	WindowID            string
 	ForkedFromID        string
 	TurnID              string
 	ParentTurnID        string
@@ -275,6 +278,7 @@ func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionReso
 	return CodexRootSessionResolution{
 		RootID:              resolution.rootID,
 		ThreadID:            resolution.threadID,
+		WindowID:            resolution.windowID,
 		ForkedFromID:        resolution.forkedFromID,
 		TurnID:              resolution.turnID,
 		ParentTurnID:        resolution.parentTurnID,
@@ -507,6 +511,7 @@ func analyzeNewAPIPolicyRootSession(c *gin.Context, info *relaycommon.RelayInfo,
 	return newAPIPolicyRootSessionResolution{
 		rootID:              rootID,
 		threadID:            evidence.threads.resolved(),
+		windowID:            evidence.windowIDs.resolved(),
 		forkedFromID:        evidence.forkedFrom.value,
 		turnID:              evidence.turns.resolved(),
 		parentTurnID:        evidence.parentTurns.resolved(),
@@ -796,11 +801,13 @@ func (e *newAPIPolicyRootSessionEvidence) addWindow(value string) {
 		e.metadataBroken = true
 		return
 	}
-	if _, err := strconv.ParseUint(strings.TrimSpace(value[separator+1:]), 10, 64); err != nil {
+	windowNumber, err := strconv.ParseUint(strings.TrimSpace(value[separator+1:]), 10, 64)
+	if err != nil {
 		e.metadataBroken = true
 		return
 	}
 	e.windows.add(thread)
+	e.windowIDs.add(thread + ":" + strconv.FormatUint(windowNumber, 10))
 }
 
 func newAPIPolicyOneLeaf(evidence newAPIPolicyRootSessionEvidence) (string, bool) {

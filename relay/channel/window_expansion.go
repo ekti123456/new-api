@@ -35,6 +35,7 @@ type WindowControlInput struct {
 	Multiplier     float64 `json:"multiplier"`
 	GrantID        string  `json:"grant_id,omitempty"`
 	ReservationID  string  `json:"reservation_id,omitempty"`
+	Root           string  `json:"root,omitempty"`
 }
 
 type WindowAdmissionDenied struct{ Message string }
@@ -47,12 +48,15 @@ func (denied *WindowAdmissionDenied) Error() string {
 }
 
 type PersonalWindow struct {
-	ID         string    `json:"id"`
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	Model      string    `json:"model,omitempty"`
-	Expanded   bool      `json:"expanded"`
-	Multiplier float64   `json:"multiplier"`
+	ID         string     `json:"id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	Model      string     `json:"model,omitempty"`
+	Expanded   bool       `json:"expanded"`
+	Multiplier float64    `json:"multiplier"`
+	GrantID    string     `json:"grant_id,omitempty"`
+	CanUpgrade bool       `json:"can_upgrade"`
+	UpgradedAt *time.Time `json:"upgraded_at,omitempty"`
 }
 
 type WindowControlResult struct {
@@ -101,6 +105,26 @@ func WindowServiceIdentity(info *relaycommon.RelayInfo) (string, error) {
 		return "", err
 	}
 	return binding.PlatformID + "\n" + target.String(), nil
+}
+
+func WindowServiceReference(info *relaycommon.RelayInfo) (string, error) {
+	identity, err := WindowServiceIdentity(info)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func InvalidateUserWindowBilling(userID int) {
+	scope := ":" + strconv.Itoa(userID) + ":"
+	windowBillingCache.Lock()
+	defer windowBillingCache.Unlock()
+	for key := range windowBillingCache.items {
+		if strings.Contains(key, scope) {
+			windowBillingCache.deleteLocked(key)
+		}
+	}
 }
 
 func RequestUserWindows(requestContext *gin.Context, info *relaycommon.RelayInfo, input WindowControlInput) (WindowControlResult, error) {

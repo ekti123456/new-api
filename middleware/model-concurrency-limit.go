@@ -349,6 +349,8 @@ func codexUserConcurrencyPolicy(c *gin.Context) (bool, bool) {
 		return false, false
 	}
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
+	c.Set(relayAdmissionModelKey, request.Model)
+	c.Set(relayAdmissionResolutionKey, resolution)
 	_, linked := relaychannel.ClassifyLinkedCodexPassiveInternalRequest(resolution)
 	_, internal := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
 	protected := linked || internal

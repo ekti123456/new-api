@@ -46,8 +46,160 @@ const { PersonalWindows } = await import('../index')
 const { WindowPoolCard } = await import('../window-pool-card')
 const { ExpansionCard } = await import('../expansion-card')
 const { remainingWindowTime } = await import('../remaining-window-time')
+const { WindowUpgradeButton } = await import('../window-upgrade-button')
 
 after(() => browser.close())
+
+test('individual upgrade requires separate confirmation and rejects a changed quote', async (testContext) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  testContext.after(async () => {
+    await act(async () => root.unmount())
+    container.remove()
+    client.clear()
+  })
+  const window = {
+    id: 'root',
+    grant_id: 'grant',
+    created_at: '2026-09-10T01:00:00Z',
+    expires_at: '2026-09-10T02:00:00Z',
+    expanded: false,
+    multiplier: 1,
+  }
+  const render = (multiplier: number, enabled: boolean) =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <WindowUpgradeButton
+          window={window}
+          poolReference='pool'
+          multiplier={multiplier}
+          enabled={enabled}
+        />
+      </QueryClientProvider>
+    )
+  await act(async () => render(1.5, false))
+  assert.equal(
+    container.querySelector<HTMLButtonElement>('button')?.disabled,
+    true
+  )
+  await act(async () => render(1.5, true))
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('button')?.click()
+  )
+  assert.match(
+    document.querySelector('[role=alertdialog]')?.textContent || '',
+    /×1.5/
+  )
+  assert.match(
+    document.querySelector('[role=alertdialog]')?.textContent || '',
+    /In-flight and past requests keep their original price/
+  )
+  await act(async () => render(2, true))
+  assert.match(
+    document.querySelector('[role=alertdialog]')?.textContent || '',
+    /Window or price changed/
+  )
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role=alertdialog] button'
+    ),
+  ].find((button) => button.textContent === 'Confirm')
+  assert.ok(confirm)
+  assert.equal(confirm.disabled, true)
+  const cancel = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role=alertdialog] button'
+    ),
+  ].find((button) => button.textContent === 'Cancel')
+  assert.ok(cancel)
+  await act(async () => cancel.click())
+  assert.equal(client.getMutationCache().getAll().length, 0)
+})
+
+test('confirmed individual upgrade sends only its window and accepted tariff to the authenticated API', async (testContext) => {
+  const { api } = await import('@/lib/api')
+  const previousAdapter = api.defaults.adapter
+  const requests: unknown[] = []
+  api.defaults.adapter = async (config) => {
+    assert.equal(config.url, '/api/user/windows/upgrade')
+    requests.push(JSON.parse(String(config.data)))
+    return {
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      data: { success: true },
+    }
+  }
+  const client = new QueryClient({
+    defaultOptions: {
+      mutations: { retry: false },
+      queries: { retry: false, gcTime: 0 },
+    },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  testContext.after(async () => {
+    api.defaults.adapter = previousAdapter
+    await act(async () => root.unmount())
+    container.remove()
+    client.clear()
+  })
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <WindowUpgradeButton
+          window={{
+            id: 'root',
+            grant_id: 'grant',
+            created_at: '2026-09-10T01:00:00Z',
+            expires_at: '2026-09-10T02:00:00Z',
+            expanded: false,
+            multiplier: 1,
+          }}
+          poolReference='pool'
+          multiplier={1.5}
+          enabled
+        />
+      </QueryClientProvider>
+    )
+  )
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>('button')?.click()
+  )
+  assert.equal(requests.length, 0)
+  const completed = new Promise<void>((resolve) => {
+    const unsubscribe = client.getMutationCache().subscribe((event) => {
+      if (event.mutation?.state.status === 'success') {
+        unsubscribe()
+        resolve()
+      }
+    })
+  })
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role=alertdialog] button'
+    ),
+  ].find((button) => button.textContent === 'Confirm')
+  assert.ok(confirm)
+  await act(async () => {
+    confirm.click()
+    await completed
+  })
+  assert.deepEqual(requests, [
+    {
+      pool_reference: 'pool',
+      root: 'root',
+      grant_id: 'grant',
+      accepted_multiplier: 1.5,
+    },
+  ])
+})
 
 test('Chinese expansion copy and switch label follow the selected locale', async (testContext) => {
   const locale = (await import('@/i18n/locales/zh.json')).default
@@ -131,7 +283,10 @@ test('expansion switch supports keyboard activation and exposes the billing rule
     description?.textContent || '',
     /Standard windows first, no surcharge for enabling/
   )
-  assert.match(description?.textContent || '', /prices stay fixed until expiry/)
+  assert.match(
+    description?.textContent || '',
+    /Prices stay fixed unless you separately confirm a window upgrade/
+  )
   await act(async () => {
     toggle.focus()
     toggle.dispatchEvent(

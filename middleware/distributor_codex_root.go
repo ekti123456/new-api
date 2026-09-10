@@ -59,6 +59,7 @@ type codexPendingPassiveRootAlias struct {
 	alias          service.CodexPassiveRootAlias
 	claimRequired  bool
 	titleCandidate bool
+	initialTitle   bool
 	temporaryOnly  bool
 	scope          service.CodexPassiveRootScope
 }
@@ -1073,6 +1074,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		return resolution, feature, true, nil
 	}
 	feature, titleCandidate := relaychannel.ClassifyUnlinkedCodexThreadTitleRequest(resolution)
+	initialTitle := titleCandidate
 	ambientFeature, ambientCandidate := relaychannel.ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution)
 	if ambientCandidate {
 		feature, titleCandidate = ambientFeature, true
@@ -1124,7 +1126,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		}
 		c.Set(codexPendingPassiveRootAliasContextKey, codexPendingPassiveRootAlias{
 			userID: userID, tokenID: tokenID, sourceRootID: sourceRootID, alias: alias,
-			titleCandidate: titleCandidate, temporaryOnly: alias.Temporary, scope: passiveScope,
+			titleCandidate: titleCandidate, initialTitle: initialTitle, temporaryOnly: alias.Temporary, scope: passiveScope,
 		})
 		return applyUnlinkedCodexPassiveRoot(c, resolution, alias.RootID, feature)
 	}
@@ -1132,7 +1134,13 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 	waitContext, cancelWait := context.WithTimeout(requestContext, waitTimeout)
 	defer cancelWait()
 	for {
-		candidates, loadErr := service.LoadCodexPassiveRootCandidates(waitContext, userID, tokenID, titleCandidate, passiveScope)
+		var candidates []service.CodexRecentRootChannelCandidate
+		var loadErr error
+		if initialTitle {
+			candidates, loadErr = service.LoadCodexInitialTitleRootCandidates(waitContext, userID, tokenID, passiveScope)
+		} else {
+			candidates, loadErr = service.LoadCodexPassiveRootCandidates(waitContext, userID, tokenID, titleCandidate, passiveScope)
+		}
 		err = loadErr
 		if err != nil {
 			return resolution, feature, true, fmt.Errorf("查询同范围主会话失败: %w", err)
@@ -1181,7 +1189,7 @@ func applyUnlinkedCodexPassiveCandidate(
 			RootID: candidate.RootID, SelectedGroup: candidate.Binding.SelectedGroup,
 			UARoutingOnly: candidate.Binding.UARoutingOnly, BindingFingerprint: candidate.BindingFingerprint,
 		},
-		claimRequired: true, titleCandidate: titleCandidate,
+		claimRequired: true, titleCandidate: titleCandidate, initialTitle: strings.EqualFold(resolution.ThreadSource, "thread_title"),
 		scope: scope,
 	})
 	return applyUnlinkedCodexPassiveRoot(c, resolution, candidate.RootID, feature)
@@ -1217,6 +1225,9 @@ func commitCodexPassiveRootAlias(c *gin.Context) error {
 	}
 	if !pending.claimRequired {
 		return nil
+	}
+	if pending.initialTitle {
+		return service.ClaimCodexInitialTitleRootAlias(c.Request.Context(), pending.userID, pending.tokenID, pending.sourceRootID, pending.alias, pending.scope)
 	}
 	if pending.titleCandidate {
 		return service.ClaimCodexTitleRootAlias(c.Request.Context(), pending.userID, pending.tokenID, pending.sourceRootID, pending.alias, pending.scope)

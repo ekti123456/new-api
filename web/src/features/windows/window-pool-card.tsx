@@ -8,10 +8,13 @@ import { cn } from '@/lib/utils'
 
 import { remainingWindowTime } from './remaining-window-time'
 import type { WindowPool } from './types'
+import { WindowUpgradeButton } from './window-upgrade-button'
 
 export function WindowPoolCard(props: {
   pool: WindowPool
   now: number
+  expansionEnabled?: boolean
+  expansionMultiplier?: number
 }): React.JSX.Element {
   const { t } = useTranslation()
   const [visible, setVisible] = useState(50)
@@ -150,6 +153,23 @@ export function WindowPoolCard(props: {
                     {window.model}
                   </p>
                 )}
+                {window.upgraded_at && (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Expansion effective from')}:{' '}
+                    {new Date(window.upgraded_at).toLocaleString()}
+                  </p>
+                )}
+                {!window.expanded &&
+                  window.can_upgrade &&
+                  window.grant_id &&
+                  props.pool.reference && (
+                    <WindowUpgradeButton
+                      window={window}
+                      poolReference={props.pool.reference}
+                      enabled={props.expansionEnabled === true}
+                      multiplier={props.expansionMultiplier || 1}
+                    />
+                  )}
               </article>
             ))}
           </div>

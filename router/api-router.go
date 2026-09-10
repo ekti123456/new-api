@@ -89,6 +89,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/self", controller.GetSelf)
 				selfRoute.GET("/windows", middleware.DisableCache(), controller.GetPersonalWindows)
 				selfRoute.PUT("/windows/expansion", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.SetPersonalWindowExpansion)
+				selfRoute.POST("/windows/upgrade", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UpgradePersonalWindow)
 				selfRoute.PUT("/windows/policy", middleware.AdminAuth(), middleware.DisableCache(), controller.UpdateWindowExpansionPolicy)
 				selfRoute.GET("/notifications/personal", controller.GetPersonalNotifications)
 				selfRoute.POST("/notifications/personal/read", controller.MarkPersonalNotificationsRead)

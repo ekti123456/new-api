@@ -13,6 +13,20 @@
 
 删除记录限制的是数据增长，不保证数据库文件立即缩小；磁盘空间回收取决于数据库自身的维护机制。本策略也不负责清理服务器或容器的文本日志。
 
+## 前置限流与临时锁定日志
+
+NewAPI 在鉴权后、渠道分发前拒绝的普通/后台并发、模型 RPM、用户请求频率限制，现在会记录独立的 `new_api_admission_error`。高错误率临时锁定也走同一审计入口。此前这些路径没有进入 Relay 控制器，只可能出现在服务运行日志中，不会进入性能失败明细或数据库错误日志。
+
+- 性能统计开启时写入管理员失败明细；`ERROR_LOG_ENABLED` 开启时另写错误日志。前置拒绝不计费、不增加上游失败率、不再次计入用户高错误率锁定样本。
+- 可用请求 ID、`stage=relay_admission`、状态码、业务错误码、用户与分组关联排查。记录已有的模型、请求来源、子代理类型和会话/窗口摘要，尚未解析的字段留空；没有选择渠道时渠道 ID 为 0，不伪造上游账号。模型未知的前置失败需取消模型筛选查看。
+- 不为了记录日志读取尚未解析的请求体。只复用并发检查已经解析的身份摘要或有限的请求头白名单；不保存 Authorization、密钥、完整请求体、查询字符串或安装设备标识。头部来源仅是客户端声明，不表示已验证父根绑定。
+- 数据库写入使用一个固定后台 worker 和最多 256 条的有界队列；每条写入有 5 秒超时，正常关闭时等待排空。队列满或数据库失败会输出带请求 ID 的告警，完整的有界诊断仍在 `relay_admission_rejected` 运行日志中，不能保证故障/强制终止期间每条都入库。
+- 内存与 Redis 请求限流都返回结构化 JSON。上游 429、并发上限及限流策略不因此改变。外层 CDN/反向代理拒绝或未认证请求不在此数据库补记范围内。
+
+高错误率锁定改为 HTTP 400、`user_error_rate_temporarily_locked`、中文说明和 `X-Should-Retry: false`，不再发送 `Retry-After`。这避免 Codex 把平台暂停提示转换成通用 429 文案；锁定仍持续到原定时间，每次新请求仍被拒绝，不能保证用户或第三方客户端主动重复提交时界面只显示一次。
+
+官方实现参考：[HTTP 错误映射](https://github.com/openai/codex/blob/b348fc26674189f758d5941cdab3f78f258b2aa7/codex-rs/codex-api/src/api_bridge.rs)、[WebSocket 握手错误映射](https://github.com/openai/codex/blob/b348fc26674189f758d5941cdab3f78f258b2aa7/codex-rs/codex-api/src/endpoint/responses_websocket.rs)。截图中的通用 429 无法单独确定产生它的组件；本补丁补齐已经确认的前置拒绝漏记路径，不能恢复部署前缺失的数据库记录。
+
 ## 排查 `502 / bad_response_status_code`
 
 NewAPI 的 `service.RelayErrorHandler` 会把上游的 HTTP 状态码带入错误；无法解析为预期结构化错误的响应可能保留 `bad_response_status_code`。关闭错误正文展示时，JSON 解析失败的响应体预览会写入服务日志；响应体读取失败则可能没有这条正文日志。

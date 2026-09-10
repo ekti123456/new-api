@@ -12,12 +12,23 @@ var codexPassiveCandidateLookups singleflight.Group
 var codexEmptyPassiveCandidateScopes = hot.NewHotCache[string, bool](hot.LRU, 4096).WithTTL(time.Second).Build()
 
 func LoadCodexPassiveRootCandidates(ctx context.Context, userID, tokenID int, title bool, scope CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
+	return loadCodexPassiveRootCandidates(ctx, userID, tokenID, title, false, scope)
+}
+
+func LoadCodexInitialTitleRootCandidates(ctx context.Context, userID, tokenID int, scope CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
+	return loadCodexPassiveRootCandidates(ctx, userID, tokenID, true, true, scope)
+}
+
+func loadCodexPassiveRootCandidates(ctx context.Context, userID, tokenID int, title, initial bool, scope CodexPassiveRootScope) ([]CodexRecentRootChannelCandidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	key := "recent:" + codexPassiveRootScopeKey(userID, tokenID, scope)
 	if title {
 		key = "title:" + codexPassiveRootScopeKey(userID, tokenID, scope)
+	}
+	if initial {
+		key = "initial-title:" + codexPassiveRootScopeKey(userID, tokenID, scope)
 	}
 	if _, found, _ := codexEmptyPassiveCandidateScopes.Get(key); found {
 		return nil, nil
@@ -28,7 +39,7 @@ func LoadCodexPassiveRootCandidates(ctx context.Context, userID, tokenID int, ti
 		var candidates []CodexRecentRootChannelCandidate
 		var err error
 		if title {
-			candidates, err = LoadCodexTitleRootChannelCandidates(lookupContext, userID, tokenID, scope)
+			candidates, err = loadCodexTitleRootChannelCandidates(lookupContext, userID, tokenID, initial, scope)
 		} else {
 			for _, side := range []bool{false, true} {
 				var sideCandidates []CodexRecentRootChannelCandidate

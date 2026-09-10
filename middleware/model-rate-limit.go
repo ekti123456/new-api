@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -56,7 +57,8 @@ func enforceModelRPMRateLimit(c *gin.Context, modelName string) bool {
 	if retryAfterSeconds > 0 {
 		c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
 	}
-	abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("模型 %s 已达到速率限制：每分钟最多请求 %d 次", modelName, rpm))
+	c.Set(relayAdmissionModelKey, modelName)
+	abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("模型 %s 已达到速率限制：每分钟最多请求 %d 次", modelName, rpm), types.ErrorCode("model_rpm_limit_exceeded"))
 	return false
 }
 
@@ -74,6 +76,7 @@ func SpecifiedModelRPMRateLimit() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		c.Set(relayAdmissionModelKey, modelRequest.Model)
 		if !enforceModelRPMRateLimit(c, modelRequest.Model) {
 			return
 		}
@@ -150,7 +153,7 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			return
 		}
 		if !allowed {
-			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount))
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount), types.ErrorCode("user_request_rate_limit_exceeded"))
 			return
 		}
 
@@ -174,7 +177,8 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			}
 
 			if !allowed {
-				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount))
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount), types.ErrorCode("user_total_request_rate_limit_exceeded"))
+				return
 			}
 		}
 
@@ -199,8 +203,7 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 
 		// 1. 检查总请求数限制（当totalMaxCount为0时跳过）
 		if totalMaxCount > 0 && !inMemoryRateLimiter.Request(totalKey, totalMaxCount, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount), types.ErrorCode("user_total_request_rate_limit_exceeded"))
 			return
 		}
 
@@ -208,8 +211,7 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 		// 使用一个临时key来检查限制，这样可以避免实际记录
 		checkKey := successKey + "_check"
 		if !inMemoryRateLimiter.Request(checkKey, successMaxCount, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount), types.ErrorCode("user_request_rate_limit_exceeded"))
 			return
 		}
 

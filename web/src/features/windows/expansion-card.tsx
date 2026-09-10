@@ -112,7 +112,7 @@ export function ExpansionCard(props: {
         </p>
         <p className='text-muted-foreground'>
           {t(
-            'Window prices stay fixed until expiry, even after disabling. Creation cooldown and account restrictions still apply.'
+            'Prices stay fixed unless you separately confirm a window upgrade. Disabling expansion does not revert prices. Cooldown and account restrictions still apply.'
           )}
         </p>
         {needsConfirmation && props.data.policy.enabled && (
