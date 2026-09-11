@@ -37,7 +37,7 @@ func TestCodexPrefixRootSelectionAndAtomicClaim(test *testing.T) {
 			require.Equal(test, rootID, candidates[0].RootID)
 			alias := codexPassiveRootAliasForBinding(rootID, binding)
 			alias.Association = CodexPrefixRootAssociation
-			require.NoError(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, backgroundID, alias, false))
+			require.NoError(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, backgroundID, alias))
 			require.NoError(test, PromoteCodexPassiveRootAlias(ctx, scope.UserID, scope.TokenID, backgroundID, alias, scope))
 			stored, found, err := LoadCodexPassiveRootAlias(ctx, scope.UserID, scope.TokenID, backgroundID, scope)
 			require.NoError(test, err)
@@ -49,8 +49,8 @@ func TestCodexPrefixRootSelectionAndAtomicClaim(test *testing.T) {
 			candidates, err = LoadCodexPrefixRootCandidates(ctx, scope, backgroundID)
 			require.NoError(test, err)
 			require.Len(test, candidates, 2)
-			require.ErrorIs(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, "new-source", alias, false), ErrCodexPassiveRootCandidatesChanged)
-			require.NoError(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, backgroundID, alias, false))
+			require.ErrorIs(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, "new-source", alias), ErrCodexPassiveRootCandidatesChanged)
+			require.NoError(test, ClaimCodexPrefixRootAlias(ctx, scope, backgroundID, backgroundID, alias))
 		})
 	}
 }
@@ -121,7 +121,7 @@ func TestCodexPrefixRootKeepsUnavailableAndOverflowAmbiguous(test *testing.T) {
 	}
 }
 
-func TestCodexPrefixTitleOnlyOneOwner(test *testing.T) {
+func TestCodexPrefixTitleAllowsConcurrentNamesAndHistoricalClaims(test *testing.T) {
 	for _, backend := range []string{"memory", "redis"} {
 		test.Run(backend, func(test *testing.T) {
 			scope, binding := prefixRootFixture(test, backend)
@@ -132,26 +132,25 @@ func TestCodexPrefixTitleOnlyOneOwner(test *testing.T) {
 			alias.Association = CodexPrefixRootAssociation
 			var workers sync.WaitGroup
 			results := make([]error, 2)
+			sourceIDs := []string{"01a09012" + uuid.NewString()[8:], "01a09012" + uuid.NewString()[8:]}
 			for index := range results {
 				workers.Add(1)
 				go func() {
 					defer workers.Done()
-					sourceID := "01a09012" + uuid.NewString()[8:]
-					results[index] = ClaimCodexPrefixRootAlias(test.Context(), scope, sourceID, sourceID, alias, true)
+					sourceID := sourceIDs[index]
+					results[index] = ClaimCodexPrefixRootAlias(test.Context(), scope, sourceID, sourceID, alias)
 				}()
 			}
 			workers.Wait()
-			successes := 0
-			for _, result := range results {
-				if result == nil {
-					successes++
-				} else {
-					require.ErrorIs(test, result, ErrCodexPassiveRootCandidatesChanged)
-				}
+			for index, result := range results {
+				require.NoError(test, result)
+				stored, found, err := LoadCodexPassiveRootAlias(test.Context(), scope.UserID, scope.TokenID, sourceIDs[index], scope)
+				require.NoError(test, err)
+				require.True(test, found)
+				require.Equal(test, alias, stored)
 			}
-			require.Equal(test, 1, successes)
 			require.NoError(test, MarkCodexInitialTitleRootNamed(test.Context(), scope.UserID, rootID))
-			require.ErrorIs(test, ClaimCodexPrefixRootAlias(test.Context(), scope, rootID, "third-title", alias, true), ErrCodexPassiveRootCandidatesChanged)
+			require.NoError(test, ClaimCodexPrefixRootAlias(test.Context(), scope, rootID, "third-title", alias))
 		})
 	}
 }

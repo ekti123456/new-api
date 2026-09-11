@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
@@ -179,7 +178,7 @@ func LoadCodexPrefixRootCandidates(ctx context.Context, scope CodexPassiveRootSc
 	return candidates, nil
 }
 
-func ClaimCodexPrefixRootAlias(ctx context.Context, scope CodexPassiveRootScope, sessionID, sourceRootID string, alias CodexPassiveRootAlias, initialTitle bool) (claimErr error) {
+func ClaimCodexPrefixRootAlias(ctx context.Context, scope CodexPassiveRootScope, sessionID, sourceRootID string, alias CodexPassiveRootAlias) error {
 	scope = normalizeCodexPassiveRootScope(scope.UserID, scope.TokenID, []CodexPassiveRootScope{scope})
 	key := codexPrefixRootKey(scope, sessionID)
 	cacheKey := codexPassiveRootAliasCacheKeyForScope(scope, sourceRootID)
@@ -202,40 +201,6 @@ func ClaimCodexPrefixRootAlias(ctx context.Context, scope CodexPassiveRootScope,
 	}
 	if !selectedWon || CodexRootChannelBindingFingerprint(winner) != alias.BindingFingerprint {
 		return ErrCodexPassiveRootCandidatesChanged
-	}
-	if initialTitle {
-		state, found, err := loadCodexInitialTitleState(ctx, scope.UserID, alias.RootID)
-		if err != nil {
-			return err
-		}
-		if found && state.Owner != "" && state.Owner != sourceRootID {
-			return ErrCodexPassiveRootCandidatesChanged
-		}
-		if found && state.Scope.UserID > 0 && (state.Scope != scope || state.BindingFingerprint != alias.BindingFingerprint) {
-			return ErrCodexPassiveRootCandidatesChanged
-		}
-		var previous *codexInitialTitleRootState
-		if found {
-			previous = &state
-		}
-		claimed := codexInitialTitleRootState{RootID: alias.RootID, Scope: scope, BindingFingerprint: alias.BindingFingerprint,
-			UARoutingOnly: alias.UARoutingOnly, FirstSeenMillis: time.Now().UTC().UnixMilli(), Owner: sourceRootID}
-		changed, err := compareCodexInitialTitleState(ctx, scope.UserID, alias.RootID, previous, claimed)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return ErrCodexPassiveRootCandidatesChanged
-		}
-		defer func() {
-			if claimErr == nil {
-				return
-			}
-			rollbackContext, rollbackCancel := context.WithTimeout(context.WithoutCancel(ctx), codexPassiveRootRedisTimeout)
-			defer rollbackCancel()
-			_, rollbackErr := compareCodexInitialTitleState(rollbackContext, scope.UserID, alias.RootID, &claimed, state)
-			claimErr = errors.Join(claimErr, rollbackErr)
-		}()
 	}
 	payload, err := common.Marshal(alias)
 	if err != nil {

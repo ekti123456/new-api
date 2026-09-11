@@ -2,14 +2,38 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNamingRequestsCanRepeatOnSameRoot(test *testing.T) {
+	channel, _, _ := setupCodexRootDistributorTest(test)
+	const userID, tokenID = 997401, 997411
+	const rootID = "01a08952-0000-7000-8000-000000000731"
+	mainRequest, recorder := codexMainRootContext(userID, tokenID, channel.Id, rootID)
+	Distribute()(mainRequest)
+	require.False(test, mainRequest.IsAborted(), recorder.Body.String())
+	require.NoError(test, service.MarkCodexInitialTitleRootNamed(test.Context(), userID, rootID))
+	for index, source := range []string{"thread_title", "thread_description", "thread_title_reconsideration", "thread_title"} {
+		sourceID := fmt.Sprintf("01a08952-0000-7000-8000-%012d", 732+index)
+		request, response := codexUnlinkedNativeTitleContext(userID, tokenID, sourceID)
+		if source != "thread_title" {
+			request, response = codexLinkedNamingContext(userID, tokenID, rootID, sourceID, source)
+		}
+		Distribute()(request)
+		require.False(test, request.IsAborted(), "%s: %s", source, response.Body.String())
+		require.Equal(test, rootID, relaychannel.ResolveCodexRootSessionForDistribution(request).RootID)
+		require.Equal(test, channel.Id, common.GetContextKeyInt(request, constant.ContextKeyChannelId))
+	}
+}
 
 func TestInitialTitleUsesSessionPrefixWithoutWindowZeroHeuristic(test *testing.T) {
 	for scenarioIndex, scenario := range []string{"new zero", "nonzero", "missing window", "window conflict", "compaction", "already bound"} {

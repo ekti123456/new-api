@@ -58,7 +58,6 @@ type codexPendingPassiveRootAlias struct {
 	alias          service.CodexPassiveRootAlias
 	claimRequired  bool
 	titleCandidate bool
-	initialTitle   bool
 	temporaryOnly  bool
 	scope          service.CodexPassiveRootScope
 }
@@ -1038,7 +1037,6 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		return resolution, feature, true, nil
 	}
 	feature, titleCandidate := relaychannel.ClassifyUnlinkedCodexThreadTitleRequest(resolution)
-	initialTitle := titleCandidate
 	ambientFeature, ambientCandidate := relaychannel.ClassifyUnlinkedCodexAmbientSuggestionRequest(resolution)
 	if ambientCandidate {
 		feature, titleCandidate = ambientFeature, true
@@ -1093,7 +1091,7 @@ func resolveUnlinkedCodexPassiveRoot(c *gin.Context, resolution relaychannel.Cod
 		}
 		c.Set(codexPendingPassiveRootAliasContextKey, codexPendingPassiveRootAlias{
 			userID: userID, tokenID: tokenID, sourceRootID: sourceRootID, alias: alias,
-			titleCandidate: titleCandidate, initialTitle: initialTitle, temporaryOnly: alias.Temporary, scope: passiveScope,
+			titleCandidate: titleCandidate, temporaryOnly: alias.Temporary, scope: passiveScope,
 		})
 		return applyUnlinkedCodexPassiveRoot(c, resolution, alias.RootID, feature)
 	}
@@ -1151,7 +1149,7 @@ func applyUnlinkedCodexPassiveCandidate(
 			RootID:      candidate.RootID, SelectedGroup: candidate.Binding.SelectedGroup,
 			UARoutingOnly: candidate.Binding.UARoutingOnly, BindingFingerprint: candidate.BindingFingerprint,
 		},
-		claimRequired: true, titleCandidate: titleCandidate, initialTitle: strings.EqualFold(resolution.ThreadSource, "thread_title"),
+		claimRequired: true, titleCandidate: titleCandidate,
 		scope: scope,
 	})
 	return applyUnlinkedCodexPassiveRoot(c, resolution, candidate.RootID, feature)
@@ -1189,7 +1187,7 @@ func commitCodexPassiveRootAlias(c *gin.Context) error {
 		return nil
 	}
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
-	return service.ClaimCodexPrefixRootAlias(c.Request.Context(), pending.scope, resolution.SessionID, pending.sourceRootID, pending.alias, pending.initialTitle)
+	return service.ClaimCodexPrefixRootAlias(c.Request.Context(), pending.scope, resolution.SessionID, pending.sourceRootID, pending.alias)
 }
 
 func promoteCodexPassiveRootAlias(c *gin.Context) error {

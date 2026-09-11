@@ -373,13 +373,6 @@ func Distribute() func(c *gin.Context) {
 					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
 			}
-			if isCodexNamingRequest(rootSession) && !strings.EqualFold(rootSession.RequestKind, "compaction") {
-				userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
-				if namingErr := service.MarkCodexInitialTitleRootNamed(c.Request.Context(), userID, rootSession.RootID); namingErr != nil {
-					abortCodexBackgroundRootFailure(c, rootSession, namingErr)
-					return
-				}
-			}
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
