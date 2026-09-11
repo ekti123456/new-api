@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "Sự kiện kết thúc",
+    "Response Status": "Trạng thái phản hồi",
+    "Incomplete Reason": "Lý do chưa hoàn tất",
+    "Terminal Write": "Ghi sự kiện kết thúc",
+    "Usage Source": "Nguồn số liệu sử dụng",
+    "Terminal Received (Unix ms)": "Nhận kết thúc (Unix ms)",
+    "Terminal Flushed (Unix ms)": "Đẩy kết thúc (Unix ms)",
+    "Client Cancellation (Unix ms)": "Khách hủy (Unix ms)",
+    "A successful local write does not confirm client receipt.": "Ghi cục bộ thành công không xác nhận máy khách đã nhận.",
+    "Per-user background concurrency": "Giới hạn yêu cầu nền đồng thời mỗi người dùng",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "Các yêu cầu nền của một người dùng dùng chung giới hạn riêng trên mọi mô hình và cuộc hội thoại. Thời gian chờ và thực thi đều chiếm suất, không ảnh hưởng suất yêu cầu chính.",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "Chỉ áp dụng khi bật giới hạn đồng thời theo người dùng và giới hạn hiệu lực của người dùng lớn hơn 0.",
     "User-Agent Management and Routing": "User-Agent Management and Routing",
     "Minimum client versions": "Minimum client versions",
     "Enable minimum version requirements": "Enable minimum version requirements",

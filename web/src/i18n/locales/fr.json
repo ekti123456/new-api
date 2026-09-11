@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "Événement terminal",
+    "Response Status": "État de la réponse",
+    "Incomplete Reason": "Motif d’incomplétude",
+    "Terminal Write": "Écriture terminale",
+    "Usage Source": "Source de l’utilisation",
+    "Terminal Received (Unix ms)": "Réception terminale (Unix ms)",
+    "Terminal Flushed (Unix ms)": "Vidage terminal (Unix ms)",
+    "Client Cancellation (Unix ms)": "Annulation client (Unix ms)",
+    "A successful local write does not confirm client receipt.": "Une écriture locale réussie ne confirme pas la réception par le client.",
+    "Per-user background concurrency": "Requêtes simultanées en arrière-plan par utilisateur",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "Les requêtes en arrière-plan partagent un quota distinct par utilisateur, tous modèles et conversations confondus. L’attente et l’exécution occupent des places sans affecter celles des requêtes principales.",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "S’applique uniquement lorsque la limitation par utilisateur est activée et que sa limite effective est positive.",
     "User-Agent Management and Routing": "User-Agent Management and Routing",
     "Minimum client versions": "Minimum client versions",
     "Enable minimum version requirements": "Enable minimum version requirements",

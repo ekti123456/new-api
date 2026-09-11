@@ -228,6 +228,16 @@ export interface LogOtherData {
     error_count?: number
     end_error?: string
     errors?: string[]
+    delivery?: {
+      terminal_event?: string
+      response_status?: string
+      incomplete_reason?: string
+      terminal_write?: string
+      usage_source?: string
+      terminal_received_at_unix_ms?: number
+      terminal_flushed_at_unix_ms?: number
+      client_canceled_at_unix_ms?: number
+    }
   }
   // Violation fee fields
   violation_fee?: boolean

@@ -73,6 +73,7 @@ const createRateLimitSchema = (t: (key: string) => string) =>
     ModelRPMRateLimitEnabled: z.boolean(),
     ModelRequestConcurrencyLimitEnabled: z.boolean(),
     DefaultUserConcurrencyLimit: z.number().int().min(1).max(100000),
+    BackgroundUserConcurrencyLimit: z.number().int().min(1).max(100000),
     UserConcurrencyCooldownSeconds: z.number().int().min(0).max(60),
     ModelRequestRateLimitDurationMinutes: z.number().min(0),
     ModelRequestRateLimitCount: z.number().min(0).max(100000000),
@@ -264,6 +265,39 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                 </FormControl>
                 <FormDescription>
                   {t('Used by users that inherit the system default')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='BackgroundUserConcurrencyLimit'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Per-user background concurrency')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={100000}
+                    step={1}
+                    className='max-w-sm'
+                    {...field}
+                    value={Number.isFinite(field.value) ? field.value : ''}
+                    onChange={(event) =>
+                      field.onChange(event.target.valueAsNumber)
+                    }
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.'
+                  )}{' '}
+                  {t(
+                    'Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.'
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

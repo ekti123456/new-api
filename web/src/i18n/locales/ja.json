@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "終端イベント",
+    "Response Status": "応答状態",
+    "Incomplete Reason": "未完了の理由",
+    "Terminal Write": "終端の書き込み",
+    "Usage Source": "使用量の取得元",
+    "Terminal Received (Unix ms)": "終端受信（Unix ms）",
+    "Terminal Flushed (Unix ms)": "終端フラッシュ（Unix ms）",
+    "Client Cancellation (Unix ms)": "クライアント取消（Unix ms）",
+    "A successful local write does not confirm client receipt.": "ローカル書き込みの成功はクライアントの受信を保証しません。",
+    "Per-user background concurrency": "ユーザーごとのバックグラウンド同時リクエスト上限",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "同じユーザーのバックグラウンドリクエストは、モデルや会話をまたいで独立した枠を共有します。待機中と実行中は枠を使用しますが、メインリクエストの枠には影響しません。",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "ユーザーの同時実行制限が有効で、そのユーザーの実効上限が正の値の場合のみ適用されます。",
     "User-Agent Management and Routing": "User-Agent Management and Routing",
     "Minimum client versions": "Minimum client versions",
     "Enable minimum version requirements": "Enable minimum version requirements",

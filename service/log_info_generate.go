@@ -141,6 +141,9 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		"status":     status,
 		"end_reason": string(ss.EndReason),
 	}
+	if delivery := ss.DeliverySnapshot(); delivery.TerminalEvent != "" || delivery.UsageSource != "" {
+		streamInfo["delivery"] = delivery
+	}
 	if ss.EndError != nil {
 		streamInfo["end_error"] = ss.EndError.Error()
 	}

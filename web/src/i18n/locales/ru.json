@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "Завершающее событие",
+    "Response Status": "Статус ответа",
+    "Incomplete Reason": "Причина незавершённости",
+    "Terminal Write": "Запись завершения",
+    "Usage Source": "Источник данных об использовании",
+    "Terminal Received (Unix ms)": "Получение завершения (Unix мс)",
+    "Terminal Flushed (Unix ms)": "Сброс завершения (Unix мс)",
+    "Client Cancellation (Unix ms)": "Отмена клиентом (Unix мс)",
+    "A successful local write does not confirm client receipt.": "Успешная локальная запись не подтверждает получение клиентом.",
+    "Per-user background concurrency": "Лимит фоновых запросов на пользователя",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "Фоновые запросы одного пользователя используют отдельный общий лимит для всех моделей и диалогов. Ожидание и выполнение занимают места, не затрагивая лимит основных запросов.",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "Действует только при включённом ограничении параллельных запросов и положительном лимите пользователя.",
     "User-Agent Management and Routing": "User-Agent Management and Routing",
     "Minimum client versions": "Minimum client versions",
     "Enable minimum version requirements": "Enable minimum version requirements",

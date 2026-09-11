@@ -391,6 +391,7 @@ export type SecuritySettings = {
   ModelRPMRateLimitModels: string
   ModelRequestConcurrencyLimitEnabled: boolean
   DefaultUserConcurrencyLimit: number
+  BackgroundUserConcurrencyLimit: number
   UserConcurrencyCooldownSeconds: number
   ModelRequestRateLimitCount: number
   ModelRequestRateLimitSuccessCount: number

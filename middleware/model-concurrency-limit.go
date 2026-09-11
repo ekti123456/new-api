@@ -394,7 +394,7 @@ func ModelRequestConcurrencyLimit() gin.HandlerFunc {
 		effectiveLimit := limit
 		if backgroundWait {
 			if effectiveLimit > 0 {
-				effectiveLimit = 2
+				effectiveLimit = setting.GetBackgroundUserConcurrencyLimit()
 			}
 			cooldown = 0
 		} else if protectedInternal && effectiveLimit > 0 {
@@ -409,7 +409,7 @@ func ModelRequestConcurrencyLimit() gin.HandlerFunc {
 		if !acquired {
 			c.Header("Retry-After", "1")
 			if backgroundWait {
-				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("后台请求并发已达到上限（%d），主请求并发不受此等待占用", effectiveLimit), types.ErrorCode("user_concurrency_limit_exceeded"))
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("后台请求并发已达到上限（%d），请稍后重试；主请求并发独立计算", effectiveLimit), types.ErrorCode("user_concurrency_limit_exceeded"))
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("当前并发请求已达到上限（%d），请稍后重试", limit), types.ErrorCode("user_concurrency_limit_exceeded"))

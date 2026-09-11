@@ -30,6 +30,7 @@ const defaultSecuritySettings: SecuritySettings = {
   ModelRPMRateLimitModels: '{}',
   ModelRequestConcurrencyLimitEnabled: true,
   DefaultUserConcurrencyLimit: 5,
+  BackgroundUserConcurrencyLimit: 5,
   UserConcurrencyCooldownSeconds: 3,
   ModelRequestRateLimitCount: 0,
   ModelRequestRateLimitSuccessCount: 1000,

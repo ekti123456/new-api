@@ -36,6 +36,8 @@ const SECURITY_SECTIONS = [
           ModelRequestConcurrencyLimitEnabled:
             settings.ModelRequestConcurrencyLimitEnabled,
           DefaultUserConcurrencyLimit: settings.DefaultUserConcurrencyLimit,
+          BackgroundUserConcurrencyLimit:
+            settings.BackgroundUserConcurrencyLimit,
           UserConcurrencyCooldownSeconds:
             settings.UserConcurrencyCooldownSeconds,
           ModelRequestRateLimitCount: settings.ModelRequestRateLimitCount,

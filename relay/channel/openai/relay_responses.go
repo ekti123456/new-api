@@ -81,6 +81,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var usage = &dto.Usage{}
+	upstreamUsageSeen := false
+	usageSource := "missing"
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
@@ -96,10 +98,27 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		terminal := false
 		switch streamResponse.Type {
-		case "response.completed", "response.done":
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "response.cancelled", "response.canceled":
 			terminal = true
+			responseStatus, incompleteReason := "", ""
 			if streamResponse.Response != nil {
+				_ = common.Unmarshal(streamResponse.Response.Status, &responseStatus)
+				switch responseStatus {
+				case "completed", "incomplete", "failed", "cancelled", "canceled":
+				default:
+					responseStatus = "unknown"
+				}
+				if streamResponse.Response.IncompleteDetails != nil {
+					switch streamResponse.Response.IncompleteDetails.Reason {
+					case "max_output_tokens", "content_filter":
+						incompleteReason = streamResponse.Response.IncompleteDetails.Reason
+					default:
+						incompleteReason = "other"
+					}
+				}
 				if streamResponse.Response.Usage != nil {
+					upstreamUsageSeen = true
+					usageSource = "upstream"
 					if streamResponse.Response.Usage.InputTokens != 0 {
 						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
 					}
@@ -114,6 +133,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 						usage.PromptTokensDetails.CacheWriteTokens = streamResponse.Response.Usage.InputTokensDetails.CacheWriteTokens
 					}
 				}
+			}
+			info.StreamStatus.ObserveTerminal(streamResponse.Type, responseStatus, incompleteReason)
+		}
+		switch streamResponse.Type {
+		case "response.completed", "response.done":
+			if streamResponse.Response != nil {
 				if !imageCommitted {
 					if relaycommon.IsNonBillableResponsesStatus(streamResponse.Response.Status) {
 						imageCounter.Reset()
@@ -183,33 +208,36 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 
-		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
-			sr.Stop(fmt.Errorf("failed to write responses stream event %s: %w", streamResponse.Type, err))
+		writeErr := sendResponsesStreamData(c, streamResponse, data)
+		if terminal {
+			info.StreamStatus.RecordTerminalWrite(writeErr)
+		}
+		if writeErr != nil {
+			sr.Stop(fmt.Errorf("failed to write responses stream event %s: %w", streamResponse.Type, writeErr))
 			return
 		}
 		if terminal {
-			// response.completed/response.done is the protocol-level terminal
-			// event. Do not wait for an optional trailing [DONE] or EOF: clients
-			// may close immediately after receiving this event.
 			sr.Done()
 		}
 	})
 
-	if usage.CompletionTokens == 0 {
+	if !upstreamUsageSeen && usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
 		tempStr := responseTextBuilder.String()
 		if len(tempStr) > 0 {
 			// 非正常结束，使用输出文本的 token 数量
 			completionTokens := service.CountTextToken(tempStr, info.UpstreamModelName)
 			usage.CompletionTokens = completionTokens
+			usageSource = "estimated"
 		}
 	}
 
-	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+	if !upstreamUsageSeen && usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	info.StreamStatus.SetUsageSource(usageSource)
 
 	return usage, nil
 }

@@ -150,6 +150,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
 	common.OptionMap["ModelRPMRateLimitModels"] = setting.ModelRPMRateLimitModels2JSONString()
 	common.OptionMap["DefaultUserConcurrencyLimit"] = strconv.Itoa(setting.DefaultUserConcurrencyLimit)
+	common.OptionMap["BackgroundUserConcurrencyLimit"] = strconv.Itoa(setting.GetBackgroundUserConcurrencyLimit())
 	common.OptionMap["UserConcurrencyCooldownSeconds"] = strconv.Itoa(setting.UserConcurrencyCooldownSeconds)
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
@@ -219,6 +220,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == "BackgroundUserConcurrencyLimit" {
+		_, err := setting.ParseBackgroundUserConcurrencyLimit(value)
+		return err
+	}
 	if key == "user_agent_routing_setting.minimum_versions" {
 		return operation_setting.ValidateUserAgentMinimumVersions(value)
 	}
@@ -316,6 +321,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == "BackgroundUserConcurrencyLimit" {
+		if err := validateOptionValue(key, value); err != nil {
+			return err
+		}
+	}
 	if key == "codex_unlinked_account_fallback_seconds" {
 		parsed, parseErr := strconv.Atoi(strings.TrimSpace(value))
 		if parseErr != nil || parsed <= 0 {
@@ -618,6 +628,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = setting.UpdateModelRPMRateLimitModelsByJSONString(value)
 	case "DefaultUserConcurrencyLimit":
 		setting.DefaultUserConcurrencyLimit, _ = strconv.Atoi(value)
+	case "BackgroundUserConcurrencyLimit":
+		err = setting.UpdateBackgroundUserConcurrencyLimit(value)
 	case "UserConcurrencyCooldownSeconds":
 		setting.UserConcurrencyCooldownSeconds, _ = strconv.Atoi(value)
 	case "RetryTimes":

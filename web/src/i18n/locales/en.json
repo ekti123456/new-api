@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "Terminal Event",
+    "Response Status": "Response Status",
+    "Incomplete Reason": "Incomplete Reason",
+    "Terminal Write": "Terminal Write",
+    "Usage Source": "Usage Source",
+    "Terminal Received (Unix ms)": "Terminal Received (Unix ms)",
+    "Terminal Flushed (Unix ms)": "Terminal Flushed (Unix ms)",
+    "Client Cancellation (Unix ms)": "Client Cancellation (Unix ms)",
+    "A successful local write does not confirm client receipt.": "A successful local write does not confirm client receipt.",
+    "Per-user background concurrency": "Per-user background concurrency",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.",
     "Expand this window on the same account": "Expand this window on the same account",
     "Enable expansion first": "Enable expansion first",
     "Confirm this window upgrade": "Confirm this window upgrade",

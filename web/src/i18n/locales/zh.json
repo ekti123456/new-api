@@ -1,5 +1,17 @@
 {
   "translation": {
+    "Terminal Event": "终态事件",
+    "Response Status": "响应状态",
+    "Incomplete Reason": "未完成原因",
+    "Terminal Write": "终态写入",
+    "Usage Source": "用量来源",
+    "Terminal Received (Unix ms)": "收到终态（Unix 毫秒）",
+    "Terminal Flushed (Unix ms)": "刷新终态（Unix 毫秒）",
+    "Client Cancellation (Unix ms)": "客户端取消（Unix 毫秒）",
+    "A successful local write does not confirm client receipt.": "本地写入成功不代表客户端已收到。",
+    "Per-user background concurrency": "每用户后台请求并发上限",
+    "Background requests share a separate per-user pool across models and conversations. Waiting and execution both count; main-request slots are unaffected.": "同一用户的后台请求跨模型、会话共用独立并发池。等待和执行期间均占用名额，不占主请求并发。",
+    "Applies only when user concurrency limiting is enabled and the user has a positive concurrency limit.": "仅在启用用户并发限制且该用户的有效并发上限为正时生效。",
     "Expand this window on the same account": "扩容此窗口，保留原账号",
     "Enable expansion first": "请先开启窗口扩容",
     "Confirm this window upgrade": "确认此窗口扩容加价",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -51,6 +52,11 @@ func setupAdmissionErrorDatabase(test *testing.T) *gorm.DB {
 
 func TestBackgroundConcurrencyRejectionIsAuditedBeforeDispatch(test *testing.T) {
 	database := setupAdmissionErrorDatabase(test)
+	originalBackgroundLimit := setting.GetBackgroundUserConcurrencyLimit()
+	require.NoError(test, setting.UpdateBackgroundUserConcurrencyLimit("2"))
+	test.Cleanup(func() {
+		require.NoError(test, setting.UpdateBackgroundUserConcurrencyLimit(strconv.Itoa(originalBackgroundLimit)))
+	})
 	originalEnabled, originalRedis := setting.ModelRequestConcurrencyLimitEnabled, common.RedisEnabled
 	setting.ModelRequestConcurrencyLimitEnabled, common.RedisEnabled = true, false
 	resetLocalUserConcurrencyForTest()

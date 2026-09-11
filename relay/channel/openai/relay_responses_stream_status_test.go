@@ -31,7 +31,7 @@ func TestOaiResponsesStreamHandlerTerminalEventStopsOpenUpstream(t *testing.T) {
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
 
-	for _, terminalType := range []string{"response.completed", "response.done"} {
+	for _, terminalType := range []string{"response.completed", "response.done", "response.incomplete"} {
 		t.Run(terminalType, func(t *testing.T) {
 			pr, pw := io.Pipe()
 			t.Cleanup(func() {
@@ -71,10 +71,14 @@ func TestOaiResponsesStreamHandlerTerminalEventStopsOpenUpstream(t *testing.T) {
 				close(done)
 			}()
 
+			responseStatus := "completed"
+			if terminalType == "response.incomplete" {
+				responseStatus = "incomplete"
+			}
 			body := strings.Join([]string{
 				`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`,
 				``,
-				`data: {"type":"` + terminalType + `","response":{"status":"completed","output":[],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":5}}}}`,
+				`data: {"type":"` + terminalType + `","response":{"status":"` + responseStatus + `","output":[],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":5}}}}`,
 				``,
 			}, "\n")
 			_, err := io.WriteString(pw, body)
