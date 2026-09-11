@@ -48,7 +48,7 @@ func TestPassiveRootAssociationChain(test *testing.T) {
 			require.Equal(test, mainID, relaychannel.ResolveCodexRootSessionForDistribution(first).RootID)
 			association := relaychannel.CodexRequestRootAssociation(first)
 			require.Equal(test, backgroundID, association.OriginalRootID)
-			require.Equal(test, "same_scope_unique", association.Basis)
+			require.Equal(test, service.CodexPrefixRootAssociation, association.Basis)
 			require.Equal(test, 1, association.Candidates)
 
 			other, otherRecorder := codexMainRootContext(userID, tokenID, channel.Id, "01a08502-0000-7000-8000-000000000104")

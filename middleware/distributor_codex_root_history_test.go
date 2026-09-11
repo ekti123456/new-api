@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDistributorBoundRootSurvivesHistoryPublicationFailure(test *testing.T) {
-	for _, failure := range []string{"observation_collision", "arrival_unavailable"} {
+func TestDistributorBoundRootSurvivesPrefixPublicationFailure(test *testing.T) {
+	for _, failure := range []string{"binding_conflict", "prefix_overflow"} {
 		test.Run(failure, func(test *testing.T) {
 			channel, _, fingerprint := setupCodexRootDistributorTest(test)
 			useCodexRecentRootRedisFixture(test, time.Now().UTC())
@@ -28,16 +28,20 @@ func TestDistributorBoundRootSurvivesHistoryPublicationFailure(test *testing.T) 
 			}
 			require.NoError(test, service.StoreCodexRootChannelBinding(userID, rootID, binding))
 			scope := codexPassiveRootScope(requestContext)
-			arrival, err := service.BeginCodexRequestArrival(context.Background(), userID, tokenID, scope)
-			require.NoError(test, err)
-			require.NoError(test, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrival, scope))
-			state := codexRequestArrivalState{arrival: arrival}
-			if failure == "observation_collision" {
-				state.arrival.ArrivedAt = arrival.ArrivedAt.Add(time.Millisecond)
+			if failure == "binding_conflict" {
+				stale := binding
+				stale.KeyFingerprint = "stale-key-fingerprint"
+				require.NoError(test, service.StoreCodexPrefixRootCandidate(test.Context(), scope, rootID, rootID, stale))
 			} else {
-				state.err = errors.New("request history temporarily unavailable")
+				for index := 0; index < 65; index++ {
+					err := service.StoreCodexPrefixRootCandidate(test.Context(), scope, rootID, fmt.Sprintf("other-root-%d", index), binding)
+					if index == 64 {
+						require.ErrorIs(test, err, service.ErrCodexPrefixRootAmbiguous)
+					} else {
+						require.NoError(test, err)
+					}
+				}
 			}
-			requestContext.Set(codexRequestArrivalContextKey, state)
 
 			Distribute()(requestContext)
 

@@ -28,7 +28,7 @@ const (
 	codexRecentRootChannelCandidateNamespace = "new-api:codex_recent_root_channel:v3"
 	codexRootObservationNamespace            = "new-api:codex_root_observation:v1"
 	codexRequestArrivalSequenceNamespace     = "new-api:codex_request_arrival:v1"
-	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v2"
+	codexPassiveRootAliasNamespace           = "new-api:codex_passive_root_alias:v3"
 	codexTitleRootCandidateNamespace         = "new-api:codex_title_root_candidate:v1"
 	codexRecentRootChannelCandidateTTL       = 30 * time.Second
 	codexProvisionalRootCandidateTTL         = 2 * time.Minute
@@ -150,6 +150,7 @@ func codexPassiveRootScopeKey(userID, tokenID int, scopes ...CodexPassiveRootSco
 }
 
 type CodexPassiveRootAlias struct {
+	Association        string `json:"association,omitempty"`
 	RootID             string `json:"root_id"`
 	SelectedGroup      string `json:"selected_group"`
 	UARoutingOnly      bool   `json:"ua_routing_only"`

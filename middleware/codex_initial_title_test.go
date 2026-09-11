@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitialTitleOnlyUsesNewUserWindowZero(test *testing.T) {
+func TestInitialTitleUsesSessionPrefixWithoutWindowZeroHeuristic(test *testing.T) {
 	for scenarioIndex, scenario := range []string{"new zero", "nonzero", "missing window", "window conflict", "compaction", "already bound"} {
 		test.Run(scenario, func(test *testing.T) {
 			channel, _, fingerprint := setupCodexRootDistributorTest(test)
@@ -40,13 +40,8 @@ func TestInitialTitleOnlyUsesNewUserWindowZero(test *testing.T) {
 			require.False(test, requestContext.IsAborted(), recorder.Body.String())
 			title, titleRecorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a08952-0000-7000-8000-000000000702")
 			Distribute()(title)
-			if scenario == "new zero" {
-				require.False(test, title.IsAborted(), titleRecorder.Body.String())
-				require.Equal(test, rootID, relaychannel.ResolveCodexRootSessionForDistribution(title).RootID)
-			} else {
-				require.True(test, title.IsAborted())
-				require.Contains(test, titleRecorder.Body.String(), "codex_background_root_unavailable")
-			}
+			require.False(test, title.IsAborted(), titleRecorder.Body.String())
+			require.Equal(test, rootID, relaychannel.ResolveCodexRootSessionForDistribution(title).RootID)
 		})
 	}
 }
@@ -55,7 +50,7 @@ func TestInitialTitleOldContinuationDoesNotStealNewTitle(test *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(test)
 	server, _ := useCodexRecentRootRedisFixture(test, time.Now())
 	const userID, tokenID = 997201, 997211
-	const oldRoot = "01a08952-0000-7000-8000-000000000711"
+	const oldRoot = "01a08951-0000-7000-8000-000000000711"
 	const newRoot = "01a08952-0000-7000-8000-000000000712"
 	mainRequest, mainRecorder := codexMainRootContext(userID, tokenID, channel.Id, oldRoot)
 	Distribute()(mainRequest)
@@ -83,11 +78,11 @@ func TestInitialTitleOldContinuationDoesNotStealNewTitle(test *testing.T) {
 	require.False(test, title.IsAborted(), titleRecorder.Body.String())
 	require.Equal(test, 1, waitCalls)
 	require.Equal(test, newRoot, relaychannel.ResolveCodexRootSessionForDistribution(title).RootID)
-	ambient, ambientRecorder := codexMainRootContext(userID, tokenID, 0, "01a08952-0000-7000-8000-000000000714")
+	ambient, ambientRecorder := codexMainRootContext(userID, tokenID, 0, "01a08951-0000-7000-8000-000000000714")
 	ambient.Request.Header.Set("X-Codex-Turn-Metadata", strings.ReplaceAll(ambient.GetHeader("X-Codex-Turn-Metadata"), `"thread_source":"user"`, `"thread_source":"ambient_suggestions"`))
 	Distribute()(ambient)
-	require.True(test, ambient.IsAborted())
-	require.Contains(test, ambientRecorder.Body.String(), "多个主会话")
+	require.False(test, ambient.IsAborted(), ambientRecorder.Body.String())
+	require.Equal(test, oldRoot, relaychannel.ResolveCodexRootSessionForDistribution(ambient).RootID)
 }
 
 func TestInitialTitleExplicitNonzeroRootRemainsLinked(test *testing.T) {

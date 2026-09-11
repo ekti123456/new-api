@@ -41,9 +41,6 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, messageKey, map[string]any{"Client": rejection.Family, "Current": rejection.CurrentVersion, "Minimum": rejection.MinimumVersion}), types.ErrorCode("client_version_unsupported"))
 			return
 		}
-		// Reserve the request's predecessor cutoff before body parsing, waiting,
-		// or channel selection. This is intentionally not the relay/FRT timer.
-		captureCodexRequestArrival(c)
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
@@ -77,10 +74,6 @@ func Distribute() func(c *gin.Context) {
 		recognizedRootFallbackEligible := canPassThroughRecognizedCodexRoot(c, rootSession)
 		recognizedRootPassThrough := false
 		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
-		initialTitleRoot := rootErr == nil && !rootBindingFound && rootSession.Resolved && !rootSession.Related &&
-			!rootSession.TurnLineageConflict && strings.EqualFold(rootSession.ThreadSource, "user") &&
-			strings.EqualFold(rootSession.RequestKind, "turn") && rootSession.ForkedFromID == "" &&
-			rootSession.ThreadID == rootSession.RootID && rootSession.WindowID == rootSession.ThreadID+":0"
 		if recognizedRootFallbackEligible && rootErr == nil && !rootBindingFound && rootChannel == nil {
 			fallbackChannel, fallbackGroup, fallbackKey, fallbackKeyIndex, fallbackFound, fallbackErr := loadUniqueRecognizedCodexPassThroughChannel(c, usingGroup, modelRequest.Model)
 			if fallbackErr != nil {
@@ -364,7 +357,7 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			threadClaim, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+			_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
 			if threadBindingErr != nil {
 				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
 				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
@@ -374,22 +367,11 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			// Publish temporal candidates only after both exact lineage claims have
-			// succeeded, so a conflicting Turn/Thread loser cannot poison the
-			// 30-second summary/system bridge.
 			if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
 				common.SysError(fmt.Sprintf("Codex root history publication failed; continuing bound route: user=%d token=%d model=%s request_id=%s reason=%s",
 					common.GetContextKeyInt(c, constant.ContextKeyUserId),
 					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
-			}
-			if initialTitleRoot && threadClaim.kind != "" {
-				userID, tokenID, rootID, binding, selected := selectedCodexRootChannelBinding(c, rootSession)
-				if selected {
-					if candidateErr := service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, codexPassiveRootScope(c)); candidateErr != nil {
-						common.SysError(fmt.Sprintf("Codex initial title candidate unavailable: user=%d root=%s reason=%v", userID, rootID, candidateErr))
-					}
-				}
 			}
 			if isCodexNamingRequest(rootSession) && !strings.EqualFold(rootSession.RequestKind, "compaction") {
 				userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)

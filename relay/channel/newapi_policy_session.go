@@ -53,9 +53,10 @@ func (e newAPIPolicyLabelEvidence) resolved() string {
 }
 
 type newAPIPolicySessionEvidence struct {
-	value    string
-	sources  int
-	conflict bool
+	value            string
+	sources          int
+	conflict         bool
+	nonCanonicalUUID bool
 }
 
 func (e newAPIPolicySessionEvidence) resolved() string {
@@ -69,6 +70,9 @@ func (e *newAPIPolicySessionEvidence) add(value string) {
 	raw := strings.TrimSpace(value)
 	if raw == "" {
 		return
+	}
+	if len(raw) != 36 {
+		e.nonCanonicalUUID = true
 	}
 	value = normalizeNewAPIPolicyRootSessionValue(raw)
 	if value == "" {
@@ -233,6 +237,7 @@ type newAPIPolicyRootSessionResolution struct {
 // parent/fork carrier, or subagent marker proves that this is a derived request;
 // thread_source alone is never sufficient.
 type CodexRootSessionResolution struct {
+	SessionID           string
 	RootID              string
 	ThreadID            string
 	WindowID            string
@@ -275,7 +280,14 @@ func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionReso
 	}
 	stableSessionID := newAPIPolicyStableSessionID(c, info)
 	resolution := applyCodexPassiveRootSessionOverride(c, analyzeNewAPIPolicyRootSession(c, info, stableSessionID))
+	evidence := collectNewAPIPolicyRootSessionEvidence(c, info)
+	session := evidence.headerSessions
+	session.add(evidence.metadataRoots.resolved())
+	if evidence.conflict() || evidence.headerSessions.nonCanonicalUUID || evidence.metadataRoots.nonCanonicalUUID {
+		session.conflict = true
+	}
 	return CodexRootSessionResolution{
+		SessionID:           session.resolved(),
 		RootID:              resolution.rootID,
 		ThreadID:            resolution.threadID,
 		WindowID:            resolution.windowID,

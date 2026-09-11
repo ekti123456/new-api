@@ -358,6 +358,7 @@ func storeRecentCodexTitleBindingForPrompt(t *testing.T, userID, tokenID int, ro
 	_ = prompt
 	require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
+	require.NoError(t, service.StoreCodexPrefixRootCandidate(t.Context(), service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, rootID, rootID, binding))
 	arrival, err := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
 	require.NoError(t, err)
 	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, arrival))
@@ -400,11 +401,10 @@ func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndRejectsAmbiguity(t *testi
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
 	}
 	storeRecentCodexTitleBindingForPrompt(t, userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb5", binding, "Same prompt")
-	time.Sleep(2 * time.Millisecond)
 	latestRootID := "01a03786-1743-7151-a307-c1c0f1615bb7"
 	storeRecentCodexTitleBindingForPrompt(t, userID, tokenID, latestRootID, binding, "Same prompt")
 
-	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb6")
 	body := `{
 		"model":"gpt-5.6-luna",
 		"input":"You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.\nUser prompt:\nSame prompt",
@@ -412,8 +412,8 @@ func TestUnlinkedCodexSystemIgnoresPromptCorrelationAndRejectsAmbiguity(t *testi
 	}`
 	titleContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	titleContext.Request.Header.Set("Content-Type", "application/json")
-	titleContext.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
-	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
+	titleContext.Request.Header.Set("Session-Id", "01a03786-1743-7151-a307-c1c0f1615bb6")
+	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03786-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03786-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 
 	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, resolution)
@@ -498,7 +498,6 @@ func TestUnlinkedCodexSystemDoesNotUseLegacyHistoryFallback(t *testing.T) {
 
 	systemContext, _ := codexSystemTurnContext(userID, tokenID, systemRootID, "01a04000-0000-7000-8000-000000000753", "", "")
 	server.SetTime(rootArrival.Add(31 * time.Second))
-	captureCodexRequestArrival(systemContext)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(systemContext)
 	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(systemContext, resolution)
 	require.ErrorContains(t, err, "unavailable")
@@ -1031,13 +1030,13 @@ func TestUnlinkedCodexTitleUsesProvisionalRootChannelAndKey(t *testing.T) {
 	common.SetContextKey(rootContext, constant.ContextKeyChannelId, channel.Id)
 	common.SetContextKey(rootContext, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(rootContext, constant.ContextKeyChannelMultiKeyIndex, 0)
-	rootResolution := relaychannel.CodexRootSessionResolution{RootID: rootID, Resolved: true}
+	rootResolution := relaychannel.CodexRootSessionResolution{RootID: rootID, SessionID: rootID, Resolved: true}
 
 	// This is deliberately recorded before any response status is available,
 	// reproducing a title request that races the first main-model response.
 	recordProvisionalCodexRootChannelBinding(rootContext, rootResolution, "gpt-5.6-sol")
 
-	titleID := "01a03787-1743-7151-a307-c1c0f1615bb6"
+	titleID := "01a03786-1743-7151-a307-c1c0f1615bb6"
 	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, titleID)
 	titleResolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	resolved, feature, strict, err := resolveUnlinkedCodexPassiveRoot(titleContext, titleResolution)
@@ -1074,7 +1073,7 @@ func TestUnlinkedSystemWaitsForRecentRootSelection(t *testing.T) {
 	}
 	rootArrival, arrivalErr := service.BeginCodexRequestArrival(context.Background(), userID, tokenID)
 	require.NoError(t, arrivalErr)
-	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	titleContext, _ := codexUnlinkedTitleContext(userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb6")
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(titleContext)
 	type result struct {
 		resolution relaychannel.CodexRootSessionResolution
@@ -1105,6 +1104,7 @@ func TestUnlinkedSystemWaitsForRecentRootSelection(t *testing.T) {
 	<-waiting
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, rootID, binding))
 	require.NoError(t, service.StoreCodexRootChannelObservation(userID, tokenID, rootID, binding, rootArrival))
+	require.NoError(t, service.StoreCodexPrefixRootCandidate(t.Context(), service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, rootID, rootID, binding))
 	close(continueWait)
 	got := <-resultChannel
 	require.NoError(t, got.err)
@@ -1200,7 +1200,7 @@ func TestDistributorAllowsUnpublishedLunaTitleOnlyOnRecentRootRoute(t *testing.T
 	storeRecentCodexTitleBinding(t, userID, tokenID, rootID, binding)
 	require.False(t, model.IsChannelEnabledForGroupModel("pro", "gpt-5.6-luna", channel.Id))
 
-	titleContext, recorder := codexUnlinkedTitleContext(userID, tokenID, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	titleContext, recorder := codexUnlinkedTitleContext(userID, tokenID, "01a03786-1743-7151-a307-c1c0f1615bb6")
 	common.SetContextKey(titleContext, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(titleContext, constant.ContextKeyTokenModelLimit, map[string]bool{"gpt-5.6-sol": true})
 	Distribute()(titleContext)
@@ -1702,7 +1702,7 @@ func TestUnlinkedCodexTitleInheritsRootAcrossUARoutingBoundary(t *testing.T) {
 		userID  = 76
 		tokenID = 734
 		rootID  = "01a03913-6f27-7f10-b723-88683446062d"
-		titleID = "01a03914-6f27-7f10-b723-88683446062e"
+		titleID = "01a03913-6f27-7f10-b723-88683446062e"
 	)
 	mainContext, mainRecorder := codexMainRootContext(userID, tokenID, 0, rootID)
 	mainContext.Request.Header.Set("User-Agent", "codex-tui/0.149.0")
@@ -1736,7 +1736,7 @@ func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
 		userID  = 177
 		tokenID = 1735
 		rootID  = "01a04913-6f27-7f10-b723-88683446062d"
-		titleID = "01a04914-6f27-7f10-b723-88683446062e"
+		titleID = "01a04913-6f27-7f10-b723-88683446062e"
 	)
 	binding := service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
@@ -1750,7 +1750,7 @@ func TestUnlinkedCodexTitleWaitsForConcurrentFreshRoot(t *testing.T) {
 		if waitCalls == 1 {
 			require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 			require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-			require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
+			require.NoError(t, service.StoreCodexPrefixRootCandidate(t.Context(), service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, rootID, rootID, binding))
 			return nil
 		}
 		<-ctx.Done()
@@ -1774,17 +1774,17 @@ func TestUnlinkedCodexTitleWithUnknownTurnLineageFallsBackToFreshRoot(t *testing
 		userID       = 180
 		tokenID      = 1738
 		rootID       = "01a04919-6f27-7f10-b723-886834460633"
-		titleID      = "01a04920-6f27-7f10-b723-886834460634"
-		titleTurnID  = "01a04921-6f27-7f10-b723-886834460635"
-		parentTurnID = "01a04922-6f27-7f10-b723-886834460636"
-		rootTurnID   = "01a04923-6f27-7f10-b723-886834460637"
+		titleID      = "01a04919-6f27-7f10-b723-886834460634"
+		titleTurnID  = "01a04919-6f27-7f10-b723-886834460635"
+		parentTurnID = "01a04919-6f27-7f10-b723-886834460636"
+		rootTurnID   = "01a04919-6f27-7f10-b723-886834460637"
 	)
 	binding := service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: keyFingerprint,
 	}
 	require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 	require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-	require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
+	require.NoError(t, service.StoreCodexPrefixRootCandidate(t.Context(), service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, rootID, rootID, binding))
 
 	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, titleID)
 	titleContext.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"`+titleID+`","thread_id":"`+titleID+`","window_id":"`+titleID+`:0","turn_id":"`+titleTurnID+`","parent_turn_id":"`+parentTurnID+`","root_turn_id":"`+rootTurnID+`","turn_trigger":"thread_title","thread_source":"thread_title","request_kind":"turn"}`)
@@ -1831,14 +1831,14 @@ func TestUnlinkedCodexTitleFailsClosedForAmbiguousFreshRoots(t *testing.T) {
 	}
 	for _, rootID := range []string{
 		"01a04916-6f27-7f10-b723-886834460630",
-		"01a04917-6f27-7f10-b723-886834460631",
+		"01a04916-6f27-7f10-b723-886834460631",
 	} {
 		require.NoError(t, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 		require.NoError(t, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding))
-		require.NoError(t, service.StoreInitialCodexTitleRootCandidate(userID, tokenID, rootID, binding, service.CodexPassiveRootScope{}))
+		require.NoError(t, service.StoreCodexPrefixRootCandidate(t.Context(), service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}, rootID, rootID, binding))
 	}
 
-	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a04918-6f27-7f10-b723-886834460632")
+	titleContext, recorder := codexUnlinkedNativeTitleContext(userID, tokenID, "01a04916-6f27-7f10-b723-886834460632")
 	Distribute()(titleContext)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -1991,7 +1991,7 @@ func TestDistributorMainThenTitleEndToEndKeepsChannelAndKey(t *testing.T) {
 	require.Equal(t, key, common.GetContextKeyString(laterMainContext, constant.ContextKeyChannelKey))
 	require.True(t, common.GetContextKeyBool(laterMainContext, constant.ContextKeyCodexRootChannelPinned))
 
-	titleID := "01a03787-1743-7151-a307-c1c0f1615bb6"
+	titleID := "01a03786-1743-7151-a307-c1c0f1615bb6"
 	titleContext, titleRecorder := codexUnlinkedTitleContext(userID, tokenID, titleID)
 	Distribute()(titleContext)
 	require.Less(t, titleRecorder.Code, http.StatusBadRequest)
@@ -2009,7 +2009,7 @@ func TestDistributorMainThenTitleEndToEndKeepsChannelAndKey(t *testing.T) {
 
 	// Once the independent system session is associated, a later main window
 	// must not move retries of that same system session to the newer candidate.
-	secondRootID := "01a03788-1743-7151-a307-c1c0f1615bb7"
+	secondRootID := "01a03786-1743-7151-a307-c1c0f1615bb7"
 	require.NoError(t, service.StoreRecentCodexRootChannelBinding(userID, tokenID, secondRootID, service.CodexRootChannelBinding{
 		ChannelID: channel.Id, SelectedGroup: "pro", KeyIndex: 0, KeyFingerprint: codexRootChannelKeyFingerprint(key),
 	}))
@@ -2037,7 +2037,7 @@ func TestUnlinkedCodexTitleFailsClosedWithoutSameTokenBinding(t *testing.T) {
 	require.Zero(t, common.GetContextKeyInt(titleContext, constant.ContextKeyChannelId))
 }
 
-func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
+func TestSystemFieldUsesPrefixRootIndependentOfPayload(t *testing.T) {
 	channel, _, keyFingerprint := setupCodexRootDistributorTest(t)
 	rootID := "01a03786-1743-7151-a307-c1c0f1615bb5"
 	binding := service.CodexRootChannelBinding{
@@ -2045,11 +2045,11 @@ func TestSystemFieldUsesRecentRootIndependentOfPayload(t *testing.T) {
 	}
 	storeRecentCodexTitleBinding(t, 42, 705, rootID, binding)
 
-	c, _ := codexUnlinkedTitleContext(42, 705, "01a03787-1743-7151-a307-c1c0f1615bb6")
+	c, _ := codexUnlinkedTitleContext(42, 705, "01a03786-1743-7151-a307-c1c0f1615bb6")
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-luna","reasoning":{"effort":"low"},"input":"ordinary user prompt","text":{"format":{"schema":{"properties":{"title":{},"description":{}}}}}}`))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Request.Header.Set("Session-Id", "01a03787-1743-7151-a307-c1c0f1615bb6")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03787-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
+	c.Request.Header.Set("Session-Id", "01a03786-1743-7151-a307-c1c0f1615bb6")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"01a03786-1743-7151-a307-c1c0f1615bb6","thread_id":"01a03786-1743-7151-a307-c1c0f1615bb6","thread_source":"system"}`)
 	resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
 	feature, classified := relaychannel.ClassifyUnlinkedCodexSystemRequest(resolution)
 	require.True(t, classified)
@@ -2507,7 +2507,7 @@ func TestMappedMainTurnStillHonorsTokenModelLimit(t *testing.T) {
 	require.True(t, retry.IsAborted())
 }
 
-func TestTurnConflictDoesNotPublishLosingRecentRoot(t *testing.T) {
+func TestTurnConflictDoesNotPublishLosingPrefixRoot(t *testing.T) {
 	channel, _, _ := setupCodexRootDistributorTest(t)
 	const (
 		userID  = 62012
@@ -2525,7 +2525,7 @@ func TestTurnConflictDoesNotPublishLosingRecentRoot(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, loserRecorder.Code)
 	require.True(t, loser.IsAborted())
 
-	candidates, err := service.LoadRecentCodexRootChannelCandidates(context.Background(), userID, tokenID, false)
+	candidates, err := service.LoadCodexPrefixRootCandidates(t.Context(), codexPassiveRootScope(winner), rootA)
 	require.NoError(t, err)
 	require.Len(t, candidates, 1)
 	require.Equal(t, rootA, candidates[0].RootID)

@@ -19,11 +19,13 @@ func abortCodexBackgroundRootFailure(requestContext *gin.Context, resolution rel
 	if !relaychannel.CodexRequestNeedsRootAccountWait(resolution.ThreadSource) {
 		return false
 	}
-	message := "后台请求尚未关联有效主会话，请先发起主请求。请求已停止，未选择其他账号。"
-	if errors.Is(failure, errCodexBackgroundRootAmbiguous) {
-		message = "同一范围内存在多个主会话，无法确定后台请求归属。请求已停止，未选择其他账号。"
+	message := "未找到身份范围及会话前缀匹配的有效主会话，请先发起主请求。"
+	if errors.Is(failure, errCodexBackgroundRootAmbiguous) || errors.Is(failure, service.ErrCodexPrefixRootAmbiguous) {
+		message = "同一身份范围及会话前缀对应多个主会话，无法确定后台请求归属。"
+	} else if errors.Is(failure, service.ErrCodexSessionPrefixUnavailable) {
+		message = service.ErrCodexSessionPrefixUnavailable.Error()
 	} else if errors.Is(failure, context.DeadlineExceeded) {
-		message = "等待主会话绑定超过60秒，请先发起主请求。请求已停止，未选择其他账号。"
+		message = "等待主会话绑定超时，请先发起主请求。"
 	}
 	abortWithOpenAiMessage(requestContext, http.StatusBadRequest, message, types.ErrorCode("codex_background_root_unavailable"))
 	return true
@@ -48,6 +50,9 @@ func resolveCodexPassiveThreadBinding(requestContext *gin.Context, resolution re
 		mapping, _, found, err := service.ResolveCodexThreadRootBinding(lookupContext, userID, parentID)
 		if err != nil {
 			return resolution, false, err
+		}
+		if found && !resolution.Related && (!mapping.RootOwner || !strings.EqualFold(mapping.RootID, parentID)) {
+			found = false
 		}
 		basis := "thread_binding"
 		rootID := mapping.RootID

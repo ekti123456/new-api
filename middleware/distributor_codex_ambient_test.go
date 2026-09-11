@@ -37,7 +37,7 @@ func TestAmbientSuggestionsWaitForRootAndPinSubsequentSteps(test *testing.T) {
 				useCodexRecentRootRedisFixture(test, time.Now())
 			}
 			const userID, tokenID = 98241, 98242
-			const rootID = "01a075e7-3ed6-7a21-b4d8-7018562f6648"
+			const rootID = "01a075e6-3ed6-7a21-b4d8-7018562f6648"
 			requestContext, recorder := codexAmbientSuggestionContext(userID, tokenID)
 			scope := codexPassiveRootScope(requestContext)
 			binding := service.CodexRootChannelBinding{ChannelID: channel.Id, SelectedGroup: "pro", KeyFingerprint: fingerprint}
@@ -51,7 +51,7 @@ func TestAmbientSuggestionsWaitForRootAndPinSubsequentSteps(test *testing.T) {
 				require.Positive(test, remaining)
 				require.NoError(test, service.StoreProvisionalCodexRootChannelBinding(userID, rootID, binding))
 				require.NoError(test, service.StoreProvisionalRecentCodexRootChannelCandidate(userID, tokenID, rootID, binding, scope))
-				require.NoError(test, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, rootID, binding, scope))
+				require.NoError(test, service.StoreCodexPrefixRootCandidate(test.Context(), scope, rootID, rootID, binding))
 				return nil
 			}
 			Distribute()(requestContext)
@@ -60,10 +60,10 @@ func TestAmbientSuggestionsWaitForRootAndPinSubsequentSteps(test *testing.T) {
 			require.Equal(test, key, common.GetContextKeyString(requestContext, constant.ContextKeyChannelKey))
 			require.Equal(test, rootID, relaychannel.ResolveCodexRootSessionForDistribution(requestContext).RootID)
 
-			const competingRootID = "01a075e8-3ed6-7a21-b4d8-7018562f6648"
+			const competingRootID = "01a075e6-3ed6-7a21-b4d8-7018562f6649"
 			require.NoError(test, service.StoreCodexRootChannelBinding(userID, competingRootID, binding))
 			require.NoError(test, service.StoreRecentCodexRootChannelCandidate(userID, tokenID, competingRootID, binding, scope))
-			require.NoError(test, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, tokenID, competingRootID, binding, scope))
+			require.NoError(test, service.StoreCodexPrefixRootCandidate(test.Context(), scope, competingRootID, competingRootID, binding))
 			for _, nextTurn := range []string{"01a075e6-d2a2-7a61-8047-f3611e0acd17", "01a075e6-d2a2-7a61-8047-f3611e0acd18"} {
 				nextContext, nextRecorder := codexAmbientSuggestionContext(userID, tokenID)
 				nextContext.Request.Header.Set("X-Codex-Turn-Metadata", strings.ReplaceAll(nextContext.Request.Header.Get("X-Codex-Turn-Metadata"), "01a075e6-d2a2-7a61-8047-f3611e0acd17", nextTurn))
@@ -114,14 +114,14 @@ func TestAmbientSuggestionsRequireUniqueAuthorizedRoot(test *testing.T) {
 				if scenario == "other group" {
 					binding.SelectedGroup = "different-group"
 				}
-				rootIDs := []string{"01a075e7-3ed6-7a21-b4d8-7018562f6648"}
+				rootIDs := []string{"01a075e6-3ed6-7a21-b4d8-7018562f6648"}
 				if scenario == "ambiguous" {
-					rootIDs = append(rootIDs, "01a075e8-3ed6-7a21-b4d8-7018562f6648")
+					rootIDs = append(rootIDs, "01a075e6-3ed6-7a21-b4d8-7018562f6649")
 				}
 				for _, rootID := range rootIDs {
 					require.NoError(test, service.StoreCodexRootChannelBinding(userID, rootID, binding))
 					require.NoError(test, service.StoreRecentCodexRootChannelCandidate(userID, scope.TokenID, rootID, binding, scope))
-					require.NoError(test, service.StoreProvisionalCodexTitleRootChannelCandidate(userID, scope.TokenID, rootID, binding, scope))
+					require.NoError(test, service.StoreCodexPrefixRootCandidate(test.Context(), scope, rootID, rootID, binding))
 				}
 			}
 			Distribute()(requestContext)
