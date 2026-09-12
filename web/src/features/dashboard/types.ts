@@ -62,6 +62,11 @@ export interface UserAgentStatsData {
 
 export interface PerformanceErrorItem {
   id: number
+  group_key?: string
+  error_group_id?: number
+  occurrence_count?: number
+  first_seen?: number
+  last_seen?: number
   created_at: number
   user_id: number
   username?: string
@@ -84,6 +89,7 @@ export interface PerformanceErrorsData {
   page: number
   page_size: number
   total: number
+  total_occurrences?: number
   items: PerformanceErrorItem[]
 }
 

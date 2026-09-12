@@ -1,9 +1,12 @@
 package model
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const perfMetricErrorRetention = 48 * time.Hour
@@ -52,6 +55,8 @@ func (PerfMetricError) TableName() string {
 }
 
 type PerfMetricErrorQuery struct {
+	Grouped        bool
+	ErrorGroupID   int64
 	ModelName      string
 	Group          string
 	Username       string
@@ -66,10 +71,20 @@ type PerfMetricErrorQuery struct {
 }
 
 type PerfMetricErrorPage struct {
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Total    int64             `json:"total"`
-	Items    []PerfMetricError `json:"items"`
+	Page             int                   `json:"page"`
+	PageSize         int                   `json:"page_size"`
+	Total            int64                 `json:"total"`
+	TotalOccurrences int64                 `json:"total_occurrences"`
+	Items            []PerfMetricErrorItem `json:"items"`
+}
+
+type PerfMetricErrorItem struct {
+	PerfMetricError
+	GroupKey        string `json:"group_key,omitempty"`
+	ErrorGroupID    int64  `json:"error_group_id,omitempty"`
+	OccurrenceCount int64  `json:"occurrence_count,omitempty"`
+	FirstSeen       int64  `json:"first_seen,omitempty"`
+	LastSeen        int64  `json:"last_seen,omitempty"`
 }
 
 func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, error) {
@@ -84,7 +99,37 @@ func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, erro
 	if startIndex < 0 {
 		startIndex = 0
 	}
+	page := PerfMetricErrorPage{
+		Page: startIndex/pageSize + 1, PageSize: pageSize, Items: []PerfMetricErrorItem{},
+	}
+	tx := perfMetricErrorsQuery(query).Session(&gorm.Session{})
+	if query.ErrorGroupID > 0 {
+		var reference PerfMetricError
+		if err := tx.Where("id = ?", query.ErrorGroupID).First(&reference).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return page, nil
+			}
+			return page, err
+		}
+		tx = perfMetricErrorGroupQuery(tx, reference).Where("id <= ?", reference.Id)
+	} else if query.Grouped {
+		return listPerfMetricErrorGroups(tx, page, startIndex)
+	}
+	if err := tx.Count(&page.Total).Error; err != nil {
+		return page, err
+	}
+	items := make([]PerfMetricError, 0, pageSize)
+	if err := tx.Order("created_at desc, id desc").Limit(pageSize).Offset(startIndex).Find(&items).Error; err != nil {
+		return page, err
+	}
+	for _, item := range items {
+		page.Items = append(page.Items, PerfMetricErrorItem{PerfMetricError: item})
+	}
+	page.TotalOccurrences = page.Total
+	return page, nil
+}
 
+func perfMetricErrorsQuery(query PerfMetricErrorQuery) *gorm.DB {
 	tx := DB.Model(&PerfMetricError{}).
 		Where("created_at >= ?", time.Now().Add(-perfMetricErrorRetention).Unix()).
 		Where("NOT (COALESCE(status_code, 0) IN ? AND LOWER(TRIM(COALESCE(error_code, ''))) IN ?)",
@@ -118,20 +163,7 @@ func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, erro
 		tx = tx.Where("created_at <= ?", query.EndTimestamp)
 	}
 
-	var total int64
-	if err := tx.Count(&total).Error; err != nil {
-		return PerfMetricErrorPage{}, err
-	}
-	items := make([]PerfMetricError, 0, pageSize)
-	if err := tx.Order("created_at desc, id desc").Limit(pageSize).Offset(startIndex).Find(&items).Error; err != nil {
-		return PerfMetricErrorPage{}, err
-	}
-
-	page := 1
-	if pageSize > 0 {
-		page = startIndex/pageSize + 1
-	}
-	return PerfMetricErrorPage{Page: page, PageSize: pageSize, Total: total, Items: items}, nil
+	return tx
 }
 
 func CreatePerfMetricError(item *PerfMetricError) error {

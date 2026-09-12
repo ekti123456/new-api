@@ -15,14 +15,16 @@ import { IconBadge } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getPerformanceErrors } from '@/features/dashboard/api'
-import type {
-  DashboardFilters,
-  PerformanceErrorItem,
-} from '@/features/dashboard/types'
+import {
+  getPerformanceErrors,
+  type PerformanceErrorQuery,
+} from '@/features/dashboard/api'
+import type { DashboardFilters } from '@/features/dashboard/types'
 import { toIntlLocale } from '@/i18n/languages'
 import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
+
+import { PerformanceErrorGroup } from './performance-error-group'
 
 type PerformanceErrorsPanelProps = {
   filters?: DashboardFilters
@@ -48,76 +50,6 @@ function emptyErrorFilters(username = ''): ErrorFilters {
     errorCode: '',
     statusCode: '',
   }
-}
-
-function displayValue(value: string | number | undefined) {
-  if (value === undefined || value === null || value === '') return '—'
-  return String(value)
-}
-
-function statusClass(statusCode: number) {
-  if (statusCode >= 500) return 'text-rose-600 dark:text-rose-400'
-  if (statusCode >= 400) return 'text-amber-600 dark:text-amber-400'
-  return 'text-muted-foreground'
-}
-
-function ErrorRow(props: { item: PerformanceErrorItem; locale: string }) {
-  const { t } = useTranslation()
-  const item = props.item
-  const timestamp = item.created_at
-    ? new Date(item.created_at * 1000).toLocaleString(props.locale)
-    : '—'
-  const user = item.username?.trim() || `#${item.user_id}`
-
-  return (
-    <div className='grid min-w-[86rem] grid-cols-[10rem_minmax(9rem,1fr)_minmax(9rem,1fr)_5rem_11rem_minmax(18rem,2fr)_minmax(11rem,1fr)_minmax(9rem,1fr)] gap-3 border-b px-5 py-3 text-xs last:border-b-0'>
-      <span className='text-muted-foreground tabular-nums'>{timestamp}</span>
-      <span className='truncate font-medium' title={user}>
-        {user}
-        <span className='text-muted-foreground ml-1 font-mono'>
-          #{item.user_id}
-        </span>
-      </span>
-      <span className='truncate font-mono' title={item.model_name}>
-        {displayValue(item.model_name)}
-      </span>
-      <span
-        className={cn(
-          'font-mono font-semibold tabular-nums',
-          statusClass(item.status_code)
-        )}
-      >
-        {item.status_code || '—'}
-      </span>
-      <span className='min-w-0 truncate' title={item.error_type}>
-        <span className='block truncate'>{displayValue(item.error_type)}</span>
-        <span className='text-muted-foreground block truncate font-mono'>
-          {displayValue(item.error_code)}
-        </span>
-      </span>
-      <span
-        className='text-muted-foreground min-w-0 truncate font-mono'
-        title={item.error_reason}
-      >
-        {displayValue(item.error_reason)}
-      </span>
-      <span
-        className='text-muted-foreground min-w-0 truncate font-mono'
-        title={item.request_id || undefined}
-      >
-        {displayValue(item.request_id)}
-      </span>
-      <span className='min-w-0 truncate' title={item.channel_name || undefined}>
-        <span className='block truncate'>
-          {item.channel_name ||
-            (item.channel_id ? `#${item.channel_id}` : t('Unknown'))}
-        </span>
-        <span className='text-muted-foreground block truncate font-mono'>
-          {displayValue(item.group)}
-        </span>
-      </span>
-    </div>
-  )
 }
 
 export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
@@ -166,6 +98,20 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
     (value) => value.trim() !== ''
   )
 
+  const queryParams: PerformanceErrorQuery = {
+    grouped: true,
+    startTimestamp: timeRange.start_timestamp,
+    endTimestamp: timeRange.end_timestamp,
+    username: errorFilters.username || undefined,
+    errorType: errorFilters.errorType || undefined,
+    errorCode: errorFilters.errorCode || undefined,
+    group: errorFilters.group || undefined,
+    modelName: errorFilters.modelName || undefined,
+    statusCode:
+      Number.isFinite(statusCode) && statusCode > 0 ? statusCode : undefined,
+    page,
+    pageSize: PAGE_SIZE,
+  }
   const query = useQuery({
     queryKey: [
       'dashboard-performance-errors',
@@ -179,22 +125,7 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
       errorFilters.username,
       page,
     ],
-    queryFn: () =>
-      getPerformanceErrors({
-        startTimestamp: timeRange.start_timestamp,
-        endTimestamp: timeRange.end_timestamp,
-        username: errorFilters.username || undefined,
-        errorType: errorFilters.errorType || undefined,
-        errorCode: errorFilters.errorCode || undefined,
-        group: errorFilters.group || undefined,
-        modelName: errorFilters.modelName || undefined,
-        statusCode:
-          Number.isFinite(statusCode) && statusCode > 0
-            ? statusCode
-            : undefined,
-        page,
-        pageSize: PAGE_SIZE,
-      }),
+    queryFn: () => getPerformanceErrors(queryParams),
     staleTime: 15 * 1000,
     refetchInterval: 30 * 1000,
     retry: false,
@@ -216,7 +147,9 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
               {t('Performance errors')}
             </div>
             <div className='text-muted-foreground text-xs'>
-              {t('Final failed requests counted by model performance metrics')}
+              {t(
+                'Same user and error code are grouped; expand the count to view individual requests'
+              )}
             </div>
           </div>
         </div>
@@ -365,7 +298,10 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
             </div>
           </Dialog>
           <span className='text-muted-foreground text-xs tabular-nums'>
-            {t('Total')}: {(data?.total ?? 0).toLocaleString(locale)}
+            {t('Error groups')}: {(data?.total ?? 0).toLocaleString(locale)}
+            {' · '}
+            {t('Occurrences')}:{' '}
+            {(data?.total_occurrences ?? 0).toLocaleString(locale)}
           </span>
           <button
             type='button'
@@ -402,7 +338,7 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
         )}
         {!query.isLoading && !query.isError && data?.items.length ? (
           <div>
-            <div className='text-muted-foreground bg-muted/30 grid min-w-[86rem] grid-cols-[10rem_minmax(9rem,1fr)_minmax(9rem,1fr)_5rem_11rem_minmax(18rem,2fr)_minmax(11rem,1fr)_minmax(9rem,1fr)] gap-3 px-5 py-2 text-xs font-medium'>
+            <div className='text-muted-foreground bg-muted/30 grid min-w-[91rem] grid-cols-[10rem_minmax(9rem,1fr)_minmax(9rem,1fr)_5rem_11rem_minmax(18rem,2fr)_minmax(11rem,1fr)_minmax(9rem,1fr)_5rem] gap-3 px-5 py-2 text-xs font-medium'>
               <span>{t('Time')}</span>
               <span>{t('User')}</span>
               <span>{t('Model')}</span>
@@ -411,9 +347,15 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
               <span>{t('Reason')}</span>
               <span>{t('Request ID')}</span>
               <span>{t('Channel')}</span>
+              <span className='text-right'>{t('Occurrences')}</span>
             </div>
             {data.items.map((item) => (
-              <ErrorRow key={item.id} item={item} locale={locale} />
+              <PerformanceErrorGroup
+                key={`${JSON.stringify(queryParams)}:${item.group_key ?? item.id}`}
+                item={item}
+                locale={locale}
+                filters={queryParams}
+              />
             ))}
           </div>
         ) : null}

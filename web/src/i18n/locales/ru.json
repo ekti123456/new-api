@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Occurrences": "Количество",
+    "Error groups": "Группы ошибок",
+    "Expand {{count}} errors": "Развернуть {{count}} ошибок",
+    "Collapse {{count}} errors": "Свернуть {{count}} ошибок",
+    "Same user and error code are grouped; expand the count to view individual requests": "Ошибки одного пользователя с одинаковым кодом сгруппированы; нажмите на число для просмотра запросов",
     "Terminal Event": "Завершающее событие",
     "Response Status": "Статус ответа",
     "Incomplete Reason": "Причина незавершённости",

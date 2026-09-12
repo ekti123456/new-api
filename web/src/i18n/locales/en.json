@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Occurrences": "Occurrences",
+    "Error groups": "Error groups",
+    "Expand {{count}} errors": "Expand {{count}} errors",
+    "Collapse {{count}} errors": "Collapse {{count}} errors",
+    "Same user and error code are grouped; expand the count to view individual requests": "Same user and error code are grouped; expand the count to view individual requests",
     "Terminal Event": "Terminal Event",
     "Response Status": "Response Status",
     "Incomplete Reason": "Incomplete Reason",

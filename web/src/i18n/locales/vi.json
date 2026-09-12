@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Occurrences": "Số lần",
+    "Error groups": "Nhóm lỗi",
+    "Expand {{count}} errors": "Mở rộng {{count}} lỗi",
+    "Collapse {{count}} errors": "Thu gọn {{count}} lỗi",
+    "Same user and error code are grouped; expand the count to view individual requests": "Lỗi cùng người dùng và mã lỗi được nhóm lại; nhấn số lần để xem từng yêu cầu",
     "Terminal Event": "Sự kiện kết thúc",
     "Response Status": "Trạng thái phản hồi",
     "Incomplete Reason": "Lý do chưa hoàn tất",

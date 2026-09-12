@@ -111,7 +111,9 @@ export async function getUserAgentStats(params: {
   return res.data
 }
 
-export async function getPerformanceErrors(params: {
+export type PerformanceErrorQuery = {
+  grouped?: boolean
+  errorGroupId?: number
   startTimestamp?: number
   endTimestamp?: number
   username?: string
@@ -122,14 +124,21 @@ export async function getPerformanceErrors(params: {
   statusCode?: number
   page: number
   pageSize: number
-}) {
+}
+
+export async function getPerformanceErrors(params: PerformanceErrorQuery) {
   const res = await api.get<{
     success: boolean
+    message?: string
     data: PerformanceErrorsData
   }>('/api/data/performance-errors', {
     params: {
       p: params.page,
       page_size: params.pageSize,
+      ...(params.grouped != null ? { grouped: params.grouped } : {}),
+      ...(params.errorGroupId != null
+        ? { error_group_id: params.errorGroupId }
+        : {}),
       ...(params.startTimestamp != null
         ? { start_timestamp: params.startTimestamp }
         : {}),
@@ -144,6 +153,9 @@ export async function getPerformanceErrors(params: {
       ...(params.statusCode ? { status_code: params.statusCode } : {}),
     },
   })
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Unable to load performance errors')
+  }
   return res.data
 }
 

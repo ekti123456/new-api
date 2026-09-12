@@ -46,7 +46,19 @@ func GetPerfMetricErrors(c *gin.Context) {
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	grouped, _ := strconv.ParseBool(c.Query("grouped"))
+	var errorGroupID int64
+	if c.Request.URL.Query().Has("error_group_id") {
+		var err error
+		errorGroupID, err = strconv.ParseInt(c.Query("error_group_id"), 10, 64)
+		if err != nil || errorGroupID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid error_group_id"})
+			return
+		}
+	}
 	result, err := model.ListPerfMetricErrors(model.PerfMetricErrorQuery{
+		Grouped:        grouped,
+		ErrorGroupID:   errorGroupID,
 		ModelName:      c.Query("model_name"),
 		Group:          c.Query("group"),
 		Username:       c.Query("username"),
@@ -63,9 +75,7 @@ func GetPerfMetricErrors(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	pageInfo.SetTotal(int(result.Total))
-	pageInfo.SetItems(result.Items)
-	common.ApiSuccess(c, pageInfo)
+	common.ApiSuccess(c, result)
 }
 
 func GetPerfMetrics(c *gin.Context) {

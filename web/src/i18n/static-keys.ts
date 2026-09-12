@@ -167,6 +167,8 @@ export const STATIC_I18N_KEYS = [
   'Complete API documentation with multi-language SDK support',
   'High Performance',
   'Performance errors',
+  'Expand {{count}} errors',
+  'Collapse {{count}} errors',
   'Final failed requests counted by model performance metrics',
   'Unable to load performance errors',
   'No performance errors in the selected period',

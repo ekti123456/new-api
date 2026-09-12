@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Occurrences": "回数",
+    "Error groups": "エラーグループ",
+    "Expand {{count}} errors": "{{count}} 件のエラーを展開",
+    "Collapse {{count}} errors": "{{count}} 件のエラーを折りたたむ",
+    "Same user and error code are grouped; expand the count to view individual requests": "同じユーザーとエラーコードで集約します。回数をクリックすると個別のリクエストを表示します",
     "Terminal Event": "終端イベント",
     "Response Status": "応答状態",
     "Incomplete Reason": "未完了の理由",

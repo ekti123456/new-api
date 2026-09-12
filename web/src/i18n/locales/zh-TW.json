@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Occurrences": "次數",
+    "Error groups": "錯誤分組",
+    "Expand {{count}} errors": "展開 {{count}} 次錯誤",
+    "Collapse {{count}} errors": "收合 {{count}} 次錯誤",
+    "Same user and error code are grouped; expand the count to view individual requests": "同使用者、同狀態碼和錯誤類型／錯誤碼合併，點擊次數查看逐筆請求",
     "Terminal Event": "終態事件",
     "Response Status": "回應狀態",
     "Incomplete Reason": "未完成原因",
