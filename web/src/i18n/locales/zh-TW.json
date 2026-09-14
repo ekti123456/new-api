@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Estimated next expansion multiplier": "預計下個視窗倍率",
+    "Estimated from active windows. Final price is set when the window is created.": "根據目前活躍視窗估算，實際以建立時的價格為準。",
     "Multiplier increase per extra window": "每個額外視窗增加倍率",
     "Maximum expansion multiplier": "擴容倍率上限",
     "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "每新增一個額外視窗遞增一檔，建立後價格固定；額外視窗數量上限仍然生效。",

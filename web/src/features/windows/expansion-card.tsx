@@ -25,6 +25,40 @@ export function ExpansionCard(props: {
   } else if (needsConfirmation) {
     status = t('Price confirmation required')
   }
+  let nextMultiplier = '—'
+  const maximum = props.data.policy.multiplier
+  const step = props.data.policy.multiplier_step
+  const now = Date.parse(props.data.server_now)
+  const complete =
+    props.data.pools.length > 0 &&
+    props.data.pools.every(
+      (pool) =>
+        pool.available &&
+        !pool.status.truncated &&
+        (Array.isArray(pool.status.windows) || pool.status.used === 0)
+    )
+  if (
+    complete &&
+    Number.isFinite(now) &&
+    Number.isFinite(step) &&
+    step > 0 &&
+    Number.isFinite(maximum) &&
+    maximum > 1
+  ) {
+    const prices = props.data.pools.map((pool) => {
+      const expanded = (pool.status.windows || []).filter(
+        (window) => window.expanded && Date.parse(window.expires_at) > now
+      ).length
+      return Math.min(
+        maximum,
+        Math.round((1 + (expanded + 1) * step) * 1e6) / 1e6
+      )
+    })
+    const lowest = Math.min(...prices)
+    const highest = Math.max(...prices)
+    nextMultiplier =
+      lowest === highest ? `×${lowest}` : `×${lowest}–×${highest}`
+  }
   return (
     <section
       aria-label={t('Window expansion')}
@@ -87,17 +121,25 @@ export function ExpansionCard(props: {
         </div>
         <div className='min-w-0 space-y-1.5 p-4'>
           <dt className='text-muted-foreground text-xs'>
-            {t('Maximum expansion multiplier')}
+            {t('Estimated next expansion multiplier')}
           </dt>
           <dd className='space-y-1.5'>
-            <span className='text-2xl font-semibold tracking-tight tabular-nums'>
-              ×{props.data.policy.multiplier}
-            </span>
+            <output
+              aria-label={t('Estimated next expansion multiplier')}
+              className='text-2xl font-semibold tracking-tight tabular-nums'
+            >
+              {nextMultiplier}
+            </output>
             <p className='text-muted-foreground text-xs'>
               {t('Each additional window adds {{step}}, capped at ×{{cap}}.', {
                 step: props.data.policy.multiplier_step,
                 cap: props.data.policy.multiplier,
               })}
+            </p>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Estimated from active windows. Final price is set when the window is created.'
+              )}
             </p>
           </dd>
         </div>

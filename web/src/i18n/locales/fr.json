@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Estimated next expansion multiplier": "Multiplicateur estimé de la prochaine fenêtre",
+    "Estimated from active windows. Final price is set when the window is created.": "Estimation selon les fenêtres actives. Le prix final est fixé à la création.",
     "Multiplier increase per extra window": "Incrément par fenêtre supplémentaire",
     "Maximum expansion multiplier": "Multiplicateur maximal",
     "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Chaque nouvelle fenêtre supplémentaire ajoute un palier. Son prix reste fixe ; la limite de fenêtres s’applique toujours.",

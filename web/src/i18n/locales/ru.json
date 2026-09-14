@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Estimated next expansion multiplier": "Множитель следующего окна (оценка)",
+    "Estimated from active windows. Final price is set when the window is created.": "Оценка по активным окнам. Итоговая цена определяется при создании окна.",
     "Multiplier increase per extra window": "Прибавка за дополнительное окно",
     "Maximum expansion multiplier": "Максимальный множитель",
     "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Каждое новое дополнительное окно повышает ступень. Его цена фиксируется; лимит окон сохраняется.",

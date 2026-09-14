@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Estimated next expansion multiplier": "Hệ số dự kiến của cửa sổ tiếp theo",
+    "Estimated from active windows. Final price is set when the window is created.": "Ước tính theo các cửa sổ đang hoạt động. Giá cuối cùng được xác định khi tạo cửa sổ.",
     "Multiplier increase per extra window": "Mức tăng cho mỗi cửa sổ bổ sung",
     "Maximum expansion multiplier": "Hệ số mở rộng tối đa",
     "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Mỗi cửa sổ bổ sung mới tăng một bậc. Giá được giữ cố định; giới hạn số cửa sổ vẫn áp dụng.",

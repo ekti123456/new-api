@@ -51,6 +51,103 @@ const { WindowPolicyEditor } = await import('../policy-editor')
 
 after(() => browser.close())
 
+test('expansion card previews the next active extra window tier and keeps pools separate', async (testContext) => {
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  testContext.after(async () => {
+    await act(async () => root.unmount())
+  })
+  const now = '2026-09-14T10:00:00Z'
+  const pool = (id: number, expanded: number): WindowPool => ({
+    id,
+    name: `Pool ${id}`,
+    available: true,
+    status: {
+      limit: 5,
+      used: expanded + 2,
+      cooldown_unavailable: false,
+      windows: [
+        {
+          id: 'ordinary',
+          expanded: false,
+          multiplier: 1,
+          created_at: now,
+          expires_at: '2026-09-14T11:00:00Z',
+        },
+        {
+          id: 'expired',
+          expanded: true,
+          multiplier: 1.5,
+          created_at: now,
+          expires_at: '2026-09-14T09:00:00Z',
+        },
+        ...Array.from({ length: expanded }, (_, index) => ({
+          id: String(index),
+          expanded: true,
+          multiplier: 1.5,
+          created_at: now,
+          expires_at: '2026-09-14T11:00:00Z',
+        })),
+      ],
+    },
+  })
+  const render = async (pools: WindowPool[], step = 0.1): Promise<void> => {
+    await act(async () =>
+      root.render(
+        <ExpansionCard
+          data={{
+            enabled: true,
+            accepted_multiplier: 1.5,
+            policy: {
+              enabled: true,
+              extra_limit: 6,
+              multiplier: 1.5,
+              multiplier_step: step,
+              channel_ids: [],
+            },
+            pools,
+            server_now: now,
+            updated_at: now,
+          }}
+          pending={false}
+          onChange={() => undefined}
+          onConfirmPrice={() => undefined}
+        />
+      )
+    )
+  }
+  const price = (): string | null | undefined =>
+    container.querySelector(
+      'output[aria-label="Estimated next expansion multiplier"]'
+    )?.textContent
+  for (const [count, expected] of [
+    [0, '×1.1'],
+    [1, '×1.2'],
+    [4, '×1.5'],
+    [5, '×1.5'],
+  ] as const) {
+    await render([pool(1, count)])
+    assert.equal(price(), expected)
+  }
+  await render([pool(1, 0)], 0.2)
+  assert.equal(price(), '×1.2')
+  await render([
+    {
+      ...pool(1, 0),
+      status: { limit: 5, used: 0, windows: [], cooldown_unavailable: false },
+    },
+  ])
+  assert.equal(price(), '×1.1')
+  await render([pool(1, 0), pool(2, 1)])
+  assert.equal(price(), '×1.1–×1.2')
+  await render([{ ...pool(1, 0), available: false }])
+  assert.equal(price(), '—')
+  await render([
+    { ...pool(1, 0), status: { ...pool(1, 0).status, truncated: true } },
+  ])
+  assert.equal(price(), '—')
+})
+
 test('admin can save a custom tier step and preview the capped price', async (testContext) => {
   const { api } = await import('@/lib/api')
   const previousAdapter = api.defaults.adapter
