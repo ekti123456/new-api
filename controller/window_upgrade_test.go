@@ -91,7 +91,8 @@ func TestWindowUpgradeRequiresCurrentConsentAndUsesAuthenticatedUser(test *testi
 		require.Len(test, requests, 1)
 		forwarded := <-requests
 		require.Equal(test, "42", forwarded.UserID)
-		require.Equal(test, "upgrade", forwarded.Input.Operation)
+		require.Equal(test, "upgrade_tiered", forwarded.Input.Operation)
+		require.Equal(test, 0.1, forwarded.Input.MultiplierStep)
 		require.Equal(test, "owned-root", forwarded.Input.Root)
 		require.Equal(test, "ordinary-grant", forwarded.Input.GrantID)
 		require.Equal(test, 1.5, forwarded.Input.Multiplier)

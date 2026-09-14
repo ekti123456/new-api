@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "Multiplier increase per extra window",
+    "Maximum expansion multiplier": "Maximum expansion multiplier",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.",
+    "Expansion price examples": "Expansion price examples",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "Each additional window adds {{step}}, capped at ×{{cap}}.",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "The multiplier is assigned by the expansion tier, up to ×{{cap}}.",
     "Occurrences": "Occurrences",
     "Error groups": "Error groups",
     "Expand {{count}} errors": "Expand {{count}} errors",

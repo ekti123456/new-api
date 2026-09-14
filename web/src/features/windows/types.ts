@@ -2,6 +2,7 @@ export interface ExpansionPolicy {
   enabled: boolean
   extra_limit: number
   multiplier: number
+  multiplier_step: number
   channel_ids: number[]
 }
 

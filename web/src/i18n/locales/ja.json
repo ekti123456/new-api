@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "追加ウィンドウごとの倍率増分",
+    "Maximum expansion multiplier": "拡張倍率の上限",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "追加ウィンドウごとに料金が一段階上がります。作成後の料金は固定され、ウィンドウ数の上限も適用されます。",
+    "Expansion price examples": "段階料金の例",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "追加ウィンドウごとに {{step}} 増加し、上限は ×{{cap}} です。",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "倍率は拡張段階に応じて決まり、最大 ×{{cap}} です。",
     "Occurrences": "回数",
     "Error groups": "エラーグループ",
     "Expand {{count}} errors": "{{count}} 件のエラーを展開",

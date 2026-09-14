@@ -47,8 +47,99 @@ const { WindowPoolCard } = await import('../window-pool-card')
 const { ExpansionCard } = await import('../expansion-card')
 const { remainingWindowTime } = await import('../remaining-window-time')
 const { WindowUpgradeButton } = await import('../window-upgrade-button')
+const { WindowPolicyEditor } = await import('../policy-editor')
 
 after(() => browser.close())
+
+test('admin can save a custom tier step and preview the capped price', async (testContext) => {
+  const { api } = await import('@/lib/api')
+  const previousAdapter = api.defaults.adapter
+  const client = new QueryClient({
+    defaultOptions: {
+      mutations: { retry: false },
+      queries: { retry: false, gcTime: 0 },
+    },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  testContext.after(async () => {
+    api.defaults.adapter = previousAdapter
+    await act(async () => root.unmount())
+    container.remove()
+    client.clear()
+  })
+  let saved: unknown
+  let complete: () => void = () => {}
+  const submitted = new Promise<void>((resolve) => {
+    complete = resolve
+  })
+  api.defaults.adapter = async (config) => {
+    assert.equal(config.url, '/api/user/windows/policy')
+    saved = JSON.parse(String(config.data))
+    complete()
+    return {
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      data: { success: true },
+    }
+  }
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <WindowPolicyEditor
+          policy={{
+            enabled: true,
+            extra_limit: 6,
+            multiplier: 1.5,
+            multiplier_step: 0.1,
+            channel_ids: [22],
+          }}
+        />
+      </QueryClientProvider>
+    )
+  )
+  const input = container.querySelector<HTMLInputElement>(
+    'input[name="multiplier_step"]'
+  )
+  assert.ok(input)
+  assert.match(
+    input.closest('label')?.textContent || '',
+    /Multiplier increase per extra window/
+  )
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      browser.HTMLInputElement.prototype,
+      'value'
+    )?.set?.call(input, '0.2')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const examples = container.querySelector(
+    'ol[aria-label="Expansion price examples"]'
+  )
+  assert.deepEqual(
+    Array.from(
+      examples?.querySelectorAll('li') || [],
+      (item) => item.textContent
+    ),
+    ['1 → ×1.2', '2 → ×1.4', '3 → ×1.5', '4 → ×1.5', '5 → ×1.5', '6 → ×1.5']
+  )
+  await act(async () => {
+    container
+      .querySelector('form')
+      ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await submitted
+  })
+  assert.deepEqual(saved, {
+    enabled: true,
+    extra_limit: 6,
+    multiplier: 1.5,
+    multiplier_step: 0.2,
+    channel_ids: [22],
+  })
+})
 
 test('individual upgrade requires separate confirmation and rejects a changed quote', async (testContext) => {
   const client = new QueryClient({
@@ -221,6 +312,7 @@ test('Chinese expansion copy and switch label follow the selected locale', async
           policy: {
             enabled: true,
             extra_limit: 5,
+            multiplier_step: 0.1,
             multiplier: 1.5,
             channel_ids: [],
           },
@@ -260,6 +352,7 @@ test('expansion switch supports keyboard activation and exposes the billing rule
           policy: {
             enabled: true,
             extra_limit: 5,
+            multiplier_step: 0.1,
             multiplier: 1.5,
             channel_ids: [],
           },
@@ -315,6 +408,7 @@ test('disabled policy and pending saves prevent new opt-in but still allow an ex
     policy: {
       enabled: false,
       extra_limit: 5,
+      multiplier_step: 0.1,
       multiplier: 1.5,
       channel_ids: [],
     },
@@ -366,6 +460,7 @@ test('price increase and save errors keep the accepted state visible instead of 
           policy: {
             enabled: true,
             extra_limit: 5,
+            multiplier_step: 0.1,
             multiplier: 2,
             channel_ids: [],
           },
@@ -486,6 +581,7 @@ test('enabling expansion requires confirming the displayed price and cancel leav
     policy: {
       enabled: true,
       extra_limit: 5,
+      multiplier_step: 0.1,
       multiplier: 1.5,
       channel_ids: [1],
     },

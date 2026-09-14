@@ -87,14 +87,17 @@ export function ExpansionCard(props: {
         </div>
         <div className='min-w-0 space-y-1.5 p-4'>
           <dt className='text-muted-foreground text-xs'>
-            {t('Expansion multiplier')}
+            {t('Maximum expansion multiplier')}
           </dt>
           <dd className='space-y-1.5'>
             <span className='text-2xl font-semibold tracking-tight tabular-nums'>
               ×{props.data.policy.multiplier}
             </span>
             <p className='text-muted-foreground text-xs'>
-              {t('Only additional windows cost more')}
+              {t('Each additional window adds {{step}}, capped at ×{{cap}}.', {
+                step: props.data.policy.multiplier_step,
+                cap: props.data.policy.multiplier,
+              })}
             </p>
           </dd>
         </div>

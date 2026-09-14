@@ -64,7 +64,7 @@ func UpgradePersonalWindow(request *gin.Context) {
 		common.ApiErrorMsg(request, "Window service unavailable")
 		return
 	}
-	_, err = relaychannel.RequestUserWindows(request, destination, relaychannel.WindowControlInput{Operation: "upgrade", Root: input.Root, GrantID: input.GrantID, AllowExpansion: true, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier})
+	_, err = relaychannel.RequestUserWindows(request, destination, relaychannel.WindowControlInput{Operation: "upgrade", Root: input.Root, GrantID: input.GrantID, AllowExpansion: true, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, MultiplierStep: policy.MultiplierStep})
 	if err != nil {
 		common.ApiError(request, err)
 		return

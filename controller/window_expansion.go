@@ -195,7 +195,7 @@ func SetPersonalWindowExpansion(requestContext *gin.Context) {
 }
 
 func UpdateWindowExpansionPolicy(requestContext *gin.Context) {
-	var policy operation_setting.WindowExpansionPolicy
+	policy := operation_setting.WindowExpansionPolicy{MultiplierStep: 0.1}
 	if requestContext.ShouldBindJSON(&policy) != nil {
 		common.ApiErrorMsg(requestContext, "Invalid expansion policy")
 		return

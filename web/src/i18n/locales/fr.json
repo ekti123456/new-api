@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "Incrément par fenêtre supplémentaire",
+    "Maximum expansion multiplier": "Multiplicateur maximal",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Chaque nouvelle fenêtre supplémentaire ajoute un palier. Son prix reste fixe ; la limite de fenêtres s’applique toujours.",
+    "Expansion price examples": "Exemples de tarifs par palier",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "Chaque fenêtre supplémentaire ajoute {{step}}, jusqu’à ×{{cap}}.",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "Le multiplicateur dépend du palier, dans la limite de ×{{cap}}.",
     "Occurrences": "Occurrences",
     "Error groups": "Groupes d’erreurs",
     "Expand {{count}} errors": "Développer {{count}} erreurs",

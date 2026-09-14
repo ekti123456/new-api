@@ -129,8 +129,13 @@ export function PersonalWindows(): React.JSX.Element {
                       {t('Confirm expansion charges')}
                     </AlertDialogTitle>
                     <AlertDialogDescription>
-                      {t('Only additional windows will be billed at')} ×
-                      {data.policy.multiplier}.{' '}
+                      {t(
+                        'Each additional window adds {{step}}, capped at ×{{cap}}.',
+                        {
+                          step: data.policy.multiplier_step,
+                          cap: data.policy.multiplier,
+                        }
+                      )}{' '}
                       {t('Existing window prices remain unchanged.')}
                     </AlertDialogDescription>
                   </AlertDialogHeader>

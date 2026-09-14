@@ -33,6 +33,7 @@ type WindowControlInput struct {
 	AllowExpansion bool    `json:"allow_expansion"`
 	ExtraLimit     int     `json:"extra_limit"`
 	Multiplier     float64 `json:"multiplier"`
+	MultiplierStep float64 `json:"multiplier_step,omitempty"`
 	GrantID        string  `json:"grant_id,omitempty"`
 	ReservationID  string  `json:"reservation_id,omitempty"`
 	Root           string  `json:"root,omitempty"`
@@ -129,6 +130,11 @@ func InvalidateUserWindowBilling(userID int) {
 
 func RequestUserWindows(requestContext *gin.Context, info *relaycommon.RelayInfo, input WindowControlInput) (WindowControlResult, error) {
 	var result WindowControlResult
+	// Dedicated operations make older gateways reject tiered pricing before
+	// reserving or upgrading a window at the old flat price.
+	if input.MultiplierStep > 0 && (input.Operation == "quote" || input.Operation == "upgrade") {
+		input.Operation += "_tiered"
+	}
 	controlInfo := *info
 	controlInfo.RequestId = common.NewRequestId()
 	controlInfo.WindowBilling = nil
@@ -314,7 +320,7 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 		return nil, errors.New("窗口扩容设置暂时无法确认，请稍后重试")
 	}
 	allow := configured && policy.Enabled && preferences.WindowExpansionEnabled && preferences.WindowExpansionAcceptedRatio >= policy.Multiplier
-	result, err := RequestUserWindows(requestContext, &shadow, WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, ReservationID: common.GetUUID()})
+	result, err := RequestUserWindows(requestContext, &shadow, WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, MultiplierStep: policy.MultiplierStep, ReservationID: common.GetUUID()})
 	if err != nil {
 		return nil, err
 	}

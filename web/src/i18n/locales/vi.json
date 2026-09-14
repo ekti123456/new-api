@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "Mức tăng cho mỗi cửa sổ bổ sung",
+    "Maximum expansion multiplier": "Hệ số mở rộng tối đa",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Mỗi cửa sổ bổ sung mới tăng một bậc. Giá được giữ cố định; giới hạn số cửa sổ vẫn áp dụng.",
+    "Expansion price examples": "Ví dụ giá theo bậc",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "Mỗi cửa sổ bổ sung tăng {{step}}, tối đa ×{{cap}}.",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "Hệ số được xác định theo bậc mở rộng, tối đa ×{{cap}}.",
     "Occurrences": "Số lần",
     "Error groups": "Nhóm lỗi",
     "Expand {{count}} errors": "Mở rộng {{count}} lỗi",

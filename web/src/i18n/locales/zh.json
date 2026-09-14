@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "每个额外窗口增加倍率",
+    "Maximum expansion multiplier": "扩容倍率上限",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "每新增一个额外窗口递增一档，创建后价格固定；额外窗口数量上限仍然生效。",
+    "Expansion price examples": "阶梯价格示例",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "每多一个额外窗口，倍率增加 {{step}}，最高 ×{{cap}}。",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "按扩容阶梯确定倍率，最高不超过 ×{{cap}}。",
     "Occurrences": "次数",
     "Error groups": "错误分组",
     "Expand {{count}} errors": "展开 {{count}} 次错误",

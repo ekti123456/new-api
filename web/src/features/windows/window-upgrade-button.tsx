@@ -74,7 +74,10 @@ export function WindowUpgradeButton(props: {
               {t(
                 'After the reserved slot is secured, subsequent requests use the new multiplier. In-flight and past requests keep their original price.'
               )}{' '}
-              ×{confirmation?.multiplier}
+              {t(
+                'The multiplier is assigned by the expansion tier, up to ×{{cap}}.',
+                { cap: confirmation?.multiplier }
+              )}
               <br />
               {t(
                 'One expansion allowance is used. The account and expiry stay unchanged.'

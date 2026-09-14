@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Multiplier increase per extra window": "Прибавка за дополнительное окно",
+    "Maximum expansion multiplier": "Максимальный множитель",
+    "Each new extra window adds one tier. Its price stays fixed; the extra window limit still applies.": "Каждое новое дополнительное окно повышает ступень. Его цена фиксируется; лимит окон сохраняется.",
+    "Expansion price examples": "Примеры ступенчатых цен",
+    "Each additional window adds {{step}}, capped at ×{{cap}}.": "Каждое дополнительное окно добавляет {{step}}, максимум ×{{cap}}.",
+    "The multiplier is assigned by the expansion tier, up to ×{{cap}}.": "Множитель определяется ступенью, не выше ×{{cap}}.",
     "Occurrences": "Количество",
     "Error groups": "Группы ошибок",
     "Expand {{count}} errors": "Развернуть {{count}} ошибок",

@@ -19,6 +19,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWindowTieredControlDoesNotFallBackToLegacyFlatPricing(test *testing.T) {
+	var operations []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var input WindowControlInput
+		if common.DecodeJson(request.Body, &input) != nil {
+			writer.WriteHeader(400)
+			return
+		}
+		operations = append(operations, input.Operation)
+		if input.MultiplierStep != 0.2 || input.Multiplier != 1.5 {
+			writer.WriteHeader(500)
+			return
+		}
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(writer, `{"error":{"message":"unsupported window operation"}}`)
+	}))
+	defer server.Close()
+	digest := sha256.Sum256([]byte("test-key"))
+	configurePolicyTest(test, []newAPIPolicyBinding{{PlatformID: "tiered-test", Target: server.URL, Secret: "0123456789abcdef0123456789abcdef", Enabled: true, CodexKeyFingerprint: hex.EncodeToString(digest[:])}})
+	request, _ := gin.CreateTestContext(httptest.NewRecorder())
+	request.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{UserId: 42, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL, ApiKey: "test-key"}}
+	for _, operation := range []string{"quote", "upgrade"} {
+		_, err := RequestUserWindows(request, info, WindowControlInput{Operation: operation, AllowExpansion: true, ExtraLimit: 6, Multiplier: 1.5, MultiplierStep: 0.2})
+		require.Error(test, err)
+	}
+	require.Equal(test, []string{"quote_tiered", "upgrade_tiered"}, operations)
+}
+
 func TestWindowControlUsesUniqueSignedRequestIDsAndDoesNotReuseGrant(test *testing.T) {
 	requests := make(chan http.Header, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
