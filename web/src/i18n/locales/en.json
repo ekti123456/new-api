@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Upstream first response": "Upstream first response",
+    "Actual first frame": "Actual first frame",
+    "Reported by codex2api (loose). Actual first frame: {{time}}": "Reported by codex2api (loose). Actual first frame: {{time}}",
+    "Reported by codex2api (loose). Includes gateway admission and earlier retries.": "Reported by codex2api (loose). Includes gateway admission and earlier retries.",
+    "Current attempt first response": "Current attempt first response",
     "Estimated next expansion multiplier": "Estimated next expansion multiplier",
     "Estimated from active windows. Final price is set when the window is created.": "Estimated from active windows. Final price is set when the window is created.",
     "Multiplier increase per extra window": "Multiplier increase per extra window",

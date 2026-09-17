@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Upstream first response": "上游首响应",
+    "Actual first frame": "实际首包",
+    "Reported by codex2api (loose). Actual first frame: {{time}}": "codex2api 上报（宽松口径）。实际首包：{{time}}",
+    "Reported by codex2api (loose). Includes gateway admission and earlier retries.": "codex2api 上报（宽松口径），包含网关准入及此前重试耗时。",
+    "Current attempt first response": "本次尝试首响应",
     "Estimated next expansion multiplier": "预计下个窗口倍率",
     "Estimated from active windows. Final price is set when the window is created.": "根据当前活跃窗口估算，实际以创建时的价格为准。",
     "Multiplier increase per extra window": "每个额外窗口增加倍率",

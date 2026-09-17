@@ -69,6 +69,7 @@ import { cn } from '@/lib/utils'
 
 import { getLogIPLocation, type LogIPLocation } from '../../api'
 import type { UsageLog } from '../../data/schema'
+import { getReportedFirstResponse } from '../../lib/first-response-timing'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -490,6 +491,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const [ipLocationLoading, setIpLocationLoading] = useState(false)
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
+  const reportedFirstResponse = getReportedFirstResponse(
+    other?.upstream_first_response,
+    other?.frt
+  )
   const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
@@ -806,7 +811,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
                         )}
                       >
                         {' '}
-                        (FRT: {formatUseTime(other.frt / 1000)})
+                        ({t('Actual first frame')}:{' '}
+                        {formatUseTime(other.frt / 1000)})
                       </span>
                     )}
                 </span>
@@ -816,6 +822,21 @@ export function DetailsDialog(props: DetailsDialogProps) {
         </div>
 
         {/* Request conversion (admin only, not for refund) */}
+        {props.log.is_stream && reportedFirstResponse && (
+          <DetailSection label={t('Upstream first response')}>
+            <p className='text-sm tabular-nums'>
+              {formatUseTime(reportedFirstResponse.ms / 1000)}
+              {' · '}
+              {t(
+                'Reported by codex2api (loose). Includes gateway admission and earlier retries.'
+              )}
+            </p>
+            <p className='text-muted-foreground text-xs tabular-nums'>
+              {t('Current attempt first response')}:{' '}
+              {formatUseTime(reportedFirstResponse.attempt_ms / 1000)}
+            </p>
+          </DetailSection>
+        )}
         {showConversion && (
           <DetailSection label={t('Request Conversion')}>
             <div className='relative min-w-0'>

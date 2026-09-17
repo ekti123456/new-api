@@ -80,18 +80,26 @@ type TokenCountMeta struct {
 	estimatePromptTokens int
 }
 
+type UpstreamFirstResponseTiming struct {
+	Source              string `json:"source"`
+	Mode                string `json:"mode"`
+	Milliseconds        int64  `json:"ms"`
+	AttemptMilliseconds int64  `json:"attempt_ms"`
+}
+
 type RelayInfo struct {
-	WindowBilling     *WindowBillingGrant
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
-	StartTime         time.Time
-	FirstResponseTime time.Time
-	isFirstResponse   bool
+	WindowBilling              *WindowBillingGrant
+	TokenId                    int
+	TokenKey                   string
+	TokenGroup                 string
+	UserId                     int
+	UsingGroup                 string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup                  string // 用户所在分组
+	TokenUnlimited             bool
+	StartTime                  time.Time
+	FirstResponseTime          time.Time
+	CodexUpstreamFirstResponse *UpstreamFirstResponseTiming
+	isFirstResponse            bool
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool

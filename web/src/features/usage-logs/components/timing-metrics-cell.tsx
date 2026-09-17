@@ -33,6 +33,7 @@ import {
 import { formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { getReportedFirstResponse } from '../lib/first-response-timing'
 import { getFirstResponseTimeColor, getResponseTimeColor } from '../lib/format'
 import type { LogOtherData } from '../types'
 
@@ -54,6 +55,7 @@ interface TimingMetricsCellProps {
   useTimeSec: number
   completionTokens: number
   frtMs?: number
+  upstreamFirstResponse?: LogOtherData['upstream_first_response']
   isStream: boolean
   className?: string
   /**
@@ -69,8 +71,15 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
   const { t } = useTranslation()
   const indicator = props.indicator ?? 'bar'
   const showFirstToken = props.isStream
+  const reported = getReportedFirstResponse(
+    props.upstreamFirstResponse,
+    props.frtMs
+  )
+  const displayFirstMs = reported?.ms ?? props.frtMs
   const firstTokenSeconds =
-    props.frtMs != null && props.frtMs > 0 ? props.frtMs / 1000 : null
+    displayFirstMs != null && (reported != null || displayFirstMs > 0)
+      ? displayFirstMs / 1000
+      : null
   const firstTokenVariant: StatusVariant =
     firstTokenSeconds == null
       ? 'neutral'
@@ -86,7 +95,17 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
   const labels = (
     <div className='flex min-h-8 min-w-0 flex-col justify-center gap-0.5 text-xs leading-tight'>
       {showFirstToken && (
-        <div className='flex items-baseline gap-1.5'>
+        <div
+          className='flex items-baseline gap-1.5'
+          title={
+            reported
+              ? t(
+                  'Reported by codex2api (loose). Actual first frame: {{time}}',
+                  { time: formatUseTime((props.frtMs ?? 0) / 1000) }
+                )
+              : undefined
+          }
+        >
           {indicator === 'dot' && (
             <span
               aria-hidden
@@ -97,7 +116,7 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
             />
           )}
           <span className='text-muted-foreground shrink-0'>
-            {t('First token')}
+            {reported ? t('Upstream first response') : t('First token')}
           </span>
           <span className={cn('tabular-nums', textColorMap[firstTokenVariant])}>
             {firstTokenLabel}
