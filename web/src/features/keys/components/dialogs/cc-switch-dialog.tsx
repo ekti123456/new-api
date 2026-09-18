@@ -41,7 +41,10 @@ const APP_CONFIGS = {
   },
   codex: {
     label: 'Codex',
-    defaultName: 'My Codex',
+    // Codex uses this provider name to decide whether the OpenAI remote
+    // compaction capability is available. Keep it aligned with the official
+    // provider name when generating a CC Switch import.
+    defaultName: 'OpenAI',
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
   gemini: {
@@ -73,11 +76,11 @@ function buildCCSwitchURL(
   apiKey: string
 ): string {
   const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
+  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
-  params.set('name', name)
+  params.set('name', app === 'codex' ? 'OpenAI' : name)
   params.set('endpoint', endpoint)
   params.set('apiKey', apiKey)
   for (const [k, v] of Object.entries(models)) {
@@ -196,7 +199,8 @@ export function CCSwitchDialog(props: Props) {
             onValueChange={setName}
             placeholder={currentConfig.defaultName}
             emptyText=''
-            allowCustomValue={true}
+            allowCustomValue={app !== 'codex'}
+            disabled={app === 'codex'}
           />
         </div>
 
