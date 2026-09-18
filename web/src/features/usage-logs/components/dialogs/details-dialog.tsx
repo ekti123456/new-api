@@ -822,14 +822,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
         </div>
 
         {/* Request conversion (admin only, not for refund) */}
-        {props.log.is_stream && reportedFirstResponse && (
+        {props.isAdmin && props.log.is_stream && reportedFirstResponse && (
           <DetailSection label={t('Upstream first response')}>
             <p className='text-sm tabular-nums'>
               {formatUseTime(reportedFirstResponse.ms / 1000)}
-              {' · '}
-              {t(
-                'Reported by codex2api (loose). Includes gateway admission and earlier retries.'
-              )}
             </p>
             <p className='text-muted-foreground text-xs tabular-nums'>
               {t('Current attempt first response')}:{' '}

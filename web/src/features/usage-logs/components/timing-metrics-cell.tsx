@@ -56,6 +56,7 @@ interface TimingMetricsCellProps {
   completionTokens: number
   frtMs?: number
   upstreamFirstResponse?: LogOtherData['upstream_first_response']
+  isAdmin?: boolean
   isStream: boolean
   className?: string
   /**
@@ -98,11 +99,8 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
         <div
           className='flex items-baseline gap-1.5'
           title={
-            reported
-              ? t(
-                  'Reported by codex2api (loose). Actual first frame: {{time}}',
-                  { time: formatUseTime((props.frtMs ?? 0) / 1000) }
-                )
+            props.isAdmin && reported
+              ? `${t('Actual first frame')}: ${formatUseTime((props.frtMs ?? 0) / 1000)}`
               : undefined
           }
         >
@@ -116,7 +114,7 @@ export function TimingMetricsCell(props: TimingMetricsCellProps) {
             />
           )}
           <span className='text-muted-foreground shrink-0'>
-            {reported ? t('Upstream first response') : t('First token')}
+            {t('First token')}
           </span>
           <span className={cn('tabular-nums', textColorMap[firstTokenVariant])}>
             {firstTokenLabel}

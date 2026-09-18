@@ -19,7 +19,8 @@ back to the actual first frame. The headers are stripped before downstream relay
 
 Usage logs preserve `other.frt` as the actual first-frame latency, and add
 `other.upstream_first_response = {source: "codex2api", mode: "loose", ms, attempt_ms}`.
-Desktop/mobile lists label the reported value **Upstream first response**. Hover
-and details retain the actual first-frame time. TPS, billing, retry decisions,
+Desktop/mobile lists keep the compact **First token** label. Only the admin view
+shows a hover with the actual first-frame time; provider/mode text is omitted.
+The additional upstream-timing detail section is also admin-only. TPS, billing, retry decisions,
 historical logs and existing aggregates are unaffected. Already committed headers,
 older gateway versions and unsupported routes fall back to the original display.

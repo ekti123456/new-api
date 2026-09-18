@@ -48,7 +48,7 @@ import {
 } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
-import { useUsageLogsContext } from './usage-logs-provider'
+import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]:
@@ -279,6 +279,7 @@ function MobileUserField({ log }: { log: UsageLog }) {
 
 /** Merge stream badge + TPS with first-token / duration on one row. */
 function MobileStreamTimingField({ log }: { log: UsageLog }) {
+  const { isAdminView } = useLogsViewScope()
   if (!isTimingLogType(log.type)) return null
 
   const other = parseLogOther(log.other)
@@ -295,6 +296,7 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
         completionTokens={log.completion_tokens}
         frtMs={other?.frt}
         upstreamFirstResponse={other?.upstream_first_response}
+        isAdmin={isAdminView}
         isStream={log.is_stream}
         indicator='dot'
         className='min-w-0 flex-1'
