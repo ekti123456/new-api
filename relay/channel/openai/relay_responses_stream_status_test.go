@@ -206,3 +206,27 @@ func TestOaiResponsesStreamHandlerMarksResponseFailedAsStreamError(t *testing.T)
 	assert.Contains(t, info.StreamStatus.Summary(), "soft_errors=1")
 	assert.Contains(t, w.Body.String(), `"type":"response.failed"`)
 }
+
+func TestOaiResponsesStreamPreservesSessionModelGuidance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	const message = "当前对话无法继续使用 gpt-6-astra。可尝试切换至 gpt-5.6-sol 继续当前任务；如需使用 gpt-6-astra，请新建对话后重试。"
+	frame := `{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"session_model_unavailable","message":"` + message + `"}}}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "session-model-guidance")
+	info := &relaycommon.RelayInfo{OriginModelName: "gpt-6-astra", DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-6-astra"}}
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(": heartbeat\n\ndata: " + frame + "\n\n")),
+		Header: http.Header{"Content-Type": {"text/event-stream"}}}
+	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	require.NotNil(t, info.StreamStatus)
+	assert.True(t, info.StreamStatus.HasErrors())
+	assert.Contains(t, w.Body.String(), message)
+	assert.Contains(t, w.Body.String(), `"code":"session_model_unavailable"`)
+	assert.NotContains(t, w.Body.String(), "上游请求失败")
+}

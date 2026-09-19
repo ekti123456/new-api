@@ -184,7 +184,7 @@ func TestRelayErrorHandlerKeepsAccountSessionCapacityMessage(t *testing.T) {
 }
 
 func TestRelayErrorHandlerKeepsSessionModelUnavailableMessage(test *testing.T) {
-	const message = "当前会话绑定的上游账号不支持所选模型，请新开对话后使用该模型。"
+	const message = "当前对话无法继续使用 gpt-6-astra。可尝试切换至 gpt-5.6-sol 继续当前任务；如需使用 gpt-6-astra，请新建对话后重试。"
 	response := &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"session_model_unavailable"}}`)),

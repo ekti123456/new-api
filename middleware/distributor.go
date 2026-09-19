@@ -124,7 +124,8 @@ func Distribute() func(c *gin.Context) {
 			if rootErr != nil {
 				logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
 				if errors.Is(rootErr, errCodexRootModelUnavailable) {
-					abortWithOpenAiMessage(c, http.StatusBadRequest, "当前会话绑定的上游渠道不支持所选模型，请新开对话后使用该模型。", types.ErrorCode("session_model_unavailable"))
+					c.Header("X-Should-Retry", "false")
+					abortWithOpenAiMessage(c, http.StatusBadRequest, "当前对话无法继续使用所选模型。请选择其他可用模型继续当前任务；如需使用所选模型，请新建对话后重试。", types.ErrorCode("session_model_unavailable"))
 					return
 				}
 				if abortCodexBackgroundRootFailure(c, rootSession, rootErr) {
