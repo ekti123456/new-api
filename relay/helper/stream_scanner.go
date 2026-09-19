@@ -50,14 +50,15 @@ func copyCodexSSEHeaders(c *gin.Context, resp *http.Response) {
 	if c == nil || c.Writer == nil || resp == nil {
 		return
 	}
-	// codex
-	for _, name := range []string{"X-Reasoning-Included", "X-Codex-Turn-State"} {
+	// Codex reads these before consuming SSE: the actual model, reasoning
+	// presence, model-list refresh signal, and the next request's turn state.
+	for _, name := range []string{"OpenAI-Model", "X-Reasoning-Included", "X-Models-Etag", "X-Codex-Turn-State"} {
 		values := resp.Header.Values(name)
 		if !service.ShouldCopyUpstreamHeader(c, name, values) {
 			continue
 		}
 		for _, value := range values {
-			if value != "" {
+			if value != "" || name == "X-Reasoning-Included" {
 				c.Writer.Header().Add(name, value)
 			}
 		}

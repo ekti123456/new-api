@@ -895,6 +895,10 @@ type OpenAIResponsesRequest struct {
 	// Codex Responses metadata/client_metadata:
 	// https://github.com/openai/codex/commit/14df0e8833aad0d6d78287954b61ffac67af936c
 	ClientMetadata json.RawMessage `json:"client_metadata,omitempty"`
+	// Codex WebSocket prewarm must retain an explicit false through HTTP gateways.
+	Generate *bool `json:"generate,omitempty"`
+	// Codex uses this structured capability selector in both HTTP and WS requests.
+	AccessPrograms json.RawMessage `json:"access_programs,omitempty"`
 	// qwen
 	EnableThinking json.RawMessage `json:"enable_thinking,omitempty"`
 	ThinkingBudget json.RawMessage `json:"thinking_budget,omitempty"`
