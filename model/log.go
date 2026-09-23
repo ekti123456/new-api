@@ -108,7 +108,8 @@ func appendRequestAdminMetadata(c *gin.Context, other map[string]interface{}) ma
 
 	userAgent := sanitizeLogAdminRequestMetadata(c.Request.UserAgent())
 	accessURL := sanitizeLogAdminRequestMetadata(common.GetRequestOrigin(c.Request))
-	if userAgent == "" && accessURL == "" {
+	classification, classified := common.GetCodexRequestClassification(c)
+	if userAgent == "" && accessURL == "" && !classified {
 		return other
 	}
 
@@ -125,6 +126,9 @@ func appendRequestAdminMetadata(c *gin.Context, other map[string]interface{}) ma
 	}
 	if accessURL != "" {
 		adminInfo["access_url"] = accessURL
+	}
+	if classified {
+		adminInfo["request_classification"] = classification
 	}
 	return other
 }
@@ -335,6 +339,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = appendRequestAdminMetadata(c, other)
+	other = appendUpstreamResponseModel(c, other)
 	otherStr := common.MapToJsonStr(other)
 	log := &Log{
 		UserId:           userId,
@@ -393,6 +398,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
 	params.Other = appendRequestAdminMetadata(c, params.Other)
+	params.Other = appendUpstreamResponseModel(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	log := &Log{
 		UserId:           userId,

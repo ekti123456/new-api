@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Upstream reported": "上游自报",
+    "Record and show upstream response model": "记录并显示实际响应模型",
+    "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "默认关闭。在模型标签下显示上游响应自报的模型，不改变路由或计费。关闭后也会隐藏已有日志中的该字段。",
     "Upstream first response": "上游首响应",
     "Actual first frame": "实际首包",
     "Reported by codex2api (loose). Actual first frame: {{time}}": "codex2api 上报（宽松口径）。实际首包：{{time}}",
@@ -5583,5 +5586,13 @@
     "No inviters were recorded for this period.": "当前统计周期内暂无邀请人记录。",
     "Rank": "排名",
     "Total inviters": "邀请人总数"
-  }
+  },
+  "Request type": "请求类型",
+  "Ingress request type": "入站请求类型",
+  "User request": "用户请求",
+  "Related background": "相关后台",
+  "Independent background": "独立后台",
+  "Related unclassified": "相关未分类",
+  "Compaction": "压缩",
+  "Not recorded": "未记录"
 }

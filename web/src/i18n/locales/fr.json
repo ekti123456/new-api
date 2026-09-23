@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Upstream reported": "Modèle déclaré en amont",
+    "Record and show upstream response model": "Enregistrer et afficher le modèle de réponse amont",
+    "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Désactivé par défaut. Affiche le modèle déclaré dans la réponse amont sous son étiquette, sans modifier le routage ni la facturation. Désactiver masque aussi ce champ dans les journaux existants.",
     "Upstream first response": "Upstream first response",
     "Actual first frame": "Actual first frame",
     "Reported by codex2api (loose). Actual first frame: {{time}}": "Reported by codex2api (loose). Actual first frame: {{time}}",
@@ -5519,5 +5522,13 @@
     "No inviters were recorded for this period.": "Aucun parrain n’a été enregistré pour cette période.",
     "Rank": "Rang",
     "Total inviters": "Total des parrains"
-  }
+  },
+  "Request type": "Type de requête",
+  "Ingress request type": "Type de requête entrant",
+  "User request": "Requête utilisateur",
+  "Related background": "Tâche de fond liée",
+  "Independent background": "Tâche de fond indépendante",
+  "Related unclassified": "Liée, non classée",
+  "Compaction": "Compactage",
+  "Not recorded": "Non enregistré"
 }

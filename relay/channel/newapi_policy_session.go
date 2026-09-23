@@ -271,11 +271,18 @@ type codexPassiveRootSessionOverride struct {
 // by signed policy metadata before channel selection. Parsing the reusable body
 // preserves it for the relay handler that follows.
 func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionResolution {
-	var request dto.OpenAIResponsesRequest
+	var request struct {
+		dto.OpenAIResponsesRequest
+		CompactionTrigger json.RawMessage `json:"compaction_trigger"`
+	}
 	info := &relaycommon.RelayInfo{}
 	if c != nil {
 		if err := common2.UnmarshalBodyReusable(c, &request); err == nil {
-			info.Request = &request
+			info.Request = &request.OpenAIResponsesRequest
+			trigger := bytes.TrimSpace(request.CompactionTrigger)
+			if len(trigger) > 0 && !bytes.Equal(trigger, []byte("null")) && !bytes.Equal(trigger, []byte("false")) {
+				c.Set(common2.CodexProtocolCompactionKey, true)
+			}
 		}
 	}
 	stableSessionID := newAPIPolicyStableSessionID(c, info)
@@ -360,6 +367,12 @@ func setCodexRootSessionOverrideValue(c *gin.Context, override codexPassiveRootS
 		return false
 	}
 	c.Set(codexPassiveRootSessionOverrideContextKey, override)
+	if observation, ok := common2.GetCodexRequestClassification(c); ok {
+		if override.labelsSet {
+			observation.ThreadSource, observation.RequestKind, observation.SubagentKind = override.threadSource, override.requestKind, override.subagentKind
+		}
+		common2.ObserveCodexRequestClassification(c, observation.ThreadSource, observation.RequestKind, observation.SubagentKind, newAPIPolicyRootSessionResolved, override.relation == newAPIPolicyRootSessionRelationRelated)
+	}
 	return true
 }
 
@@ -386,6 +399,10 @@ func applyCodexPassiveRootSessionOverride(c *gin.Context, resolution newAPIPolic
 	if c == nil {
 		return resolution
 	}
+	common2.ObserveCodexRequestClassification(c, resolution.threadSource, resolution.requestKind, resolution.subagentKind, resolution.state, resolution.relation == newAPIPolicyRootSessionRelationRelated)
+	defer func() {
+		common2.ObserveCodexRequestClassification(c, resolution.threadSource, resolution.requestKind, resolution.subagentKind, resolution.state, resolution.relation == newAPIPolicyRootSessionRelationRelated)
+	}()
 	raw, found := c.Get(codexPassiveRootSessionOverrideContextKey)
 	override, ok := raw.(codexPassiveRootSessionOverride)
 	if !found || !ok || override.rootID == "" ||

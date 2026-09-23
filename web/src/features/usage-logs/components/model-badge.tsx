@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils'
 interface ModelBadgeProps {
   modelName: string
   actualModel?: string
+  responseModel?: string
   className?: string
 }
 
@@ -153,7 +154,7 @@ function ModelBadgeContent(props: ModelBadgeProps) {
   )
 }
 
-export function ModelBadge(props: ModelBadgeProps) {
+function ModelBadgeMapping(props: ModelBadgeProps) {
   const { t } = useTranslation()
 
   if (!props.actualModel) {
@@ -191,5 +192,25 @@ export function ModelBadge(props: ModelBadgeProps) {
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+export function ModelBadge(props: ModelBadgeProps) {
+  const { t } = useTranslation()
+  const responseModel =
+    typeof props.responseModel === 'string' ? props.responseModel.trim() : ''
+
+  return (
+    <div className='flex min-w-0 flex-col items-start gap-0.5'>
+      <ModelBadgeMapping {...props} />
+      {responseModel && (
+        <span
+          className='text-muted-foreground max-w-full truncate text-[11px]'
+          title={`${t('Upstream reported')}: ${responseModel}`}
+        >
+          ↳ {t('Upstream reported')}: {responseModel}
+        </span>
+      )}
+    </div>
   )
 }

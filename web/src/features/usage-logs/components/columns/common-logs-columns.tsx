@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { RequestTypeBadge } from '../request-type-badge'
 import type { ColumnDef } from '@tanstack/react-table'
 import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
 import { useState } from 'react'
@@ -597,6 +598,18 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
     },
     size: 160,
   })
+  if (isAdmin) {
+    columns.push({
+      id: 'request_type',
+      header: t('Request type'),
+      cell: ({ row }) => {
+        if (!isTimingLogType(row.original.type)) return null
+        return <RequestTypeBadge classification={parseLogOther(row.original.other)?.admin_info?.request_classification} />
+      },
+      meta: { label: t('Request type') },
+      size: 160,
+    })
+  }
   columns.push(
     {
       accessorKey: 'model_name',
@@ -612,6 +625,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             <ModelBadge
               modelName={modelInfo.name}
               actualModel={modelInfo.actualModel}
+              responseModel={modelInfo.responseModel}
             />
           </div>
         )

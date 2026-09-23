@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { RequestTypeBadge } from '../request-type-badge'
 import type { TFunction } from 'i18next'
 /*
 Copyright (C) 2023-2026 QuantumNous
@@ -771,6 +772,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
+          {props.isAdmin && (
+            <DetailRow label={t('Request type')} value={<RequestTypeBadge classification={adminInfo?.request_classification} />} />
+          )}
+
           {props.isAdmin && adminInfo?.user_agent && (
             <DetailRow
               label={t('User Agent')}
@@ -1132,6 +1137,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 copyable={false}
               />
             }
+          />
+        )}
+
+        {other?.upstream_response_model && (
+          <DetailRow
+            label={t('Upstream reported')}
+            value={other.upstream_response_model}
+            mono
           />
         )}
 

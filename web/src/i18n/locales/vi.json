@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Upstream reported": "Mô hình do upstream báo cáo",
+    "Record and show upstream response model": "Ghi và hiển thị mô hình phản hồi thực tế",
+    "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Mặc định tắt. Hiển thị mô hình được khai báo trong phản hồi upstream dưới nhãn mô hình, không đổi định tuyến hay tính phí. Khi tắt, trường này trong nhật ký cũ cũng được ẩn.",
     "Upstream first response": "Upstream first response",
     "Actual first frame": "Actual first frame",
     "Reported by codex2api (loose). Actual first frame: {{time}}": "Reported by codex2api (loose). Actual first frame: {{time}}",
@@ -5519,5 +5522,13 @@
     "No inviters were recorded for this period.": "Không ghi nhận người giới thiệu nào trong khoảng thời gian này.",
     "Rank": "Hạng",
     "Total inviters": "Tổng số người giới thiệu"
-  }
+  },
+  "Request type": "Loại yêu cầu",
+  "Ingress request type": "Loại yêu cầu đầu vào",
+  "User request": "Yêu cầu người dùng",
+  "Related background": "Tác vụ nền liên quan",
+  "Independent background": "Tác vụ nền độc lập",
+  "Related unclassified": "Liên quan, chưa phân loại",
+  "Compaction": "Nén ngữ cảnh",
+  "Not recorded": "Chưa ghi nhận"
 }

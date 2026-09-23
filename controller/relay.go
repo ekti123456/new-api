@@ -209,6 +209,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	windowRenewed := false
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		common.BeginUpstreamResponseModel(c)
 		common.ClearCodexDispatchDiagnostic(c)
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)

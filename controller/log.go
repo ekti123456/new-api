@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -11,7 +12,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func applyRequestIPVisibility(logs []*model.Log) {
+func applyLogFieldVisibility(logs []*model.Log) {
+	if !common.UpstreamResponseModelLogEnabled.Load() {
+		for _, log := range logs {
+			var other map[string]json.RawMessage
+			if common.UnmarshalJsonStr(log.Other, &other) != nil {
+				continue
+			}
+			_, hasModel := other["upstream_response_model"]
+			_, hasConflict := other["upstream_response_model_conflict"]
+			if hasModel || hasConflict {
+				delete(other, "upstream_response_model")
+				delete(other, "upstream_response_model_conflict")
+				if raw, err := common.Marshal(other); err == nil {
+					log.Other = string(raw)
+				}
+			}
+		}
+	}
 	if common.RequestIPLogEnabled {
 		return
 	}
@@ -37,7 +55,7 @@ func GetAllLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	applyRequestIPVisibility(logs)
+	applyLogFieldVisibility(logs)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -60,7 +78,7 @@ func GetUserLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	applyRequestIPVisibility(logs)
+	applyLogFieldVisibility(logs)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -100,7 +118,7 @@ func GetLogByKey(c *gin.Context) {
 		})
 		return
 	}
-	applyRequestIPVisibility(logs)
+	applyLogFieldVisibility(logs)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",

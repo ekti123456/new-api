@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Upstream reported": "Upstream reported",
+    "Record and show upstream response model": "Record and show upstream response model",
+    "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.",
     "Upstream first response": "Upstream first response",
     "Actual first frame": "Actual first frame",
     "Reported by codex2api (loose). Actual first frame: {{time}}": "Reported by codex2api (loose). Actual first frame: {{time}}",
@@ -5583,5 +5586,13 @@
     "No inviters were recorded for this period.": "No inviters were recorded for this period.",
     "Rank": "Rank",
     "Total inviters": "Total inviters"
-  }
+  },
+  "Request type": "Request type",
+  "Ingress request type": "Ingress request type",
+  "User request": "User request",
+  "Related background": "Related background",
+  "Independent background": "Independent background",
+  "Related unclassified": "Related unclassified",
+  "Compaction": "Compaction",
+  "Not recorded": "Not recorded"
 }

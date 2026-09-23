@@ -54,7 +54,7 @@ func TestRequestIPVisibilityFollowsGlobalAdministratorSetting(t *testing.T) {
 
 	logs := []*model.Log{{Ip: "203.0.113.9"}}
 	common.RequestIPLogEnabled = false
-	applyRequestIPVisibility(logs)
+	applyLogFieldVisibility(logs)
 	assert.Empty(t, logs[0].Ip)
 
 	recorder := httptest.NewRecorder()

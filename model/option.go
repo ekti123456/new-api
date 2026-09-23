@@ -50,6 +50,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["RequestIPLogEnabled"] = strconv.FormatBool(common.RequestIPLogEnabled)
+	common.OptionMap["UpstreamResponseModelLogEnabled"] = strconv.FormatBool(common.UpstreamResponseModelLogEnabled.Load())
 	common.OptionMap["codex_unlinked_account_fallback_enabled"] = "false"
 	common.OptionMap["codex_unlinked_account_fallback_seconds"] = "300"
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
@@ -398,6 +399,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.LogConsumeEnabled = boolValue
 		case "RequestIPLogEnabled":
 			common.RequestIPLogEnabled = boolValue
+		case "UpstreamResponseModelLogEnabled":
+			common.UpstreamResponseModelLogEnabled.Store(boolValue)
 		case "DisplayInCurrencyEnabled":
 			// 兼容旧字段：同步到新配置 general_setting.quota_display_type（运行时生效）
 			// true -> USD, false -> TOKENS

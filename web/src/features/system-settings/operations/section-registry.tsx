@@ -128,6 +128,9 @@ const OPERATIONS_SECTIONS = [
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
         defaultIPLogEnabled={settings.RequestIPLogEnabled !== false}
+        defaultResponseModelLogEnabled={
+          settings.UpstreamResponseModelLogEnabled === true
+        }
       />
     ),
   },

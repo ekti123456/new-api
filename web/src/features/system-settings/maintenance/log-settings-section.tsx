@@ -81,6 +81,7 @@ import type { LogCleanupTask } from '../types'
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
   RequestIPLogEnabled: z.boolean(),
+  UpstreamResponseModelLogEnabled: z.boolean(),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
@@ -88,6 +89,7 @@ type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
 type LogSettingsSectionProps = {
   defaultEnabled: boolean
   defaultIPLogEnabled: boolean
+  defaultResponseModelLogEnabled?: boolean
 }
 
 type ServerLogInfo = {
@@ -144,6 +146,7 @@ function isActiveLogCleanupTask(task: LogCleanupTask | null) {
 export function LogSettingsSection({
   defaultEnabled,
   defaultIPLogEnabled,
+  defaultResponseModelLogEnabled = false,
 }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -152,6 +155,7 @@ export function LogSettingsSection({
     defaultValues: {
       LogConsumeEnabled: defaultEnabled,
       RequestIPLogEnabled: defaultIPLogEnabled,
+      UpstreamResponseModelLogEnabled: defaultResponseModelLogEnabled,
     },
   })
 
@@ -181,8 +185,14 @@ export function LogSettingsSection({
     form.reset({
       LogConsumeEnabled: defaultEnabled,
       RequestIPLogEnabled: defaultIPLogEnabled,
+      UpstreamResponseModelLogEnabled: defaultResponseModelLogEnabled,
     })
-  }, [defaultEnabled, defaultIPLogEnabled, form])
+  }, [
+    defaultEnabled,
+    defaultIPLogEnabled,
+    defaultResponseModelLogEnabled,
+    form,
+  ])
 
   useEffect(() => {
     fetchServerLogInfo()
@@ -267,6 +277,7 @@ export function LogSettingsSection({
     const defaults: LogSettingsFormValues = {
       LogConsumeEnabled: defaultEnabled,
       RequestIPLogEnabled: defaultIPLogEnabled,
+      UpstreamResponseModelLogEnabled: defaultResponseModelLogEnabled,
     }
     const updates = Object.entries(values).filter(
       ([key, value]) => value !== defaults[key as keyof LogSettingsFormValues]
@@ -370,6 +381,33 @@ export function LogSettingsSection({
                 </SettingsSwitchContent>
                 <FormControl>
                   <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+                <FormMessage />
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='UpstreamResponseModelLogEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Record and show upstream response model')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    aria-label={t('Record and show upstream response model')}
                     checked={field.value}
                     onCheckedChange={field.onChange}
                   />

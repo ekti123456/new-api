@@ -23,6 +23,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	}
 
 	info.IsStream = true
+	modelObservation := common.BeginUpstreamResponseModel(c)
 	clientConn := info.ClientWs
 	targetConn := info.TargetWs
 
@@ -115,6 +116,7 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					close(targetClosed)
 					return
 				}
+				modelObservation.Observe(message, "")
 				message = channel.SanitizeCodexDispatchWebSocketMessage(c, message)
 				policyResult := channel.ProcessNewAPIPolicyWebSocketMessage(c, message)
 				info.SetFirstResponseTime()

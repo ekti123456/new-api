@@ -119,6 +119,15 @@ export interface ToolSurchargeItem {
 export interface LogOtherData {
   window_expansion?: { id: string; expanded: boolean; multiplier: number }
   admin_info?: {
+    request_classification?: {
+      type: string
+      ingress_type: string
+      thread_source?: string
+      request_kind?: string
+      subagent_kind?: string
+      root_state?: string
+      related: boolean
+    }
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]
@@ -191,6 +200,8 @@ export interface LogOtherData {
   cache_creation_ratio_1h?: number
   is_model_mapped?: boolean
   upstream_model_name?: string
+  upstream_response_model?: string
+  upstream_response_model_conflict?: boolean
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number
