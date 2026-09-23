@@ -121,6 +121,11 @@ func MaskSensitiveInfo(str string) string {
 
 	// Mask domain names without protocol (like openai.com, www.openai.com)
 	str = maskDomainPattern.ReplaceAllStringFunc(str, func(domain string) string {
+		// This public Codex configuration filename is not an upstream address.
+		// Explicit URLs (including a config.toml host or path) were masked above.
+		if strings.EqualFold(domain, "config.toml") {
+			return domain
+		}
 		return maskHostForPlainDomain(domain)
 	})
 
