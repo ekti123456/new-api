@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { RequestTypeBadge } from '../request-type-badge'
 import type { ColumnDef } from '@tanstack/react-table'
 import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
 import { useState } from 'react'
@@ -61,7 +60,9 @@ import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
+import { RequestTypeBadge } from '../request-type-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
+import { UpstreamErrorDetails } from '../upstream-error-details'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
 interface DetailSegment {
@@ -604,7 +605,14 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       header: t('Request type'),
       cell: ({ row }) => {
         if (!isTimingLogType(row.original.type)) return null
-        return <RequestTypeBadge classification={parseLogOther(row.original.other)?.admin_info?.request_classification} />
+        return (
+          <RequestTypeBadge
+            classification={
+              parseLogOther(row.original.other)?.admin_info
+                ?.request_classification
+            }
+          />
+        )
       },
       meta: { label: t('Request type') },
       size: 160,
@@ -757,7 +765,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           primaryTextClass = 'text-red-600 dark:text-red-400'
         }
         let detailPreview = <span className='text-muted-foreground/40'>—</span>
-        if (primary) {
+        if (isAdmin && other?.admin_info?.upstream_error?.message) {
+          detailPreview = (
+            <UpstreamErrorDetails
+              diagnostic={other.admin_info.upstream_error}
+              isAdmin={isAdmin}
+              compact
+            />
+          )
+        } else if (primary) {
           detailPreview = (
             <span
               className={cn(

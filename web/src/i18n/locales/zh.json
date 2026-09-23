@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "上游错误详情（脱敏）",
+    "Error source": "错误来源",
+    "Failure stage": "失败阶段",
+    "Transport": "传输方式",
+    "Observed upstream HTTP status": "实际上游 HTTP 状态",
+    "Not observed": "未观测到",
+    "Handshake HTTP status": "握手 HTTP 状态",
+    "Gateway Request ID": "网关请求 ID",
     "Upstream reported": "上游自报",
     "Record and show upstream response model": "记录并显示实际响应模型",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "默认关闭。在模型标签下显示上游响应自报的模型，不改变路由或计费。关闭后也会隐藏已有日志中的该字段。",

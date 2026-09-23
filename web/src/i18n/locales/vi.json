@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "Chi tiết lỗi thượng nguồn (đã ẩn thông tin)",
+    "Error code": "Mã lỗi",
+    "Error type": "Loại lỗi",
+    "Error source": "Nguồn lỗi",
+    "Failure stage": "Giai đoạn lỗi",
+    "Transport": "Phương thức truyền",
+    "Observed upstream HTTP status": "Trạng thái HTTP thượng nguồn quan sát được",
+    "Not observed": "Chưa quan sát được",
+    "Handshake HTTP status": "Trạng thái HTTP bắt tay",
+    "Gateway Request ID": "ID yêu cầu cổng",
     "Upstream reported": "Mô hình do upstream báo cáo",
     "Record and show upstream response model": "Ghi và hiển thị mô hình phản hồi thực tế",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Mặc định tắt. Hiển thị mô hình được khai báo trong phản hồi upstream dưới nhãn mô hình, không đổi định tuyến hay tính phí. Khi tắt, trường này trong nhật ký cũ cũng được ẩn.",

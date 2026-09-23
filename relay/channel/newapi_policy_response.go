@@ -189,6 +189,7 @@ func processNewAPIPolicyResponse(c *gin.Context, resp *http.Response) bool {
 
 func processNewAPIPolicyResponseWithContext(c *gin.Context, resp *http.Response, requestContext newAPIPolicyRequestContext) bool {
 	processCodexDispatchHeader(resp, requestContext)
+	processCodexUpstreamErrorHeader(resp, requestContext)
 	if requestContext.Secret == "" || requestContext.RequestID == "" {
 		return false
 	}

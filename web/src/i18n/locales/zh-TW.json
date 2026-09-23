@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "上游錯誤詳情（已遮蔽）",
+    "Error code": "錯誤碼",
+    "Error type": "錯誤類型",
+    "Error source": "錯誤來源",
+    "Failure stage": "失敗階段",
+    "Transport": "傳輸方式",
+    "Observed upstream HTTP status": "實際上游 HTTP 狀態",
+    "Not observed": "未觀測到",
+    "Handshake HTTP status": "交握 HTTP 狀態",
+    "Gateway Request ID": "閘道請求 ID",
     "Upstream reported": "上游自報",
     "Record and show upstream response model": "記錄並顯示實際回應模型",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "預設關閉。在模型標籤下顯示上游回應自報的模型，不改變路由或計費。關閉後也會隱藏既有日誌中的此欄位。",

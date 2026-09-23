@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "Détails de l’erreur en amont (expurgés)",
+    "Error code": "Code d’erreur",
+    "Error type": "Type d’erreur",
+    "Error source": "Source de l’erreur",
+    "Failure stage": "Étape de l’échec",
+    "Transport": "Transport",
+    "Observed upstream HTTP status": "Statut HTTP amont observé",
+    "Not observed": "Non observé",
+    "Handshake HTTP status": "Statut HTTP de négociation",
+    "Gateway Request ID": "ID de requête de passerelle",
     "Upstream reported": "Modèle déclaré en amont",
     "Record and show upstream response model": "Enregistrer et afficher le modèle de réponse amont",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Désactivé par défaut. Affiche le modèle déclaré dans la réponse amont sous son étiquette, sans modifier le routage ni la facturation. Désactiver masque aussi ce champ dans les journaux existants.",

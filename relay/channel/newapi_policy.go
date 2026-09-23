@@ -68,6 +68,7 @@ type newAPIPolicyEnforcementConfig struct {
 }
 
 type newAPIPolicyRequestContext struct {
+	ErrorAttempt    *common2.CodexUpstreamErrorAttempt
 	DispatchAttempt *common2.CodexDispatchAttempt
 	RequestID       string
 	UserID          int
@@ -274,6 +275,7 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	req.Header.Set("X-NewAPI-Policy-Meta", encodedMeta)
 	req.Header.Set("X-NewAPI-Policy-Meta-Signature", newAPIHMAC(binding.Secret, metaCanonical))
 	requestContext := newAPIPolicyRequestContext{
+		ErrorAttempt:    common2.CodexUpstreamErrorAttemptForContext(c),
 		DispatchAttempt: common2.CodexDispatchAttemptForContext(c),
 		RequestID:       requestID, UserID: info.UserId, ClientIP: clientIP,
 		PlatformID: binding.PlatformID, ChannelID: info.ChannelId, Secret: binding.Secret,

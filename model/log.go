@@ -340,6 +340,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	other = appendRequestAdminMetadata(c, other)
 	other = appendUpstreamResponseModel(c, other)
+	other = appendCodexUpstreamError(c, channelId, other)
 	otherStr := common.MapToJsonStr(other)
 	log := &Log{
 		UserId:           userId,
@@ -399,6 +400,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	createdAt := common.GetTimestamp()
 	params.Other = appendRequestAdminMetadata(c, params.Other)
 	params.Other = appendUpstreamResponseModel(c, params.Other)
+	params.Other = appendCodexUpstreamError(c, params.ChannelId, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	log := &Log{
 		UserId:           userId,

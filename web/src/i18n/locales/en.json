@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "Upstream error details (redacted)",
+    "Error source": "Error source",
+    "Failure stage": "Failure stage",
+    "Transport": "Transport",
+    "Observed upstream HTTP status": "Observed upstream HTTP status",
+    "Not observed": "Not observed",
+    "Handshake HTTP status": "Handshake HTTP status",
+    "Gateway Request ID": "Gateway Request ID",
     "Upstream reported": "Upstream reported",
     "Record and show upstream response model": "Record and show upstream response model",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.",

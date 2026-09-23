@@ -107,6 +107,8 @@ type codexDispatchStreamBody struct {
 	continuation bool
 	discard      bool
 	encoded      string
+	errorEncoded string
+	errorData    []byte
 }
 
 func (body *codexDispatchStreamBody) Read(output []byte) (int, error) {
@@ -123,8 +125,9 @@ func (body *codexDispatchStreamBody) Read(output []byte) (int, error) {
 		if err != nil && err != bufio.ErrBufferFull {
 			body.readErr = err
 		}
+		body.observeUpstreamErrorLine(line, continued)
 		if !continued {
-			body.discard = bytes.HasPrefix(line, []byte(": codex2api_dispatch"))
+			body.discard = bytes.HasPrefix(line, []byte(": codex2api_dispatch")) || bytes.HasPrefix(line, []byte(": codex2api_error"))
 			if body.discard {
 				body.encoded = ""
 				if !body.continuation && bytes.HasPrefix(line, []byte(": codex2api_dispatch ")) {
@@ -171,6 +174,7 @@ func codexDispatchFailurePayload(payload []byte) bool {
 }
 
 func SanitizeCodexDispatchWebSocketMessage(ctx *gin.Context, message []byte) []byte {
+	message = sanitizeCodexUpstreamErrorWebSocketMessage(ctx, message)
 	if !gjson.GetBytes(message, "error.details.codex2api_dispatch").Exists() {
 		return message
 	}

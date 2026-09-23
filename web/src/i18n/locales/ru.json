@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "Сведения об ошибке сервера (скрыты секреты)",
+    "Error code": "Код ошибки",
+    "Error type": "Тип ошибки",
+    "Error source": "Источник ошибки",
+    "Failure stage": "Этап сбоя",
+    "Transport": "Транспорт",
+    "Observed upstream HTTP status": "Наблюдаемый HTTP-статус сервера",
+    "Not observed": "Не наблюдался",
+    "Handshake HTTP status": "HTTP-статус рукопожатия",
+    "Gateway Request ID": "ID запроса шлюза",
     "Upstream reported": "Модель в ответе провайдера",
     "Record and show upstream response model": "Записывать и показывать модель ответа провайдера",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "По умолчанию выключено. Показывает модель из ответа провайдера под названием модели, не меняя маршрутизацию или оплату. Отключение также скрывает это поле в существующих журналах.",

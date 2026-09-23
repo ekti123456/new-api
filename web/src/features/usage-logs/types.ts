@@ -119,6 +119,18 @@ export interface ToolSurchargeItem {
 export interface LogOtherData {
   window_expansion?: { id: string; expanded: boolean; multiplier: number }
   admin_info?: {
+    upstream_error?: {
+      message: string
+      code?: string
+      type?: string
+      source: string
+      stage: string
+      transport?: string
+      http_status?: number
+      handshake_status?: number
+      upstream_request_id?: string
+      gateway_request_id?: string
+    }
     request_classification?: {
       type: string
       ingress_type: string

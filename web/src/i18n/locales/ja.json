@@ -1,5 +1,15 @@
 {
   "translation": {
+    "Upstream error details (redacted)": "上流エラーの詳細（機密情報除去済み）",
+    "Error code": "エラーコード",
+    "Error type": "エラー種別",
+    "Error source": "エラー発生元",
+    "Failure stage": "失敗した段階",
+    "Transport": "通信方式",
+    "Observed upstream HTTP status": "確認された上流 HTTP ステータス",
+    "Not observed": "未確認",
+    "Handshake HTTP status": "ハンドシェイク HTTP ステータス",
+    "Gateway Request ID": "ゲートウェイリクエスト ID",
     "Upstream reported": "上流が返したモデル",
     "Record and show upstream response model": "実際の応答モデルを記録・表示",
     "Default off. Show the model declared by upstream responses below the model badge. Does not change routing or billing. Disabling also hides this field in existing logs.": "既定では無効です。上流の応答が宣言したモデルをモデル名の下に表示します。ルーティングや課金は変更しません。無効にすると既存ログのこの項目も非表示になります。",

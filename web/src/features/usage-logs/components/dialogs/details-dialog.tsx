@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { RequestTypeBadge } from '../request-type-badge'
 import type { TFunction } from 'i18next'
 /*
 Copyright (C) 2023-2026 QuantumNous
@@ -90,7 +89,9 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { RequestTypeBadge } from '../request-type-badge'
 import { StreamDeliveryDetails } from '../stream-delivery-details'
+import { UpstreamErrorDetails } from '../upstream-error-details'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -773,7 +774,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
           {props.isAdmin && (
-            <DetailRow label={t('Request type')} value={<RequestTypeBadge classification={adminInfo?.request_classification} />} />
+            <DetailRow
+              label={t('Request type')}
+              value={
+                <RequestTypeBadge
+                  classification={adminInfo?.request_classification}
+                />
+              }
+            />
           )}
 
           {props.isAdmin && adminInfo?.user_agent && (
@@ -825,6 +833,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
+
+        <UpstreamErrorDetails
+          diagnostic={adminInfo?.upstream_error}
+          isAdmin={props.isAdmin}
+        />
 
         {/* Request conversion (admin only, not for refund) */}
         {props.isAdmin && props.log.is_stream && reportedFirstResponse && (
