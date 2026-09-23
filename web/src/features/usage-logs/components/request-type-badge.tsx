@@ -20,12 +20,18 @@ import { useTranslation } from 'react-i18next'
 
 import type { LogOtherData } from '../types'
 
-type RequestClassification = NonNullable<LogOtherData['admin_info']>['request_classification']
+type RequestClassification = NonNullable<
+  LogOtherData['admin_info']
+>['request_classification']
 
-export function RequestTypeBadge(props: { classification?: RequestClassification }) {
+export function RequestTypeBadge(props: {
+  classification?: RequestClassification
+}) {
   const { t } = useTranslation()
   if (!props.classification) {
-    return <span className='text-muted-foreground text-xs'>{t('Not recorded')}</span>
+    return (
+      <span className='text-muted-foreground text-xs'>{t('Not recorded')}</span>
+    )
   }
 
   const labels: Record<string, string> = {
@@ -38,15 +44,37 @@ export function RequestTypeBadge(props: { classification?: RequestClassification
   }
   const label = labels[props.classification.type] ?? t('Unknown')
   const ingress = labels[props.classification.ingress_type] ?? t('Unknown')
-  const source = [props.classification.thread_source, props.classification.subagent_kind].filter(Boolean).join(' / ')
-  const changed = props.classification.ingress_type !== props.classification.type
-  const title = [label, source, changed ? `${t('Ingress request type')}: ${ingress}` : '', props.classification.root_state].filter(Boolean).join('\n')
+  const source = [
+    props.classification.thread_source,
+    props.classification.subagent_kind,
+  ]
+    .filter(Boolean)
+    .join(' / ')
+  const showSource = source && source !== 'user'
+  const changed =
+    props.classification.ingress_type !== props.classification.type
+  const title = [
+    label,
+    source,
+    changed ? `${t('Ingress request type')}: ${ingress}` : '',
+    props.classification.root_state,
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   return (
     <div className='flex max-w-52 flex-col items-start gap-0.5' title={title}>
       <span className='bg-muted rounded px-1.5 py-0.5 text-xs'>{label}</span>
-      {source && <span className='text-muted-foreground max-w-full truncate font-mono text-[10px]'>{source}</span>}
-      {changed && <span className='text-muted-foreground text-[10px]'>{t('Ingress request type')}: {ingress}</span>}
+      {showSource && (
+        <span className='text-muted-foreground max-w-full truncate font-mono text-[10px]'>
+          {source}
+        </span>
+      )}
+      {changed && (
+        <span className='text-muted-foreground text-[10px]'>
+          {t('Ingress request type')}: {ingress}
+        </span>
+      )}
     </div>
   )
 }

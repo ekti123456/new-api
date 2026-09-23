@@ -2098,7 +2098,7 @@
     "footer.columns.related.links.oneApi": "1つのAPI",
     "footer.columns.related.title": "関連プロジェクト",
     "footer.defaultCopyright": "すべての権利を留保します。",
-    "footer.new\u0061pi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
+    "footer.newapi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "2025 年 5 月 10 日以降に追加されたチャネルの場合、デプロイ時にモデル名から「.」を削除する必要はありません",
     "For private deployments, format: https://fastgpt.run/api/openapi": "プライベートデプロイメントの場合、形式: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "構文的に有効な JSON 応答を強制",
@@ -5521,14 +5521,14 @@
     "No referral ranking data": "紹介ランキングのデータがありません",
     "No inviters were recorded for this period.": "この期間に記録された紹介者はいません。",
     "Rank": "順位",
-    "Total inviters": "紹介者総数"
-  },
-  "Request type": "リクエスト種別",
-  "Ingress request type": "受信時のリクエスト種別",
-  "User request": "ユーザーリクエスト",
-  "Related background": "関連バックグラウンド",
-  "Independent background": "独立バックグラウンド",
-  "Related unclassified": "関連・未分類",
-  "Compaction": "圧縮",
-  "Not recorded": "未記録"
+    "Total inviters": "紹介者総数",
+    "Request type": "リクエスト種別",
+    "Ingress request type": "受信時のリクエスト種別",
+    "User request": "ユーザーリクエスト",
+    "Related background": "関連バックグラウンド",
+    "Independent background": "独立バックグラウンド",
+    "Related unclassified": "関連・未分類",
+    "Compaction": "圧縮",
+    "Not recorded": "未記録"
+  }
 }

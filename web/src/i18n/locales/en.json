@@ -2152,7 +2152,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Related Projects",
     "footer.defaultCopyright": "All rights reserved.",
-    "footer.new\u0061pi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
+    "footer.newapi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Force a syntactically valid JSON response",
@@ -5585,14 +5585,14 @@
     "No referral ranking data": "No referral ranking data",
     "No inviters were recorded for this period.": "No inviters were recorded for this period.",
     "Rank": "Rank",
-    "Total inviters": "Total inviters"
-  },
-  "Request type": "Request type",
-  "Ingress request type": "Ingress request type",
-  "User request": "User request",
-  "Related background": "Related background",
-  "Independent background": "Independent background",
-  "Related unclassified": "Related unclassified",
-  "Compaction": "Compaction",
-  "Not recorded": "Not recorded"
+    "Total inviters": "Total inviters",
+    "Request type": "Request type",
+    "Ingress request type": "Ingress request type",
+    "User request": "User request",
+    "Related background": "Related background",
+    "Independent background": "Independent background",
+    "Related unclassified": "Related unclassified",
+    "Compaction": "Compaction",
+    "Not recorded": "Not recorded"
+  }
 }

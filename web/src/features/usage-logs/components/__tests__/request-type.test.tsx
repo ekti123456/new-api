@@ -18,9 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+
 import { createInstance } from 'i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
+
+import zhCN from '@/i18n/locales/zh.json'
 
 import { RequestTypeBadge } from '../request-type-badge'
 
@@ -29,7 +32,15 @@ test('a related request shows its original independent classification and protoc
   await i18n.use(initReactI18next).init({ lng: 'en', resources: {} })
   const html = renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
-      <RequestTypeBadge classification={{ type: 'related_internal', ingress_type: 'independent_internal', thread_source: 'guardian_review', subagent_kind: 'guardian', related: true }} />
+      <RequestTypeBadge
+        classification={{
+          type: 'related_internal',
+          ingress_type: 'independent_internal',
+          thread_source: 'guardian_review',
+          subagent_kind: 'guardian',
+          related: true,
+        }}
+      />
     </I18nextProvider>
   )
   assert.ok(html.includes('Related background'))
@@ -40,16 +51,62 @@ test('a related request shows its original independent classification and protoc
 test('historical logs without recorded classification display not recorded', async () => {
   const i18n = createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: {} })
-  const html = renderToStaticMarkup(<I18nextProvider i18n={i18n}><RequestTypeBadge /></I18nextProvider>)
+  const html = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <RequestTypeBadge />
+    </I18nextProvider>
+  )
   assert.ok(html.includes('Not recorded'))
   assert.ok(!html.includes('User request'))
 })
 
 test('compaction labels follow the selected language and escape source text', async () => {
   const i18n = createInstance()
-  await i18n.use(initReactI18next).init({ lng: 'zh', resources: { zh: { translation: { Compaction: '压缩' } } } })
-  const html = renderToStaticMarkup(<I18nextProvider i18n={i18n}><RequestTypeBadge classification={{ type: 'compaction', ingress_type: 'compaction', thread_source: '<img src=x>', related: false }} /></I18nextProvider>)
+  await i18n.use(initReactI18next).init({ lng: 'zhCN', resources: { zhCN } })
+  const html = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <RequestTypeBadge
+        classification={{
+          type: 'compaction',
+          ingress_type: 'compaction',
+          thread_source: '<img src=x>',
+          related: false,
+        }}
+      />
+    </I18nextProvider>
+  )
   assert.ok(html.includes('压缩'))
   assert.ok(!html.includes('<img src=x>'))
   assert.ok(html.includes('&lt;img'))
+})
+
+test('production Chinese resources translate the admin request column and classifications', async () => {
+  const i18n = createInstance()
+  await i18n.use(initReactI18next).init({ lng: 'zhCN', resources: { zhCN } })
+  assert.equal(i18n.t('Request type'), '请求类型')
+  for (const [type, label] of Object.entries({
+    user: '用户请求',
+    related_internal: '相关后台',
+    independent_internal: '独立后台',
+    compaction: '压缩',
+    related_unclassified: '相关未分类',
+  })) {
+    const html = renderToStaticMarkup(
+      <I18nextProvider i18n={i18n}>
+        <RequestTypeBadge
+          classification={{
+            type,
+            ingress_type: type,
+            thread_source: 'user',
+            related: false,
+          }}
+        />
+      </I18nextProvider>
+    )
+    assert.ok(html.includes(label))
+    assert.ok(
+      !html.includes('>user<'),
+      'a user request should not repeat its raw source below the label'
+    )
+  }
 })

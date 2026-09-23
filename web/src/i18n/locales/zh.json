@@ -2152,7 +2152,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "强制返回语法合法的 JSON",
@@ -5585,14 +5585,14 @@
     "No referral ranking data": "暂无邀新排行数据",
     "No inviters were recorded for this period.": "当前统计周期内暂无邀请人记录。",
     "Rank": "排名",
-    "Total inviters": "邀请人总数"
-  },
-  "Request type": "请求类型",
-  "Ingress request type": "入站请求类型",
-  "User request": "用户请求",
-  "Related background": "相关后台",
-  "Independent background": "独立后台",
-  "Related unclassified": "相关未分类",
-  "Compaction": "压缩",
-  "Not recorded": "未记录"
+    "Total inviters": "邀请人总数",
+    "Request type": "请求类型",
+    "Ingress request type": "入站请求类型",
+    "User request": "用户请求",
+    "Related background": "相关后台",
+    "Independent background": "独立后台",
+    "Related unclassified": "相关未分类",
+    "Compaction": "压缩",
+    "Not recorded": "未记录"
+  }
 }

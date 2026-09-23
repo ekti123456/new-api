@@ -2098,7 +2098,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Projets liés",
     "footer.defaultCopyright": "Tous droits réservés.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
+    "footer.newapi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Pour les canaux ajoutés après le 10 mai 2025, pas besoin de supprimer \".\" des noms de modèles lors du déploiement",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Pour les déploiements privés, format : https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Imposer une réponse JSON syntaxiquement valide",
@@ -5521,14 +5521,14 @@
     "No referral ranking data": "Aucune donnée de classement des parrainages",
     "No inviters were recorded for this period.": "Aucun parrain n’a été enregistré pour cette période.",
     "Rank": "Rang",
-    "Total inviters": "Total des parrains"
-  },
-  "Request type": "Type de requête",
-  "Ingress request type": "Type de requête entrant",
-  "User request": "Requête utilisateur",
-  "Related background": "Tâche de fond liée",
-  "Independent background": "Tâche de fond indépendante",
-  "Related unclassified": "Liée, non classée",
-  "Compaction": "Compactage",
-  "Not recorded": "Non enregistré"
+    "Total inviters": "Total des parrains",
+    "Request type": "Type de requête",
+    "Ingress request type": "Type de requête entrant",
+    "User request": "Requête utilisateur",
+    "Related background": "Tâche de fond liée",
+    "Independent background": "Tâche de fond indépendante",
+    "Related unclassified": "Liée, non classée",
+    "Compaction": "Compactage",
+    "Not recorded": "Non enregistré"
+  }
 }
