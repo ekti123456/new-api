@@ -120,6 +120,10 @@ export function SidebarModulesSection({
       },
     },
     personal: {
+      windows: {
+        title: t('Window management'),
+        description: t('View and manage personal session windows.'),
+      },
       topup: {
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),

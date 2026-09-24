@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Window management": "Управление окнами",
+    "View and manage personal session windows.": "Просмотр личных окон сеансов и управление ими.",
     "Upstream error details (redacted)": "Сведения об ошибке сервера (скрыты секреты)",
     "Error code": "Код ошибки",
     "Error type": "Тип ошибки",

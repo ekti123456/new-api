@@ -69,6 +69,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   },
   personal: {
     enabled: true,
+    windows: true,
     topup: true,
     promotion: true,
     personal: true,

@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Window management": "ウィンドウ管理",
+    "View and manage personal session windows.": "個人のセッションウィンドウを表示・管理します。",
     "Upstream error details (redacted)": "上流エラーの詳細（機密情報除去済み）",
     "Error code": "エラーコード",
     "Error type": "エラー種別",

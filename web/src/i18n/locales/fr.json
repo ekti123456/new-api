@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Window management": "Gestion des fenêtres",
+    "View and manage personal session windows.": "Consulter et gérer les fenêtres de session personnelles.",
     "Upstream error details (redacted)": "Détails de l’erreur en amont (expurgés)",
     "Error code": "Code d’erreur",
     "Error type": "Type d’erreur",

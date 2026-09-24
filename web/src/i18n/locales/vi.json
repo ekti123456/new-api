@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Window management": "Quản lý cửa sổ",
+    "View and manage personal session windows.": "Xem và quản lý các cửa sổ phiên cá nhân.",
     "Upstream error details (redacted)": "Chi tiết lỗi thượng nguồn (đã ẩn thông tin)",
     "Error code": "Mã lỗi",
     "Error type": "Loại lỗi",
