@@ -73,7 +73,7 @@ export function BillingRequestDetails(props: {
       </dl>
       <p className='text-muted-foreground text-xs'>
         {t(
-          'Original request values are retained. Priority can also match a trusted codex2api response; the multiplier is applied once.'
+          'Billing conditions use the original request. Upstream tiers are diagnostic only; default Fast does not trigger a surcharge.'
         )}
       </p>
     </section>
