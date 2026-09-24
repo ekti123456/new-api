@@ -32,8 +32,26 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 	if info != nil {
 		input.Headers = cloneStringMap(info.RequestHeaders)
 	}
+	input.BodySource = "request_unavailable"
+	parsedJSONRequest := false
+	if info != nil {
+		switch info.Request.(type) {
+		case *dto.OpenAIResponsesRequest, *dto.OpenAIResponsesCompactionRequest, *dto.GeneralOpenAIRequest:
+			parsedJSONRequest = true
+		}
+	}
+	if c != nil && c.Request != nil {
+		input.ContentType = c.Request.Header.Get("Content-Type")
+		input.BodySource = "incoming_json"
+		if !isJSONContentType(input.ContentType) {
+			input.BodySource = "content_type_not_json"
+			if parsedJSONRequest {
+				input.BodySource = "incoming_json_inferred"
+			}
+		}
+	}
 
-	bodyBytes, err := readIncomingBillingExprBody(c)
+	bodyBytes, err := readIncomingBillingExprBody(c, parsedJSONRequest)
 	if err != nil {
 		return billingexpr.RequestInput{}, err
 	}
@@ -43,7 +61,7 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 
 func BuildBillingExprRequestInputFromRequest(request dto.Request, headers map[string]string) (billingexpr.RequestInput, error) {
 	input := billingexpr.RequestInput{
-		Headers: cloneStringMap(headers),
+		Headers: cloneStringMap(headers), BodySource: "request_dto",
 	}
 	if request == nil {
 		return input, nil
@@ -57,8 +75,8 @@ func BuildBillingExprRequestInputFromRequest(request dto.Request, headers map[st
 	return input, nil
 }
 
-func readIncomingBillingExprBody(c *gin.Context) ([]byte, error) {
-	if c == nil || c.Request == nil || !isJSONContentType(c.Request.Header.Get("Content-Type")) {
+func readIncomingBillingExprBody(c *gin.Context, parsedJSONRequest bool) ([]byte, error) {
+	if c == nil || c.Request == nil || (!parsedJSONRequest && !isJSONContentType(c.Request.Header.Get("Content-Type"))) {
 		return nil, nil
 	}
 	storage, err := common.GetBodyStorage(c)
@@ -70,8 +88,10 @@ func readIncomingBillingExprBody(c *gin.Context) ([]byte, error) {
 
 func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	input := billingexpr.RequestInput{
-		Headers:   cloneStringMap(src.Headers),
-		ChannelID: src.ChannelID,
+		Headers:     cloneStringMap(src.Headers),
+		ChannelID:   src.ChannelID,
+		BodySource:  src.BodySource,
+		ContentType: src.ContentType,
 	}
 	if len(src.Body) > 0 {
 		input.Body = append([]byte(nil), src.Body...)

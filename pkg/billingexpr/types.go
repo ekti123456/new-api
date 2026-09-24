@@ -11,6 +11,9 @@ type RequestInput struct {
 	Headers   map[string]string
 	Body      []byte
 	ChannelID int
+	// Diagnostic provenance only; expression evaluation still uses Body/Headers.
+	BodySource  string
+	ContentType string
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
