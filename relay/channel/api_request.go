@@ -580,8 +580,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	transportStarted := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		common2.RecordUpstreamTransportError(c, req, err, time.Since(transportStarted))
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
