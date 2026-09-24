@@ -212,6 +212,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		common.BeginUpstreamResponseModel(c)
 		common.ClearCodexDispatchDiagnostic(c)
 		common.ClearCodexUpstreamError(c)
+		common.ClearUpstreamTransportError(c)
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
@@ -467,6 +468,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		if diagnostic, ok := common.GetUpstreamTransportError(c, channelId); ok && err.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+			adminInfo["upstream_error"] = diagnostic
+		}
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
@@ -595,6 +599,7 @@ func RelayTask(c *gin.Context) {
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		common.ClearCodexDispatchDiagnostic(c)
 		common.ClearCodexUpstreamError(c)
+		common.ClearUpstreamTransportError(c)
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
