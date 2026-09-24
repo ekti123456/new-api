@@ -53,13 +53,30 @@ func Distribute() func(c *gin.Context) {
 		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
 			return
 		}
+		// sever defaults to ordinary channel routing for background requests.
+		// Parent discovery and binding are opt-in; original metadata is preserved
+		// for the upstream and must not become a fabricated local root binding.
+		backgroundRootPassThrough := relaychannel.CodexRequestNeedsRootAccountWait(rootSession.ThreadSource) &&
+			!common.GetEnvOrDefaultBool("CODEX_BACKGROUND_ROOT_ROUTING_ENABLED", false)
+		if rootSession.ForkedFromID != "" && strings.EqualFold(rootSession.RootID, rootSession.ThreadID) &&
+			!isKnownCodexInternalThreadSource(rootSession.ThreadSource) {
+			backgroundRootPassThrough = false // A user-owned fork still has normal root routing.
+		}
+		if backgroundRootPassThrough {
+			relaychannel.RecordCodexRootAssociation(c, rootSession.RootID, "routing_disabled", 0)
+		}
 		// A Codex naming request belongs to the user root and must inherit that
 		// root's routing side. The initial thread_title is a fresh ephemeral thread,
 		// while description/reconsideration requests carry an explicit parent graph.
-		if !isCodexNamingRequest(rootSession) && !strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
+		if backgroundRootPassThrough || !isCodexNamingRequest(rootSession) && !strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
 			service.PrepareUserAgentRoutingMode(c, usingGroup)
 		}
-		rootSession, passiveFeature, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
+		var passiveFeature string
+		var strictPassiveRoute bool
+		var passiveRootErr error
+		if !backgroundRootPassThrough {
+			rootSession, passiveFeature, strictPassiveRoute, passiveRootErr = resolveUnlinkedCodexPassiveRoot(c, rootSession)
+		}
 		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
 			return
 		}
@@ -73,7 +90,13 @@ func Distribute() func(c *gin.Context) {
 		}
 		recognizedRootFallbackEligible := canPassThroughRecognizedCodexRoot(c, rootSession)
 		recognizedRootPassThrough := false
-		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+		var rootChannel *model.Channel
+		var rootSelectedGroup string
+		var rootBindingFound bool
+		var rootErr error
+		if !backgroundRootPassThrough {
+			rootChannel, rootSelectedGroup, rootBindingFound, rootErr = prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+		}
 		if recognizedRootFallbackEligible && rootErr == nil && !rootBindingFound && rootChannel == nil {
 			fallbackChannel, fallbackGroup, fallbackKey, fallbackKeyIndex, fallbackFound, fallbackErr := loadUniqueRecognizedCodexPassThroughChannel(c, usingGroup, modelRequest.Model)
 			if fallbackErr != nil {
@@ -329,60 +352,64 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), types.ErrorCodeModelNotFound)
 				return
 			}
-			bindingChanged, bindingClaimed, bindingErr := claimProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
-			if bindingErr != nil {
-				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, bindingErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if bindingClaimed && bindingChanged {
-				winnerErr := errors.New("another request claimed a different Codex root channel binding")
-				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, winnerErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
-				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, aliasErr) {
+			if !backgroundRootPassThrough {
+				bindingChanged, bindingClaimed, bindingErr := claimProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+				if bindingErr != nil {
+					logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, bindingErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
-			if turnBindingErr != nil {
-				logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, turnBindingErr) {
+				if bindingClaimed && bindingChanged {
+					winnerErr := errors.New("another request claimed a different Codex root channel binding")
+					logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, winnerErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
-			if threadBindingErr != nil {
-				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
-				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, threadBindingErr) {
+				if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
+					logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
+					if abortCodexBackgroundRootFailure(c, rootSession, aliasErr) {
+						return
+					}
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
-				common.SysError(fmt.Sprintf("Codex root history publication failed; continuing bound route: user=%d token=%d model=%s request_id=%s reason=%s",
-					common.GetContextKeyInt(c, constant.ContextKeyUserId),
-					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
+				turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
+				if turnBindingErr != nil {
+					logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
+					if abortCodexBackgroundRootFailure(c, rootSession, turnBindingErr) {
+						return
+					}
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
+				_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+				if threadBindingErr != nil {
+					rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
+					logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
+					if abortCodexBackgroundRootFailure(c, rootSession, threadBindingErr) {
+						return
+					}
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
+				if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
+					common.SysError(fmt.Sprintf("Codex root history publication failed; continuing bound route: user=%d token=%d model=%s request_id=%s reason=%s",
+						common.GetContextKeyInt(c, constant.ContextKeyUserId),
+						common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+						modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
+				}
 			}
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
-			recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
-			recordCodexTurnRootBinding(c, rootSession, modelRequest.Model)
-			recordCodexThreadRootBinding(c, rootSession, modelRequest.Model)
-			if promoteErr := promoteCodexPassiveRootAlias(c); promoteErr != nil {
-				logCodexPassiveRouteFailure(c, "promote", modelRequest.Model, rootSession, promoteErr)
+			if !backgroundRootPassThrough {
+				recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+				recordCodexTurnRootBinding(c, rootSession, modelRequest.Model)
+				recordCodexThreadRootBinding(c, rootSession, modelRequest.Model)
+				if promoteErr := promoteCodexPassiveRootAlias(c); promoteErr != nil {
+					logCodexPassiveRouteFailure(c, "promote", modelRequest.Model, rootSession, promoteErr)
+				}
 			}
 		}
 	}

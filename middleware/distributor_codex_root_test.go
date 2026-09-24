@@ -66,6 +66,9 @@ func (*blockFirstCodexCandidateLoadHook) AfterProcessPipeline(context.Context, [
 
 func setupCodexRootDistributorTest(t *testing.T) (*model.Channel, string, string) {
 	t.Helper()
+	// These tests cover the opt-in parent-routing policy. sever's default
+	// passthrough behavior is covered by codex_background_passthrough_test.go.
+	t.Setenv("CODEX_BACKGROUND_ROOT_ROUTING_ENABLED", "true")
 	originalDB := model.DB
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	originalPassiveWaitTimeout := codexUnlinkedPassiveRootWaitTimeout

@@ -1,5 +1,13 @@
 # Codex 无根请求：身份范围与会话前缀
 
+## sever 默认关闭后台父会话路由
+
+`sever` 默认不启用后台请求的父会话归属路由，`CODEX_BACKGROUND_ROOT_ROUTING_ENABLED` 未设置或为 `false` 时生效。后台请求按当前令牌、分组、模型和 UA 规则选择渠道，不查询或等待父会话，不认领、重写或记录父会话绑定。缺少父会话、关联歧义和等待超时不会触发 `codex_background_root_unavailable`。
+
+原始请求头和请求体仍传给上游，NewAPI 身份签名、普通用户主会话绑定、模型权限及其他独立限制继续生效。此开关仅控制 NewAPI 的路由，上游网关仍使用自己的准入规则。
+
+下面的父会话路由规则仅在显式设置 `CODEX_BACKGROUND_ROOT_ROUTING_ENABLED=true` 后启用。
+
 ## 路由规则
 
 - 明确的主会话、父线程、祖先 turn 和 fork 关系继续使用完整 ID 绑定，不用前缀替换。
