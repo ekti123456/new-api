@@ -220,9 +220,9 @@ codex2api 档位回传（main 和 sever）：绑定目标和 API Key 必须匹�
 
 回传位于 Responses 的 `codex2api_billing`（SSE 为 `response.codex2api_billing`），版本为 1，包括执行档位 `service_tier`、依据 `source`、网关有效请求档位 `requested_service_tier`、上游实际档位 `actual_service_tier`、网关本地计费档位 `local_billing_service_tier`。缺少扩展字段时可读取同一可信目标标准响应中的 `service_tier`，供旧版本和 Chat 转换兼容使用。
 
-结算规则为：原始请求 `service_tier` 精确等于 `priority`，或者可信 codex2api 回传执行档位为 `priority`，任一成立就以 `priority` 执行现有表达式一次。原始请求已是 priority 时不会被回传 default 降级；两边同时 priority 也不会叠加成四倍。回填只作用于本次结算副本，不覆盖原始快照，不强制所有模型乘二；实际倍率仍由配置的表达式决定。该副本上的其他 `service_tier` 条件也读取回填后的值。预扣仍按请求估算，结算通过现有余额补退流程处理差额。
+结算仅使用原始请求执行现有表达式，不再根据 codex2api 回传档位补写 `service_tier`。原始请求精确包含 `service_tier: "priority"` 时，配置的 Priority 条件仍正常命中；未传、显式 default 或请求体不可用时，不因上游默认返回 priority/Fast 额外加价。回传的执行档位和网关本地计费档位均仅供诊断；预扣和结算保持同一请求口径，实际倍率继续由表达式决定。
 
-管理员诊断保留原始 `service_tier`，并另记 `codex2api` 回传、`effective_service_tier` 和 `priority_match_source`（`request` / `codex2api` / `none`）。条件乘数的命中状态来自最终表达式执行结果。codex2api 的本地计费策略未改变，因此其 `local_billing_service_tier` 可以是 default，而 NewAPI 按回传执行档位 priority 命中；日志分别显示两者。
+管理员诊断保留原始 `service_tier`，并另记 `codex2api` 回传、`effective_service_tier` 和 `priority_match_source`（新记录仅 `request` / `none`）。历史记录中的 `codex2api` 来源保留展示，不篡改历史命中状态或账单。上游实际 priority、网关本地计费 default、用户未请求 Priority 可以同时成立；这些字段应分别展示，不能将默认执行档位解释为用户的加价请求。
 
 ---
 

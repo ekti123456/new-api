@@ -50,7 +50,7 @@ func TestTieredSettlementLogKeepsActualRequestRuleMatches(test *testing.T) {
 	assert.NotContains(test, failedSettlement, "request_rule_matches")
 }
 
-func TestTieredCodexBillingPriorityFallbackPreservesOriginalAndAppliesOnce(t *testing.T) {
+func TestTieredCodexBillingUsesOriginalRequestAndNeverChargesDefaultPriority(t *testing.T) {
 	expression := `tier("gpt", p * 5 + c * 30 + cr * 0.5 + cc * 6.25) * (param("service_tier") == "priority" ? 2 : 1)`
 	for _, tc := range []struct {
 		name, body, reported, source string
@@ -59,9 +59,10 @@ func TestTieredCodexBillingPriorityFallbackPreservesOriginalAndAppliesOnce(t *te
 		{"original priority", `{"service_tier":"priority"}`, "", "request", true},
 		{"original wins downgrade", `{"service_tier":"priority"}`, "default", "request", true},
 		{"both priority only once", `{"service_tier":"priority"}`, "priority", "request", true},
-		{"missing fallback", `{}`, "priority", "codex2api", true},
-		{"fast fallback", `{"service_tier":"fast"}`, "priority", "codex2api", true},
-		{"empty capture fallback", ``, "priority", "codex2api", true},
+		{"upstream default priority is not requested", `{}`, "priority", "none", false},
+		{"fast does not become literal priority", `{"service_tier":"fast"}`, "priority", "none", false},
+		{"empty capture cannot establish intent", ``, "priority", "none", false},
+		{"explicit default stays default", `{"service_tier":"default"}`, "priority", "none", false},
 		{"no report", `{}`, "", "none", false},
 		{"default report", `{}`, "default", "none", false},
 		{"fast alone unchanged", `{"service_tier":"fast"}`, "", "none", false},
@@ -73,7 +74,7 @@ func TestTieredCodexBillingPriorityFallbackPreservesOriginalAndAppliesOnce(t *te
 			}
 			if tc.reported != "" {
 				info.CodexBilling = &relaycommon.CodexBillingObservation{}
-				info.CodexBilling.Record(relaycommon.CodexBillingReport{ServiceTier: tc.reported, Source: "upstream_response", ActualServiceTier: tc.reported})
+				info.CodexBilling.Record(relaycommon.CodexBillingReport{ServiceTier: tc.reported, Source: "upstream_response", ActualServiceTier: tc.reported, LocalBillingServiceTier: tc.reported})
 			}
 			applied, quota, result := TryTieredSettle(info, billingexpr.TokenParams{P: 68, C: 3673, CR: 106870, CC: 520, Len: 107458})
 			require.True(t, applied)
@@ -87,6 +88,9 @@ func TestTieredCodexBillingPriorityFallbackPreservesOriginalAndAppliesOnce(t *te
 			require.Equal(t, tc.source, info.BillingRequestDiagnostic.PriorityMatchSource)
 			original := relaycommon.CaptureBillingRequestDiagnostic(info.BillingRequestInput)
 			require.Equal(t, original.ServiceTier, info.BillingRequestDiagnostic.ServiceTier)
+			if tc.reported != "" {
+				require.Equal(t, tc.reported, info.BillingRequestDiagnostic.Codex2API.ServiceTier, "retain observation without affecting the charge")
+			}
 			other := map[string]interface{}{}
 			InjectTieredBillingInfo(other, info, result)
 			data, err := common.Marshal(other)

@@ -9,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // TieredResultWrapper wraps billingexpr.TieredResult for use at the service layer.
@@ -214,16 +213,9 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	}
 	if gjson.GetBytes(requestInput.Body, "service_tier").String() == "priority" {
 		diagnostic.PriorityMatchSource = "request"
-	} else if diagnostic.Codex2API != nil && diagnostic.Codex2API.ServiceTier == "priority" {
-		body := requestInput.Body
-		if len(body) == 0 {
-			body = []byte(`{}`)
-		}
-		if updated, err := sjson.SetBytes(body, "service_tier", "priority"); err == nil {
-			requestInput.Body = updated
-			diagnostic.EffectiveServiceTier, diagnostic.PriorityMatchSource = "priority", "codex2api"
-		}
 	}
+	// An upstream may assign Priority by default. Observations are diagnostic
+	// only; they must never turn an ordinary request into a higher charge.
 
 	tr, err := billingexpr.ComputeTieredQuotaWithRequest(snap, params, requestInput)
 	if err != nil {

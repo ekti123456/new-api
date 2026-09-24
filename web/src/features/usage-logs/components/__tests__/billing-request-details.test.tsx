@@ -56,7 +56,7 @@ test('old records do not invent an inbound value and non-admin viewers cannot se
   )
 })
 
-test('trusted priority fallback displays execution, local billing and unchanged user tier separately', async () => {
+test('default upstream priority is displayed separately without claiming a billing match', async () => {
   const translations = createInstance()
   await translations
     .use(initReactI18next)
@@ -69,7 +69,7 @@ test('trusted priority fallback displays execution, local billing and unchanged 
           source: 'incoming_json',
           content_type: 'application/json',
           body_state: 'json',
-          service_tier: { state: 'string', value: 'fast' },
+          service_tier: { state: 'absent' },
           codex2api: {
             service_tier: 'priority',
             source: 'upstream_response',
@@ -77,17 +77,16 @@ test('trusted priority fallback displays execution, local billing and unchanged 
             local_billing_service_tier: 'default',
             protocol: 'codex2api_billing_v1',
           },
-          effective_service_tier: 'priority',
-          priority_match_source: 'codex2api',
+          priority_match_source: 'none',
         }}
       />
     </I18nextProvider>
   )
-  assert.ok(html.includes('&quot;fast&quot;'))
-  assert.ok(html.includes('&quot;priority&quot;'))
+  assert.ok(html.includes('未传此字段'))
+  assert.ok(!html.includes('最终计费匹配档位'))
   assert.ok(html.includes('codex2api 执行档位'))
   assert.ok(html.includes('codex2api 本地计费档位'))
   assert.ok(html.includes('default'))
-  assert.ok(html.includes('codex2api 回传'))
-  assert.ok(html.includes('倍率只应用一次'))
+  assert.ok(html.includes('未匹配 Priority'))
+  assert.ok(html.includes('上游默认 Fast 不会触发加价'))
 })

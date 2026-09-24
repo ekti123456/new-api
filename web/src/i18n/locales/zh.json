@@ -7,7 +7,7 @@
     "codex2api local billing tier": "codex2api 本地计费档位",
     "Effective billing service tier": "最终计费匹配档位",
     "Priority tier source": "Priority 档位来源",
-    "Original request values are retained. Priority can also match a trusted codex2api response; the multiplier is applied once.": "保留用户原始请求值；也可根据可信 codex2api 回传匹配 Priority，倍率只应用一次。",
+    "Billing conditions use the original request. Upstream tiers are diagnostic only; default Fast does not trigger a surcharge.": "计费条件仅读取用户原始请求；上游档位仅供诊断，上游默认 Fast 不会触发加价。",
     "Inbound billing parameters": "入站计费参数",
     "Field not provided": "未传此字段",
     "Billing request body unavailable": "计费请求体未读取",
