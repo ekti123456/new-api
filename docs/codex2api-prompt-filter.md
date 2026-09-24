@@ -33,6 +33,12 @@ try { ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').T
 
 Codex2API 的 Prompt Filter 总开关、运行模式与绑定的 `require_signed_identity` 仍需在 Codex2API 侧按部署策略配置。NewAPI 发送的 `mode`、`profile` 只是已签名审计元数据，不覆盖 Codex2API 的全局 GuardPipeline 策略。
 
+## 管理员保留上游来源文字
+
+向匹配签名绑定的 codex2api 渠道发起请求时，NewAPI 根据服务端认证的令牌所属用户身份，自动为启用状态的管理员和 Root 用户在策略元数据中加入 `preserve_upstream_source: true`。普通用户不发送该字段。无需在 Codex 客户端加配置，也不信任客户端自报角色、请求头或正文中的同名开关。
+
+配套 codex2api 验签后，保留模型回答、代码块、链接和工具参数中的 BPS 来源文字及地址，避免网关把技术说明或待执行代码里的地址改写成 Codex 地址；账号凭据、会话身份映射和公开错误过滤仍按原策略处理。两端均需更新；已有 WebSocket 长连接需要重新连接。未配置签名绑定、签名无效或仍使用旧版接收端时，不获得此豁免。
+
 ## Codex 独立搜索接口
 
 `/v1/alpha/search` 是 Codex 独立搜索请求。除了原有 NewAPI、Sub2API、Codex 和 AdvancedCustom 渠道，普通 OpenAI 渠道在其最终请求地址和当前 Key 命中已启用的 Codex2API 策略绑定时也允许转发。路径前缀绑定检查使用 Base URL 拼接请求路径后的地址，因此绑定到 `/v1` 时也能正确识别。绑定沿用本页配置，不根据域名包含 `codex`、客户端请求头或分组名称猜测提供商。

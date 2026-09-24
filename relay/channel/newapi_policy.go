@@ -84,6 +84,10 @@ type newAPIPolicyRequestContextKey struct{}
 const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
+	// Only the authenticated user's server-side role may enable this signed
+	// exemption. It preserves source addresses in model output, not credentials.
+	PreserveUpstreamSource bool `json:"preserve_upstream_source,omitempty"`
+
 	WindowGrant      string `json:"window_grant,omitempty"`
 	PlatformID       string `json:"platform_id"`
 	UserName         string `json:"user_name,omitempty"`
@@ -197,6 +201,9 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	}, "\n")
 
 	meta := newAPIPolicyMeta{
+		PreserveUpstreamSource: common2.GetContextKeyInt(c, constant.ContextKeyUserId) == info.UserId &&
+			common2.GetContextKeyInt(c, constant.ContextKeyUserStatus) == common2.UserStatusEnabled &&
+			common2.GetContextKeyInt(c, constant.ContextKeyUserRole) >= common2.RoleAdminUser,
 		PlatformID:         binding.PlatformID,
 		UserName:           common2.GetContextKeyString(c, constant.ContextKeyUserName),
 		UserEmail:          info.UserEmail,

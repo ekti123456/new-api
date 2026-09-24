@@ -60,6 +60,7 @@ const (
 	ContextKeyUserSetting ContextKey = "user_setting"
 	ContextKeyUserQuota   ContextKey = "user_quota"
 	ContextKeyUserStatus  ContextKey = "user_status"
+	ContextKeyUserRole    ContextKey = "user_role"
 	ContextKeyUserEmail   ContextKey = "user_email"
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
