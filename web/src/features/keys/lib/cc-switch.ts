@@ -16,14 +16,42 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+function isLocalHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname) ||
+    hostname === '[::1]' ||
+    hostname === '0.0.0.0'
+  )
+}
+
 export function buildCCSwitchURL(
   app: string,
   name: string,
   models: Record<string, string>,
   apiKey: string,
-  serverAddress: string
+  serverAddress: string,
+  pageOrigin?: string
 ): string {
-  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
+  let address = serverAddress.trim().replace(/\/+$/, '')
+  if (pageOrigin) {
+    try {
+      const configuredURL = new URL(address)
+      // ServerAddress defaults to localhost on new deployments. Do not
+      // export that placeholder to clients visiting a remote instance.
+      if (
+        !['http:', 'https:'].includes(configuredURL.protocol) ||
+        (isLocalHostname(configuredURL.hostname) &&
+          !isLocalHostname(new URL(pageOrigin).hostname))
+      ) {
+        address = pageOrigin
+      }
+    } catch {
+      address = pageOrigin
+    }
+  }
+  const endpoint = app === 'codex' ? `${address}/v1` : address
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
@@ -34,7 +62,7 @@ export function buildCCSwitchURL(
   for (const [k, v] of Object.entries(models)) {
     if (v) params.set(k, v)
   }
-  params.set('homepage', serverAddress)
+  params.set('homepage', address)
   params.set('enabled', 'true')
   return `ccswitch://v1/import?${params.toString()}`
 }

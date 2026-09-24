@@ -65,3 +65,98 @@ for (const app of ['claude', 'gemini']) {
     })
   })
 }
+
+for (const app of ['codex', 'claude', 'gemini']) {
+  test(`${app} import replaces the default localhost address with the visited site`, () => {
+    const url = new URL(
+      buildCCSwitchURL(
+        app,
+        `My ${app}`,
+        { model: 'test-model' },
+        'sk-test',
+        'http://localhost:3000',
+        'https://gateway.example.com'
+      )
+    )
+    assert.equal(
+      url.searchParams.get('homepage'),
+      'https://gateway.example.com'
+    )
+    assert.equal(
+      url.searchParams.get('endpoint'),
+      app === 'codex'
+        ? 'https://gateway.example.com/v1'
+        : 'https://gateway.example.com'
+    )
+    assert.equal(
+      url.searchParams.get('name'),
+      app === 'codex' ? 'OpenAI' : `My ${app}`
+    )
+  })
+}
+
+for (const address of [
+  'http://127.0.0.1:3000',
+  'http://[::1]:3000',
+  'http://0.0.0.0:3000',
+  '',
+  'not a URL',
+  'javascript:alert(1)',
+]) {
+  test(`Codex import falls back to the visited site for ${address || 'an empty address'}`, () => {
+    const url = new URL(
+      buildCCSwitchURL(
+        'codex',
+        'OpenAI',
+        {},
+        'sk-test',
+        address,
+        'https://gateway.example.com'
+      )
+    )
+    assert.equal(
+      url.searchParams.get('homepage'),
+      'https://gateway.example.com'
+    )
+    assert.equal(
+      url.searchParams.get('endpoint'),
+      'https://gateway.example.com/v1'
+    )
+  })
+}
+
+test('a configured API domain and path take priority over the visited site without duplicate slashes', () => {
+  const url = new URL(
+    buildCCSwitchURL(
+      'codex',
+      'OpenAI',
+      {},
+      'sk-test',
+      ' https://api.example.com/proxy/ ',
+      'https://portal.example.com'
+    )
+  )
+  assert.equal(
+    url.searchParams.get('homepage'),
+    'https://api.example.com/proxy'
+  )
+  assert.equal(
+    url.searchParams.get('endpoint'),
+    'https://api.example.com/proxy/v1'
+  )
+})
+
+test('local deployments preserve an explicitly configured loopback server', () => {
+  const url = new URL(
+    buildCCSwitchURL(
+      'codex',
+      'OpenAI',
+      {},
+      'sk-test',
+      'http://localhost:3000',
+      'http://localhost:5173'
+    )
+  )
+  assert.equal(url.searchParams.get('homepage'), 'http://localhost:3000')
+  assert.equal(url.searchParams.get('endpoint'), 'http://localhost:3000/v1')
+})

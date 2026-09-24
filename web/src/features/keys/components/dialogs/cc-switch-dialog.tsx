@@ -63,7 +63,9 @@ function getServerAddress(): string {
     const raw = localStorage.getItem('status')
     if (raw) {
       const status = JSON.parse(raw)
-      if (status.server_address) return status.server_address
+      if (typeof status?.server_address === 'string') {
+        return status.server_address
+      }
     }
   } catch {
     /* empty */
@@ -123,7 +125,14 @@ export function CCSwitchDialog(props: Props) {
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key, getServerAddress())
+    const url = buildCCSwitchURL(
+      app,
+      name,
+      models,
+      key,
+      getServerAddress(),
+      window.location.origin
+    )
     window.open(url, '_blank')
     props.onOpenChange(false)
   }
