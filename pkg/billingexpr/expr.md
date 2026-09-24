@@ -212,6 +212,18 @@ Frontend: Detects `billing_mode === "tiered_expr"`, decodes `expr_b64`, parses t
 
 请求条件乘数在表达式执行过程中同步记录条件判断结果，结算通过 `request_rule_matches` 写入日志 `other`。每项包含规则表达式 `expression` 及布尔值 `matched`，不保存请求正文、请求头值，也不在展示时重算条件。新日志显示「已命中 / 未命中」；历史日志或结算失败而无记录时显示「未记录命中状态」，不能根据模型名称、最终倍率或当前时间推断历史命中。追踪不改变表达式的数值、短路行为和计费结果。
 
+管理员日志额外保存 `other.admin_info.billing_request`，记录结算实际使用的请求快照来源、请求体是否可用、Content-Type 的媒体类型，以及顶层 `service_tier` 的存在状态和已知档位字符串原值。大小写、空格、空字符串、null 和缺失分别保留/标注；`serviceTier` 驼峰字段存在时另列，不能冒充 `service_tier`。任意非标准字符串仅标注脱敏，不记录提示词、工具、任意请求头或完整请求体。诊断在结算执行时冻结，日志展示时不读取后续被改写的请求，也不重新计算规则匹配结果。非管理员接口移除整个 `admin_info`；旧记录没有该诊断时不猜测用户原始值。
+
+`param("service_tier") == "priority"` 在原始请求上的比较保持大小写敏感；仅传 `fast`、`Priority` 或 `serviceTier` 不算直接命中。渠道的字段过滤发生在出站副本上，不会删除已冻结的入站计费参数。对于已经按 Responses、Compact 或 Chat JSON DTO 解析成功的请求，即使 Content-Type 缺失或不标准也从原始缓存正文提取计费参数，并标记 `incoming_json_inferred`。其他未读取正文的非 JSON 路径继续标记 `content_type_not_json` / `unavailable`，不能解释为用户未传。
+
+codex2api 档位回传（main 和 sever）：绑定目标和 API Key 必须匹配策略配置，而且本次出站请求必须带有匹配请求、渠道和用户 ID 的内部签名上下文。仅接受 HTTP 200 的有效 JSON 或成功/不完整终态 Responses SSE；失败事件、任意工具文本、未知版本和不一致元数据均不采纳。观察在协议转换前进行，不依赖模型日志开关、不改写客户端响应，重试时重新创建观察状态。单事件或 JSON 超过 2 MiB 时跳过回传观察，仍保留原始请求计费。
+
+回传位于 Responses 的 `codex2api_billing`（SSE 为 `response.codex2api_billing`），版本为 1，包括执行档位 `service_tier`、依据 `source`、网关有效请求档位 `requested_service_tier`、上游实际档位 `actual_service_tier`、网关本地计费档位 `local_billing_service_tier`。缺少扩展字段时可读取同一可信目标标准响应中的 `service_tier`，供旧版本和 Chat 转换兼容使用。
+
+结算规则为：原始请求 `service_tier` 精确等于 `priority`，或者可信 codex2api 回传执行档位为 `priority`，任一成立就以 `priority` 执行现有表达式一次。原始请求已是 priority 时不会被回传 default 降级；两边同时 priority 也不会叠加成四倍。回填只作用于本次结算副本，不覆盖原始快照，不强制所有模型乘二；实际倍率仍由配置的表达式决定。该副本上的其他 `service_tier` 条件也读取回填后的值。预扣仍按请求估算，结算通过现有余额补退流程处理差额。
+
+管理员诊断保留原始 `service_tier`，并另记 `codex2api` 回传、`effective_service_tier` 和 `priority_match_source`（`request` / `codex2api` / `none`）。条件乘数的命中状态来自最终表达式执行结果。codex2api 的本地计费策略未改变，因此其 `local_billing_service_tier` 可以是 default，而 NewAPI 按回传执行档位 priority 命中；日志分别显示两者。
+
 ---
 
 ## Key Design Decisions

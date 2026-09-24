@@ -89,6 +89,7 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { BillingRequestDetails } from '../billing-request-details'
 import { RequestTypeBadge } from '../request-type-badge'
 import { StreamDeliveryDetails } from '../stream-delivery-details'
 import { UpstreamErrorDetails } from '../upstream-error-details'
@@ -890,6 +891,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        <BillingRequestDetails
+          diagnostic={other?.admin_info?.billing_request}
+          isAdmin={props.isAdmin}
+        />
         {/* Quota saturation marker (admin only) */}
         {props.isAdmin && other?.admin_info?.quota_saturation && (
           <DetailSection

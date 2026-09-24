@@ -119,6 +119,23 @@ export interface ToolSurchargeItem {
 export interface LogOtherData {
   window_expansion?: { id: string; expanded: boolean; multiplier: number }
   admin_info?: {
+    billing_request?: {
+      source: string
+      content_type: string
+      body_state: string
+      service_tier: BillingTierFieldDiagnostic
+      service_tier_camel_case?: BillingTierFieldDiagnostic
+      effective_service_tier?: string
+      priority_match_source?: string
+      codex2api?: {
+        service_tier: string
+        source: string
+        requested_service_tier?: string
+        actual_service_tier?: string
+        local_billing_service_tier?: string
+        protocol: string
+      }
+    }
     upstream_error?: {
       message: string
       code?: string
@@ -288,6 +305,12 @@ export interface LogOtherData {
   subscription_consumed?: number
   subscription_remain?: number
   subscription_total?: number
+}
+
+export interface BillingTierFieldDiagnostic {
+  state: string
+  value?: string
+  redacted?: boolean
 }
 
 /**

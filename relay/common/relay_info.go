@@ -178,8 +178,10 @@ type RelayInfo struct {
 	// TieredBillingSnapshot captures tiered billing rules at pre-consume time.
 	// Auto-group retries refresh its group-dependent fields before each attempt
 	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
-	TieredBillingSnapshot *billingexpr.BillingSnapshot
-	BillingRequestInput   *billingexpr.RequestInput
+	TieredBillingSnapshot    *billingexpr.BillingSnapshot
+	BillingRequestInput      *billingexpr.RequestInput
+	BillingRequestDiagnostic *BillingRequestDiagnostic
+	CodexBilling             *CodexBillingObservation
 
 	Request dto.Request
 

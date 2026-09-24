@@ -15,17 +15,22 @@ const responseModelObservationLimit = 2 << 20
 
 type responseModelBody struct {
 	io.ReadCloser
-	observation   *common.UpstreamResponseModelObservation
-	sse           bool
-	buffer        []byte
-	data          []byte
-	event         string
-	overflow      bool
-	eventOverflow bool
+	observation     *common.UpstreamResponseModelObservation
+	billingObserver func([]byte, string)
+	sse             bool
+	buffer          []byte
+	data            []byte
+	event           string
+	overflow        bool
+	eventOverflow   bool
 }
 
-func observeResponseModelBody(resp *http.Response, observation *common.UpstreamResponseModelObservation) {
-	if observation == nil || resp == nil || resp.Body == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+func observeResponseModelBody(resp *http.Response, observation *common.UpstreamResponseModelObservation, billing ...func([]byte, string)) {
+	var billingObserver func([]byte, string)
+	if len(billing) > 0 {
+		billingObserver = billing[0]
+	}
+	if (observation == nil && billingObserver == nil) || resp == nil || resp.Body == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return
 	}
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
@@ -33,12 +38,21 @@ func observeResponseModelBody(resp *http.Response, observation *common.UpstreamR
 	if !sse && !strings.Contains(contentType, "json") && contentType != "" {
 		return
 	}
-	resp.Body = &responseModelBody{ReadCloser: resp.Body, observation: observation, sse: sse}
+	resp.Body = &responseModelBody{ReadCloser: resp.Body, observation: observation, billingObserver: billingObserver, sse: sse}
+}
+
+func (b *responseModelBody) observe(data []byte, event string) {
+	if b.observation != nil && common.UpstreamResponseModelLogEnabled.Load() {
+		b.observation.Observe(data, event)
+	}
+	if b.billingObserver != nil {
+		b.billingObserver(data, event)
+	}
 }
 
 func (b *responseModelBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if !common.UpstreamResponseModelLogEnabled.Load() {
+	if !common.UpstreamResponseModelLogEnabled.Load() && b.billingObserver == nil {
 		b.buffer, b.data = nil, nil
 		return n, err
 	}
@@ -49,7 +63,7 @@ func (b *responseModelBody) Read(p []byte) (int, error) {
 			b.buffer, b.overflow = nil, true
 		}
 		if err == io.EOF && !b.overflow {
-			b.observation.Observe(b.buffer, "")
+			b.observe(b.buffer, "")
 			b.buffer = nil
 		}
 		return n, err
@@ -104,7 +118,7 @@ func (b *responseModelBody) finishLine() {
 
 func (b *responseModelBody) finishEvent() {
 	if !b.eventOverflow && len(b.data) > 0 {
-		b.observation.Observe(b.data, b.event)
+		b.observe(b.data, b.event)
 	}
 	b.data, b.event, b.eventOverflow = b.data[:0], "", false
 }

@@ -543,6 +543,7 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 }
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	modelObservation := common2.BeginUpstreamResponseModel(c)
+	info.CodexBilling = nil
 	info.CodexUpstreamFirstResponse = nil
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
@@ -588,7 +589,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, errors.New("resp is nil")
 	}
 	captureCodexFirstResponse(resp, info, time.Now())
-	observeResponseModelBody(resp, modelObservation)
+	observeResponseModelBody(resp, modelObservation, newCodexBillingObserver(resp, info))
 	if common2.DebugEnabled {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
 		logger.LogDebug(c, fmt.Sprintf(
