@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "使用者並行限制已關閉，主請求和背景請求均不受此並行上限限制；已設定的數值會保留。",
     "Upstream error details (redacted)": "上游錯誤詳情（已遮蔽）",
     "Error code": "錯誤碼",
     "Error type": "錯誤類型",

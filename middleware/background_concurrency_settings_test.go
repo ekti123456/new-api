@@ -81,3 +81,65 @@ func TestBackgroundConcurrencyConfiguredLimitAndPoolIsolation(test *testing.T) {
 		})
 	}
 }
+
+func TestBackgroundConcurrencyFollowsGlobalSwitchWithFullPools(test *testing.T) {
+	for _, backend := range []string{"memory", "redis"} {
+		test.Run(backend, func(test *testing.T) {
+			previousRedis, previousClient := common.RedisEnabled, common.RDB
+			previousEnabled := setting.ModelRequestConcurrencyLimitEnabled
+			previousLimit := setting.GetBackgroundUserConcurrencyLimit()
+			common.RedisEnabled = backend == "redis"
+			require.NoError(test, setting.UpdateBackgroundUserConcurrencyLimit("5"))
+			resetLocalUserConcurrencyForTest()
+			test.Cleanup(func() {
+				common.RedisEnabled, common.RDB = previousRedis, previousClient
+				setting.ModelRequestConcurrencyLimitEnabled = previousEnabled
+				require.NoError(test, setting.UpdateBackgroundUserConcurrencyLimit(strconv.Itoa(previousLimit)))
+				resetLocalUserConcurrencyForTest()
+			})
+			if common.RedisEnabled {
+				server := miniredis.RunT(test)
+				client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+				common.RDB = client
+				test.Cleanup(func() { _ = client.Close() })
+			}
+			for index := 0; index < 5; index++ {
+				acquired, err := acquireUserConcurrency(test.Context(), 42, 5, fmt.Sprintf("held-%d", index), true)
+				require.NoError(test, err)
+				require.True(test, acquired)
+			}
+			acquired, err := acquireUserConcurrency(test.Context(), 42, 1, "held-main")
+			require.NoError(test, err)
+			require.True(test, acquired)
+			router := gin.New()
+			router.Use(func(request *gin.Context) {
+				request.Set("id", 42)
+				common.SetContextKey(request, constant.ContextKeyUserConcurrencyLimit, 1)
+				defer common.CleanupBodyStorage(request)
+				request.Next()
+			})
+			router.Use(ModelRequestConcurrencyLimit())
+			router.POST("/v1/responses", func(request *gin.Context) {
+				active, err := GetUserCurrentConcurrency(test.Context(), 42)
+				require.NoError(test, err)
+				assert.Equal(test, 7, active, "disabled limits still track running requests")
+				request.Status(http.StatusOK)
+			})
+			for _, enabled := range []bool{true, false, true} {
+				setting.ModelRequestConcurrencyLimitEnabled = enabled
+				background, _ := codexUnlinkedNativeTitleContext(42, 7, "01a04915-6f27-7f10-b723-88683446062f")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, background.Request)
+				if enabled {
+					assert.Equal(test, http.StatusTooManyRequests, response.Code, response.Body.String())
+					assert.Contains(test, response.Body.String(), "后台请求并发已达到上限（5）")
+				} else {
+					assert.Equal(test, http.StatusOK, response.Code, response.Body.String())
+				}
+				occupied, err := GetUserOccupiedConcurrency(test.Context(), 42)
+				require.NoError(test, err)
+				assert.Equal(test, 6, occupied, "completed background request leaves no slot or cooldown")
+			}
+		})
+	}
+}

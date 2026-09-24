@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.",
     "Upstream error details (redacted)": "Upstream error details (redacted)",
     "Error source": "Error source",
     "Failure stage": "Failure stage",

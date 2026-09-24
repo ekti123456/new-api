@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "Đã tắt giới hạn đồng thời theo người dùng cho cả yêu cầu chính và yêu cầu nền. Các giá trị đã lưu được giữ nguyên.",
     "Window management": "Quản lý cửa sổ",
     "View and manage personal session windows.": "Xem và quản lý các cửa sổ phiên cá nhân.",
     "Upstream error details (redacted)": "Chi tiết lỗi thượng nguồn (đã ẩn thông tin)",

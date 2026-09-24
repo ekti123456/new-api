@@ -127,6 +127,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
     mode: 'onChange', // Enable real-time validation
     defaultValues,
   })
+  const concurrencyEnabled = form.watch('ModelRequestConcurrencyLimitEnabled')
 
   useEffect(() => {
     form.reset(defaultValues)
@@ -233,6 +234,13 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                     {t(
                       'Limit active model requests per user. Streaming and WebSocket requests keep a slot until the connection ends.'
                     )}
+                    {!concurrencyEnabled && (
+                      <span className='mt-1 block'>
+                        {t(
+                          'User concurrency limiting is off. Main and background limits are inactive; saved values are retained.'
+                        )}
+                      </span>
+                    )}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>
@@ -258,6 +266,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                     max={100000}
                     step={1}
                     {...field}
+                    disabled={!concurrencyEnabled}
                     onChange={(e) =>
                       field.onChange(Number.parseInt(e.target.value) || 1)
                     }
@@ -285,6 +294,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                     step={1}
                     className='max-w-sm'
                     {...field}
+                    disabled={!concurrencyEnabled}
                     value={Number.isFinite(field.value) ? field.value : ''}
                     onChange={(event) =>
                       field.onChange(event.target.valueAsNumber)
@@ -318,6 +328,7 @@ export function RateLimitSection({ defaultValues }: RateLimitSectionProps) {
                       max={60}
                       step={1}
                       {...field}
+                      disabled={!concurrencyEnabled}
                       onChange={(e) =>
                         field.onChange(Number.parseInt(e.target.value) || 0)
                       }

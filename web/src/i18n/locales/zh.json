@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "用户并发限制已关闭，主请求和后台请求均不受此并发上限限制；已配置的数值会保留。",
     "Upstream error details (redacted)": "上游错误详情（脱敏）",
     "Error source": "错误来源",
     "Failure stage": "失败阶段",

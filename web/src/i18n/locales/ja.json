@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "ユーザーの同時実行制限はオフです。メインとバックグラウンドの両方の上限は適用されません。設定値は保持されます。",
     "Window management": "ウィンドウ管理",
     "View and manage personal session windows.": "個人のセッションウィンドウを表示・管理します。",
     "Upstream error details (redacted)": "上流エラーの詳細（機密情報除去済み）",

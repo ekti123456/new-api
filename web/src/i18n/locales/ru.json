@@ -1,5 +1,6 @@
 {
   "translation": {
+    "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "Ограничение параллельных запросов отключено как для основных, так и для фоновых запросов. Сохранённые значения остаются без изменений.",
     "Window management": "Управление окнами",
     "View and manage personal session windows.": "Просмотр личных окон сеансов и управление ими.",
     "Upstream error details (redacted)": "Сведения об ошибке сервера (скрыты секреты)",

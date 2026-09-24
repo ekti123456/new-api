@@ -47,6 +47,20 @@ await i18n
 ).IS_REACT_ACT_ENVIRONMENT = true
 after(() => domWindow.close())
 
+const defaultValues = {
+  ModelRequestRateLimitEnabled: false,
+  ModelRPMRateLimitEnabled: false,
+  ModelRequestConcurrencyLimitEnabled: true,
+  DefaultUserConcurrencyLimit: 5,
+  BackgroundUserConcurrencyLimit: 5,
+  UserConcurrencyCooldownSeconds: 3,
+  ModelRequestRateLimitDurationMinutes: 1,
+  ModelRequestRateLimitCount: 0,
+  ModelRequestRateLimitSuccessCount: 1000,
+  ModelRequestRateLimitGroup: '{}',
+  ModelRPMRateLimitModels: '{}',
+}
+
 test('background concurrency defaults to five, validates input and saves without changing main concurrency', async () => {
   const container = document.createElement('div')
   const actions = document.createElement('div')
@@ -75,21 +89,7 @@ test('background concurrency defaults to five, validates input and saves without
         <QueryClientProvider client={queryClient}>
           <I18nextProvider i18n={i18n}>
             <SettingsPageProvider actionsContainer={actions}>
-              <RateLimitSection
-                defaultValues={{
-                  ModelRequestRateLimitEnabled: false,
-                  ModelRPMRateLimitEnabled: false,
-                  ModelRequestConcurrencyLimitEnabled: true,
-                  DefaultUserConcurrencyLimit: 5,
-                  BackgroundUserConcurrencyLimit: 5,
-                  UserConcurrencyCooldownSeconds: 3,
-                  ModelRequestRateLimitDurationMinutes: 1,
-                  ModelRequestRateLimitCount: 0,
-                  ModelRequestRateLimitSuccessCount: 1000,
-                  ModelRequestRateLimitGroup: '{}',
-                  ModelRPMRateLimitModels: '{}',
-                }}
-              />
+              <RateLimitSection defaultValues={defaultValues} />
             </SettingsPageProvider>
           </I18nextProvider>
         </QueryClientProvider>
@@ -143,3 +143,104 @@ test('background concurrency defaults to five, validates input and saves without
     actions.remove()
   }
 })
+
+for (const initiallyEnabled of [true, false]) {
+  test(`concurrency toggle starting ${initiallyEnabled ? 'on' : 'off'} controls main and background settings without clearing saved limits`, async (testContext) => {
+    const container = document.createElement('div')
+    const actions = document.createElement('div')
+    document.body.append(container, actions)
+    const root = createRoot(container)
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    })
+    const originalAdapter = api.defaults.adapter
+    const updates: unknown[] = []
+    api.defaults.adapter = async (config) => {
+      assert.equal(config.method, 'put')
+      assert.equal(config.url, '/api/option/')
+      updates.push(JSON.parse(String(config.data)))
+      return {
+        config,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        data: { success: true },
+      }
+    }
+    testContext.after(async () => {
+      await act(async () => root.unmount())
+      api.defaults.adapter = originalAdapter
+      queryClient.clear()
+      container.remove()
+      actions.remove()
+    })
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <I18nextProvider i18n={i18n}>
+            <SettingsPageProvider actionsContainer={actions}>
+              <RateLimitSection
+                defaultValues={{
+                  ...defaultValues,
+                  ModelRequestConcurrencyLimitEnabled: initiallyEnabled,
+                  BackgroundUserConcurrencyLimit: 7,
+                }}
+              />
+            </SettingsPageProvider>
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    const labels = [...container.querySelectorAll('label')]
+    const inactiveNotice =
+      'User concurrency limiting is off. Main and background limits are inactive; saved values are retained.'
+    assert.equal(
+      container.textContent?.includes(inactiveNotice),
+      !initiallyEnabled
+    )
+    const controls = [
+      ['Default user concurrency', '5'],
+      ['Per-user background concurrency', '7'],
+      ['Concurrency slot cooldown', '3'],
+    ].map(([name, value]) => {
+      const label = labels.find((item) => item.textContent === name)
+      assert.ok(label)
+      const input = container.querySelector<HTMLInputElement>(
+        `input[id="${label.htmlFor}"], [id="${label.htmlFor}"] input`
+      )
+      assert.ok(input)
+      assert.equal(input.disabled, !initiallyEnabled, name)
+      assert.equal(input.value, value)
+      return { input, value }
+    })
+    const toggle = labels.find(
+      (item) => item.textContent === 'Enable user concurrency limiting'
+    )
+    assert.ok(toggle)
+    await act(async () => toggle.click())
+    assert.equal(
+      container.textContent?.includes(inactiveNotice),
+      initiallyEnabled
+    )
+    for (const { input, value } of controls) {
+      assert.equal(input.disabled, initiallyEnabled)
+      assert.equal(input.value, value)
+    }
+    const save = [...actions.querySelectorAll('button')].find(
+      (item) => item.textContent === 'Save rate limits'
+    )
+    assert.ok(save)
+    await act(async () => save.click())
+    assert.deepEqual(updates, [
+      { key: 'ModelRequestConcurrencyLimitEnabled', value: !initiallyEnabled },
+    ])
+    await act(async () => toggle.click())
+    for (const { input, value } of controls) {
+      assert.equal(input.disabled, !initiallyEnabled)
+      assert.equal(input.value, value)
+    }
+  })
+}
