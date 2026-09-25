@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func setupPerfMetricErrorTest(test *testing.T) {
@@ -15,6 +16,46 @@ func setupPerfMetricErrorTest(test *testing.T) {
 	test.Cleanup(func() {
 		require.NoError(test, DB.Where("1 = 1").Delete(&PerfMetricError{}).Error)
 	})
+}
+
+func TestClearPerfMetricErrorsPreservesNewErrorsAndOtherLogs(test *testing.T) {
+	setupPerfMetricErrorTest(test)
+	old := []PerfMetricError{{ModelName: "old-a"}, {ModelName: "old-b"}}
+	require.NoError(test, DB.Create(&old).Error)
+	metric := PerfMetric{ModelName: "clear-test", Group: "default", BucketTs: time.Now().Unix(), RequestCount: 3}
+	require.NoError(test, DB.Create(&metric).Error)
+	usage := Log{CreatedAt: time.Now().Unix(), Type: LogTypeConsume, Content: "clear-test"}
+	require.NoError(test, LOG_DB.Create(&usage).Error)
+	test.Cleanup(func() {
+		require.NoError(test, DB.Delete(&metric).Error)
+		require.NoError(test, LOG_DB.Where("id = ?", usage.Id).Delete(&Log{}).Error)
+	})
+	// Insert after the cleanup snapshot, immediately before its DELETE executes.
+	// The new row must survive even if it has the same second-level timestamp.
+	newError := PerfMetricError{ModelName: "new", CreatedAt: time.Now().Unix()}
+	require.NoError(test, DB.Callback().Delete().Before("gorm:delete").Register("test:new_performance_error", func(tx *gorm.DB) {
+		if tx.Statement.Table == "perf_metric_errors" {
+			tx.AddError(tx.Session(&gorm.Session{NewDB: true}).Create(&newError).Error)
+		}
+	}))
+	deleted, err := ClearPerfMetricErrors(test.Context())
+	require.NoError(test, DB.Callback().Delete().Remove("test:new_performance_error"))
+	require.NoError(test, err)
+	assert.Equal(test, int64(2), deleted)
+	var remaining []PerfMetricError
+	require.NoError(test, DB.Find(&remaining).Error)
+	assert.Equal(test, []PerfMetricError{newError}, remaining)
+	var count int64
+	require.NoError(test, DB.Model(&PerfMetric{}).Where("id = ?", metric.Id).Count(&count).Error)
+	assert.Equal(test, int64(1), count)
+	require.NoError(test, LOG_DB.Model(&Log{}).Where("id = ?", usage.Id).Count(&count).Error)
+	assert.Equal(test, int64(1), count)
+	deleted, err = ClearPerfMetricErrors(test.Context())
+	require.NoError(test, err)
+	assert.Equal(test, int64(1), deleted)
+	deleted, err = ClearPerfMetricErrors(test.Context())
+	require.NoError(test, err)
+	assert.Zero(test, deleted)
 }
 
 func TestListPerfMetricErrorsFiltersAndPaginates(test *testing.T) {

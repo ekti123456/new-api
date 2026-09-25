@@ -159,6 +159,18 @@ export async function getPerformanceErrors(params: PerformanceErrorQuery) {
   return res.data
 }
 
+export async function clearPerformanceErrors() {
+  const res = await api.delete<{
+    success: boolean
+    message?: string
+    data: { deleted: number }
+  }>('/api/data/performance-errors')
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Unable to clear performance errors')
+  }
+  return res.data
+}
+
 export async function getFullSessionWindows() {
   const res = await api.get<{
     success: boolean

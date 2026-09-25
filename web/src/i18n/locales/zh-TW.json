@@ -5594,5 +5594,10 @@
     "Related unclassified": "相關未分類",
     "Compaction": "壓縮",
     "Not recorded": "未記錄"
-  }
+  },
+  "Clear performance errors": "清理效能錯誤",
+  "Clear all performance errors": "清空全部效能錯誤",
+  "Performance errors cleared": "效能錯誤明細已清空",
+  "Unable to clear performance errors": "清理效能錯誤失敗，請重試",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "將清空現有的全部效能錯誤明細，包括目前篩選範圍外的錯誤。新錯誤會繼續記錄，用量日誌、計費和效能統計均保留。"
 }

@@ -5543,5 +5543,10 @@
     "Related unclassified": "Liên quan, chưa phân loại",
     "Compaction": "Nén ngữ cảnh",
     "Not recorded": "Chưa ghi nhận"
-  }
+  },
+  "Clear performance errors": "Xóa lỗi hiệu suất",
+  "Clear all performance errors": "Xóa tất cả lỗi hiệu suất",
+  "Performance errors cleared": "Đã xóa lỗi hiệu suất",
+  "Unable to clear performance errors": "Không thể xóa lỗi hiệu suất",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Xóa tất cả chi tiết lỗi hiện có, kể cả ngoài bộ lọc hiện tại. Lỗi mới vẫn được ghi lại. Nhật ký sử dụng, thanh toán và thống kê hiệu suất được giữ nguyên."
 }

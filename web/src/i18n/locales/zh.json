@@ -5619,5 +5619,10 @@
     "Related unclassified": "相关未分类",
     "Compaction": "压缩",
     "Not recorded": "未记录"
-  }
+  },
+  "Clear performance errors": "清理性能错误",
+  "Clear all performance errors": "清空全部性能错误",
+  "Performance errors cleared": "性能错误明细已清空",
+  "Unable to clear performance errors": "清理性能错误失败，请重试",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "将清空现有的全部性能错误明细，包括当前筛选范围外的错误。新错误会继续记录，用量日志、计费和性能统计均保留。"
 }

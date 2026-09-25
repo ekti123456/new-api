@@ -78,6 +78,15 @@ func GetPerfMetricErrors(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+func ClearPerfMetricErrors(c *gin.Context) {
+	deleted, err := model.ClearPerfMetricErrors(c.Request.Context())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": deleted})
+}
+
 func GetPerfMetrics(c *gin.Context) {
 	modelName := c.Query("model")
 	if modelName == "" {

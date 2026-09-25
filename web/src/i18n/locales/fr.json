@@ -5543,5 +5543,10 @@
     "Related unclassified": "Liée, non classée",
     "Compaction": "Compactage",
     "Not recorded": "Non enregistré"
-  }
+  },
+  "Clear performance errors": "Effacer les erreurs de performance",
+  "Clear all performance errors": "Effacer toutes les erreurs de performance",
+  "Performance errors cleared": "Erreurs de performance effacées",
+  "Unable to clear performance errors": "Impossible d’effacer les erreurs de performance",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Efface tous les détails d’erreurs existants, y compris hors des filtres actuels. Les nouvelles erreurs restent enregistrées. Les journaux d’utilisation, la facturation et les statistiques sont conservés."
 }

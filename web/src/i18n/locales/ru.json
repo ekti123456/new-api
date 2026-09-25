@@ -5543,5 +5543,10 @@
     "Related unclassified": "Связанный, без категории",
     "Compaction": "Сжатие контекста",
     "Not recorded": "Не записано"
-  }
+  },
+  "Clear performance errors": "Очистить ошибки производительности",
+  "Clear all performance errors": "Очистить все ошибки производительности",
+  "Performance errors cleared": "Ошибки производительности очищены",
+  "Unable to clear performance errors": "Не удалось очистить ошибки производительности",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Все существующие сведения об ошибках будут удалены, включая записи вне текущих фильтров. Новые ошибки продолжат записываться. Журналы использования, расчёты и статистика сохранятся."
 }

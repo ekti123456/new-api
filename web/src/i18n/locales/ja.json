@@ -5543,5 +5543,10 @@
     "Related unclassified": "関連・未分類",
     "Compaction": "圧縮",
     "Not recorded": "未記録"
-  }
+  },
+  "Clear performance errors": "パフォーマンスエラーを消去",
+  "Clear all performance errors": "すべてのパフォーマンスエラーを消去",
+  "Performance errors cleared": "パフォーマンスエラーを消去しました",
+  "Unable to clear performance errors": "パフォーマンスエラーを消去できません",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "現在のフィルター範囲外を含む既存のエラー詳細をすべて消去します。新しいエラーは引き続き記録されます。使用量ログ、課金、パフォーマンス統計は保持されます。"
 }

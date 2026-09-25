@@ -14,10 +14,11 @@ func TestPerformanceErrorsRouteRequiresAuthentication(t *testing.T) {
 	engine := gin.New()
 	SetApiRouter(engine)
 
-	request := httptest.NewRequest(http.MethodGet, "/api/data/performance-errors", nil)
-	response := httptest.NewRecorder()
-	engine.ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusUnauthorized, response.Code)
-	require.Contains(t, response.Body.String(), "AUTH_UNAUTHORIZED")
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		request := httptest.NewRequest(method, "/api/data/performance-errors", nil)
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		require.Equal(t, http.StatusUnauthorized, response.Code)
+		require.Contains(t, response.Body.String(), "AUTH_UNAUTHORIZED")
+	}
 }

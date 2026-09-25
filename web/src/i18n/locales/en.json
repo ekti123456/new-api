@@ -5619,5 +5619,10 @@
     "Related unclassified": "Related unclassified",
     "Compaction": "Compaction",
     "Not recorded": "Not recorded"
-  }
+  },
+  "Clear performance errors": "Clear performance errors",
+  "Clear all performance errors": "Clear all performance errors",
+  "Performance errors cleared": "Performance errors cleared",
+  "Unable to clear performance errors": "Unable to clear performance errors",
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved."
 }
