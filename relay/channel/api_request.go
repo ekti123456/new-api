@@ -397,6 +397,15 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	identityURL := strings.Replace(strings.Replace(fullRequestURL, "wss://", "https://", 1), "ws://", "http://", 1)
+	identityRequest, err := http.NewRequest(http.MethodGet, identityURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	identityRequest.Header = targetHeader
+	if err := applyCPAIdentity(c, identityRequest, info); err != nil {
+		return nil, err
+	}
 	dialer := *websocket.DefaultDialer
 	if info.ChannelSetting.Proxy != "" {
 		proxyURL, _, proxyErr := common2.ParseProxyURLRuntime(info.ChannelSetting.Proxy)
@@ -518,6 +527,9 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	if err := applyCPAIdentity(c, req, info); err != nil {
+		return nil, err
+	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)

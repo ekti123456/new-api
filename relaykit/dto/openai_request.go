@@ -1048,6 +1048,10 @@ type OpenAIResponsesRequest struct {
 	// Codex Responses metadata/client_metadata:
 	// https://github.com/openai/codex/commit/14df0e8833aad0d6d78287954b61ffac67af936c
 	ClientMetadata json.RawMessage `json:"client_metadata,omitempty"`
+	// Native Responses gateway extensions. In particular, false is a prewarm
+	// request and must not become an ordinary generation after re-encoding.
+	Generate       *bool           `json:"generate,omitempty"`
+	AccessPrograms json.RawMessage `json:"access_programs,omitempty"`
 	// qwen
 	EnableThinking json.RawMessage `json:"enable_thinking,omitempty"`
 	ThinkingBudget json.RawMessage `json:"thinking_budget,omitempty"`

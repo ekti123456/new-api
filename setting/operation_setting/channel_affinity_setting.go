@@ -1,6 +1,10 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"slices"
+
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 type ChannelAffinityKeySource struct {
 	Type string `json:"type"` // context_int, context_string, request_header, gjson
@@ -57,17 +61,24 @@ var codexCliPassThroughHeaders = []string{
 	"Thread-Id",
 	"X-Client-Request-Id",
 	"User-Agent",
+	"Version",
 	"X-Codex-Beta-Features",
 	"X-Codex-Turn-State",
 	"X-Codex-Turn-Metadata",
 	"X-Codex-Window-Id",
 	"X-Codex-Parent-Thread-Id",
-	//"X-Codex-Installation-Id",
+	"X-Codex-Installation-Id",
 	"X-OpenAI-Subagent",
 	"X-OpenAI-Memgen-Request",
 	//"X-OAI-Attestation",
 	"X-ResponsesAPI-Include-Timing-Metrics",
 	"X-OpenAI-Internal-Codex-Responses-Lite",
+}
+
+// CodexCLIRequestHeaders is also used by native Responses forwarding. Client
+// protocol metadata must not depend on a successful channel-affinity match.
+func CodexCLIRequestHeaders() []string {
+	return slices.Clone(codexCliPassThroughHeaders)
 }
 
 var claudeCliPassThroughHeaders = []string{

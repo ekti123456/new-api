@@ -1108,7 +1108,7 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 		return jsonData, nil
 	}
 
-	var data map[string]any
+	var data map[string]json.RawMessage
 	if err := common.Unmarshal(jsonData, &data); err != nil {
 		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
 		return jsonData, nil
@@ -1151,15 +1151,20 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 
 	// 默认移除 stream_options.include_obfuscation，除非明确允许（避免关闭响应流混淆保护）
 	if !channelOtherSettings.AllowIncludeObfuscation {
-		if streamOptionsAny, exists := data["stream_options"]; exists {
-			if streamOptions, ok := streamOptionsAny.(map[string]any); ok {
+		if streamOptionsRaw, exists := data["stream_options"]; exists {
+			var streamOptions map[string]json.RawMessage
+			if common.Unmarshal(streamOptionsRaw, &streamOptions) == nil && streamOptions != nil {
 				if _, includeExists := streamOptions["include_obfuscation"]; includeExists {
 					delete(streamOptions, "include_obfuscation")
 				}
 				if len(streamOptions) == 0 {
 					delete(data, "stream_options")
 				} else {
-					data["stream_options"] = streamOptions
+					encoded, err := common.Marshal(streamOptions)
+					if err != nil {
+						return nil, err
+					}
+					data["stream_options"] = encoded
 				}
 			}
 		}

@@ -57,15 +57,15 @@ func copyCodexSSEHeaders(c *gin.Context, resp *http.Response) {
 		return
 	}
 	// codex
-	for _, name := range []string{"X-Reasoning-Included", "X-Codex-Turn-State"} {
+	for _, name := range []string{"OpenAI-Model", "X-Reasoning-Included", "X-Models-Etag", "X-Codex-Turn-State"} {
 		values := resp.Header.Values(name)
 		if !service.ShouldCopyUpstreamHeader(c, name, values) {
 			continue
 		}
 		for _, value := range values {
-			if value != "" {
-				c.Writer.Header().Add(name, value)
-			}
+			// Presence matters even when the upstream explicitly sends an empty
+			// capability value. Only this protocol allowlist is copied for SSE.
+			c.Writer.Header().Add(name, value)
 		}
 	}
 }

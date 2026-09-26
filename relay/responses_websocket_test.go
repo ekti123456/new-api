@@ -442,7 +442,7 @@ func TestBuildResponsesWSCreateEventIsFlat(t *testing.T) {
 	}
 }
 
-func TestHTTPResponsesRequestOmitsWebSocketMetadata(t *testing.T) {
+func TestHTTPResponsesRequestPreservesPrewarmWithoutWebSocketEnvelope(t *testing.T) {
 	var req dto.OpenAIResponsesRequest
 	require.NoError(t, common.Unmarshal([]byte(`{"model":"gpt-5.3-codex-spark","input":"hi","generate":false,"stream_id":"planner"}`), &req))
 	got, err := common.Marshal(req)
@@ -450,7 +450,10 @@ func TestHTTPResponsesRequestOmitsWebSocketMetadata(t *testing.T) {
 	var data map[string]any
 	require.NoError(t, common.Unmarshal(got, &data))
 	assert.NotContains(t, data, "stream_id")
-	assert.NotContains(t, data, "generate")
+	// Native HTTP gateways also accept prewarm. Preserve explicit false while
+	// keeping WebSocket-only multiplexing metadata out of the HTTP request.
+	assert.Contains(t, data, "generate")
+	assert.Equal(t, false, data["generate"])
 }
 
 func TestBuildResponsesWSErrorPayloadIncludesStatus(t *testing.T) {

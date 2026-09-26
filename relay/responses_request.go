@@ -3,9 +3,12 @@ package relay
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -14,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,6 +27,35 @@ import (
 // The returned adaptor retains route/conversion state for DoRequest/DoResponse.
 func PrepareResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, req *dto.OpenAIResponsesRequest) (relaychannel.Adaptor, common.ReplayableBody, io.Closer, *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	// Header operations belong to one attempt. A retry must use the newly
+	// selected channel's overrides, not the previous attempt's resolved map.
+	info.RuntimeHeadersOverride = nil
+	info.UseRuntimeHeadersOverride = false
+	if info.ChannelType == constant.ChannelTypeOpenAI || info.ChannelType == constant.ChannelTypeNewAPI || info.ChannelType == constant.ChannelTypeSub2API {
+		// Seed the normal override pipeline so explicit channel overrides and
+		// delete_header operations still win. This also runs for raw passthrough,
+		// which intentionally bypasses body/affinity parameter transformations.
+		headers := maps.Clone(info.HeadersOverride)
+		if headers == nil {
+			headers = make(map[string]any)
+		}
+		for _, name := range operation_setting.CodexCLIRequestHeaders() {
+			if c.Request.Header.Get(name) == "" {
+				continue
+			}
+			overridden := false
+			for key := range headers {
+				if strings.EqualFold(strings.TrimSpace(key), name) {
+					overridden = true
+					break
+				}
+			}
+			if !overridden {
+				headers[name] = "{client_header:" + name + "}"
+			}
+		}
+		info.HeadersOverride = headers
+	}
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 		!common.SupportsResponsesCompact(info.ChannelType, info.ApiType) {
 		return nil, nil, nil, types.NewErrorWithStatusCode(
