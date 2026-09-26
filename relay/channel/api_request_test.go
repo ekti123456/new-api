@@ -2,15 +2,78 @@ package channel
 
 import (
 	"context"
+	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestCPAIdentityPreservesNonReplayableBody(t *testing.T) {
+	t.Setenv("CPA_IDENTITY_INSTANCE_ID", "persistent-instance")
+	for _, tc := range []struct {
+		name, payload, headerDevice, turnMetadata, wantDevice string
+		cached                                                bool
+	}{
+		{"body installation", `{"client_metadata":{"installation_id":"body-device"}}`, "", "", "body-device", true},
+		{"body device", `{"metadata":{"device_id":"metadata-device"}}`, "", "", "metadata-device", true},
+		{"header priority", `{"client_metadata":{"device_id":"body-device"}}`, "header-device", "", "header-device", true},
+		{"turn metadata", `{}`, "", `{"installation_id":"turn-device"}`, "turn-device", false},
+		{"no optional fields", `{}`, "", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(tc.payload))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("X-Device-Id", tc.headerDevice)
+			c.Request.Header.Set("X-Codex-Turn-Metadata", tc.turnMetadata)
+			if tc.cached {
+				storage, err := common.GetBodyStorage(c)
+				require.NoError(t, err)
+				defer storage.Close()
+				_, err = storage.Seek(3, io.SeekStart)
+				require.NoError(t, err)
+			}
+			// No GetBody: identity forwarding must neither reject nor drain uploads.
+			req, err := http.NewRequest(http.MethodPost, "https://cpa.example/v1/responses", io.NopCloser(strings.NewReader(tc.payload)))
+			require.NoError(t, err)
+			require.Nil(t, req.GetBody)
+			info := &relaycommon.RelayInfo{UserId: 5, TokenId: 9}
+			require.NoError(t, applyCPAIdentity(c, req, info))
+			first := req.Header.Get("X-CPA-Identity")
+			require.NoError(t, applyCPAIdentity(c, req, info))
+			assert.Equal(t, first, req.Header.Get("X-CPA-Identity"), "retry must keep identity")
+			decoded, err := base64.RawURLEncoding.DecodeString(first)
+			require.NoError(t, err)
+			assert.Equal(t, "5", gjson.GetBytes(decoded, "user").String())
+			assert.Equal(t, tc.wantDevice, gjson.GetBytes(decoded, "device").String())
+			assert.Empty(t, gjson.GetBytes(decoded, "ua").String())
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.NoError(t, req.Body.Close())
+			assert.Equal(t, tc.payload, string(body))
+			if tc.cached {
+				cached, _ := c.Get(common.KeyBodyStorage)
+				offset, err := cached.(common.BodyStorage).Seek(0, io.SeekCurrent)
+				require.NoError(t, err)
+				assert.EqualValues(t, 3, offset, "original cached body cursor must be unchanged")
+			}
+			info.UserId = 0
+			req.Header.Set("X-CPA-Identity-Signature", "stale")
+			require.NoError(t, applyCPAIdentity(c, req, info))
+			assert.Empty(t, req.Header.Get("X-CPA-Identity"), "unauthenticated state must not assert user identity")
+			assert.Empty(t, req.Header.Get("X-CPA-Identity-Signature"))
+		})
+	}
+}
 
 func TestNewTaskAPIRequestInheritsClientCancellation(t *testing.T) {
 	recorder := httptest.NewRecorder()

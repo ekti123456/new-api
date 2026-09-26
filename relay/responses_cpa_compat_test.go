@@ -2,7 +2,6 @@ package relay
 
 import (
 	"bufio"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -30,25 +29,29 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestCPAIdentitySignedFinalWire(t *testing.T) {
-	const secret = "test-only-cpa-identity-signing-secret-20260926"
+func TestCPAIdentityDirectFinalWire(t *testing.T) {
 	captured := make(chan cpaCapturedRequest, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		captured <- cpaCapturedRequest{r.URL.RequestURI(), r.Header.Clone(), b}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
-	t.Setenv("CPA_IDENTITY_TARGETS", upstream.URL+"/v1")
+	// Legacy settings cannot gate direct forwarding to the selected destination.
+	t.Setenv("CPA_IDENTITY_TARGETS", "https://unused.example/v1")
 	t.Setenv("CPA_IDENTITY_INSTANCE_ID", "persistent-newapi-test-instance")
-	t.Setenv("CPA_IDENTITY_SIGNING_SECRET", secret)
+	t.Setenv("CPA_IDENTITY_SIGNING_SECRET", "")
 	var wire []map[string]any
 	for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
 		for _, passthrough := range []bool{false, true} {
 			c, info, request := cpaRequestFixture(t, path, `{"model":"gpt-5.1","input":"hello","client_metadata":{"session_id":"same-client-session"}}`, upstream.URL, passthrough)
 			info.UserId, info.TokenId, info.RequestId = 101, 7, "newapi-request-1"
-			common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, map[string]any{"X-CPA-Identity": "forged", "X-CPA-Identity-Signature": "forged"})
+			c.Request.Header.Set("X-CPA-Identity", "client-forged")
+			common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, map[string]any{"X-CPA-Identity": "forged", "X-CPA-Identity-Signature": "forged", "User-Agent": "upstream-agent"})
 			adaptor, body, closer, apiErr := PrepareResponsesRequest(c, info, request)
 			require.Nil(t, apiErr)
 			resp, err := adaptor.DoRequest(c, info, body)
@@ -63,12 +66,16 @@ func TestCPAIdentitySignedFinalWire(t *testing.T) {
 			assert.Equal(t, "7", gjson.GetBytes(decoded, "key").String())
 			assert.Equal(t, "Codex Desktop/test", gjson.GetBytes(decoded, "ua").String())
 			assert.Equal(t, "client-installation", gjson.GetBytes(decoded, "device").String())
-			digest := sha256.Sum256(got.body)
-			assert.Equal(t, hex.EncodeToString(digest[:]), gjson.GetBytes(decoded, "body_sha256").String())
-			mac := hmac.New(sha256.New, []byte(secret))
-			_, err = mac.Write([]byte(strings.Join([]string{"cpa-identity-v1", "POST", got.path, raw}, "\n")))
-			require.NoError(t, err)
-			assert.Equal(t, hex.EncodeToString(mac.Sum(nil)), got.header.Get("X-CPA-Identity-Signature"))
+			digest := sha256.Sum256([]byte("persistent-newapi-test-instance"))
+			assert.Equal(t, hex.EncodeToString(digest[:]), gjson.GetBytes(decoded, "instance").String())
+			assert.Equal(t, "newapi-request-1", gjson.GetBytes(decoded, "request_id").String())
+			assert.Equal(t, "upstream-agent", got.header.Get("User-Agent"))
+			assert.Equal(t, "Bearer cpa-channel-key", got.header.Get("Authorization"))
+			assert.Empty(t, got.header.Get("X-CPA-Identity-Signature"))
+			for _, field := range []string{"ts", "nonce", "aud", "body_sha256"} {
+				assert.False(t, gjson.GetBytes(decoded, field).Exists(), field)
+			}
+			assert.Equal(t, "same-client-session", gjson.GetBytes(got.body, "client_metadata.session_id").String())
 			wire = append(wire, map[string]any{"path": got.path, "body": string(got.body), "headers": got.header})
 		}
 	}
@@ -77,9 +84,9 @@ func TestCPAIdentitySignedFinalWire(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(path, b, 0600))
 	}
-	// A retry outside the configured CPA destination must not leak assertions,
-	// even if a channel override explicitly attempts to inject them.
-	t.Setenv("CPA_IDENTITY_TARGETS", "https://not-this-destination.example/v1")
+	// Ordinary relays still work with no identity configuration. Overrides may
+	// not leave stale metadata or signatures attached when forwarding is off.
+	t.Setenv("CPA_IDENTITY_INSTANCE_ID", "")
 	c, info, request := cpaRequestFixture(t, "/v1/responses", `{"model":"gpt-5.1","input":"hi"}`, upstream.URL, true)
 	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, map[string]any{"X-CPA-Identity": "forged", "X-CPA-Identity-Signature": "forged"})
 	adaptor, body, closer, apiErr := PrepareResponsesRequest(c, info, request)
@@ -91,13 +98,6 @@ func TestCPAIdentitySignedFinalWire(t *testing.T) {
 	got := <-captured
 	assert.Empty(t, got.header.Get("X-CPA-Identity"))
 	assert.Empty(t, got.header.Get("X-CPA-Identity-Signature"))
-	t.Setenv("CPA_IDENTITY_TARGETS", upstream.URL)
-	t.Setenv("CPA_IDENTITY_SIGNING_SECRET", "")
-	adaptor, body, closer, apiErr = PrepareResponsesRequest(c, info, request)
-	require.Nil(t, apiErr)
-	_, err = adaptor.DoRequest(c, info, body)
-	require.ErrorContains(t, err, "signing secret")
-	require.NoError(t, closer.Close())
 }
 
 type cpaCapturedRequest struct {
@@ -107,7 +107,6 @@ type cpaCapturedRequest struct {
 }
 
 func TestCPAIdentityWebSocketHandshake(t *testing.T) {
-	const secret = "test-only-cpa-identity-signing-secret-20260926"
 	captured := make(chan cpaCapturedRequest, 1)
 	upgrader := websocket.Upgrader{}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -120,9 +119,7 @@ func TestCPAIdentityWebSocketHandshake(t *testing.T) {
 		captured <- cpaCapturedRequest{r.URL.RequestURI(), r.Header.Clone(), nil}
 	}))
 	defer upstream.Close()
-	t.Setenv("CPA_IDENTITY_TARGETS", upstream.URL+"/v1")
 	t.Setenv("CPA_IDENTITY_INSTANCE_ID", "persistent-newapi-test-instance")
-	t.Setenv("CPA_IDENTITY_SIGNING_SECRET", secret)
 	c, info, request := cpaRequestFixture(t, "/v1/responses", `{"model":"gpt-5.1","input":"hi"}`, upstream.URL, false)
 	info.UserId, info.TokenId, info.RequestId = 101, 7, "websocket-handshake"
 	c.Request.Method = http.MethodGet
@@ -137,12 +134,10 @@ func TestCPAIdentityWebSocketHandshake(t *testing.T) {
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	require.NoError(t, err)
 	assert.Equal(t, "101", gjson.GetBytes(decoded, "user").String())
-	emptyHash := sha256.Sum256(nil)
-	assert.Equal(t, hex.EncodeToString(emptyHash[:]), gjson.GetBytes(decoded, "body_sha256").String())
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, err = mac.Write([]byte(strings.Join([]string{"cpa-identity-v1", "GET", got.path, raw}, "\n")))
-	require.NoError(t, err)
-	assert.Equal(t, hex.EncodeToString(mac.Sum(nil)), got.header.Get("X-CPA-Identity-Signature"))
+	assert.Equal(t, "7", gjson.GetBytes(decoded, "key").String())
+	assert.Equal(t, "client-installation", gjson.GetBytes(decoded, "device").String())
+	assert.Equal(t, "websocket-handshake", gjson.GetBytes(decoded, "request_id").String())
+	assert.Empty(t, got.header.Get("X-CPA-Identity-Signature"))
 }
 
 func cpaRequestFixture(t *testing.T, path, payload, upstream string, passthrough bool) (*gin.Context, *relaycommon.RelayInfo, *dto.OpenAIResponsesRequest) {
@@ -245,6 +240,7 @@ func TestCPAResponsesRequestWire(t *testing.T) {
 }
 
 func TestCPAResponsesRetryRebuildsChannelHeaders(t *testing.T) {
+	t.Setenv("CPA_IDENTITY_INSTANCE_ID", "retry-instance")
 	captured := make(chan cpaCapturedRequest, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -256,11 +252,21 @@ func TestCPAResponsesRetryRebuildsChannelHeaders(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
+	secondCalls := make(chan struct{}, 2)
+	secondUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondCalls <- struct{}{}
+		upstream.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer secondUpstream.Close()
 	const payload = `{"model":"gpt-5.1","input":"hello","client_metadata":{"session_id":"original-session"},"generate":false}`
 	c, info, request := cpaRequestFixture(t, "/v1/responses", payload, upstream.URL, false)
+	info.UserId, info.TokenId, info.RequestId = 101, 7, "retry-request"
 	// An opaque client value must never be expanded as a channel-key template.
 	c.Request.Header.Set("X-Codex-Turn-State", "{api_key}")
 	for attempt := range 3 {
+		if attempt > 0 {
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, secondUpstream.URL)
+		}
 		common.SetContextKey(c, constant.ContextKeyChannelKey, fmt.Sprintf("channel-key-%d", attempt))
 		common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, map[string]any{})
 		common.SetContextKey(c, constant.ContextKeyChannelParamOverride, map[string]any{})
@@ -280,6 +286,13 @@ func TestCPAResponsesRetryRebuildsChannelHeaders(t *testing.T) {
 		require.NoError(t, response.(*http.Response).Body.Close())
 		require.NoError(t, closer.Close())
 		got := <-captured
+		identity, err := base64.RawURLEncoding.DecodeString(got.header.Get("X-CPA-Identity"))
+		require.NoError(t, err)
+		assert.Equal(t, "101", gjson.GetBytes(identity, "user").String())
+		assert.Equal(t, "7", gjson.GetBytes(identity, "key").String())
+		assert.Equal(t, "retry-request", gjson.GetBytes(identity, "request_id").String())
+		assert.Equal(t, "Codex Desktop/test", gjson.GetBytes(identity, "ua").String())
+		assert.Empty(t, got.header.Get("X-CPA-Identity-Signature"))
 		assert.Equal(t, "{api_key}", got.header.Get("X-Codex-Turn-State"))
 		assert.JSONEq(t, payload, string(got.body))
 		if attempt == 0 {
@@ -294,6 +307,7 @@ func TestCPAResponsesRetryRebuildsChannelHeaders(t *testing.T) {
 			assert.Equal(t, "client-window:0", got.header.Get("X-Codex-Window-Id"))
 		}
 	}
+	assert.Len(t, secondCalls, 2, "retries must actually reach the second CPA destination")
 }
 
 func TestCPACompactionAndPassthroughErrors(t *testing.T) {
