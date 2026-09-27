@@ -1,0 +1,215 @@
+package model
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+const perfMetricErrorRetention = 48 * time.Hour
+
+const perfMetricSessionCreationLimitCode = "session_creation_limit_exceeded"
+const perfMetricAccountSessionCapacityCode = "account_session_capacity_exceeded"
+
+func IsSessionWindowCapacityError(statusCode int, errorCode string) bool {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusTooManyRequests {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(errorCode)) {
+	case perfMetricSessionCreationLimitCode, perfMetricAccountSessionCapacityCode:
+		return true
+	default:
+		return false
+	}
+}
+
+// PerfMetricError stores one final failed relay request for the administrator
+// performance dashboard. It is deliberately separate from the user-facing log
+// table because error logs can be disabled while performance metrics remain
+// enabled.
+type PerfMetricError struct {
+	Id                int64  `json:"id" gorm:"primaryKey"`
+	CreatedAt         int64  `json:"created_at" gorm:"index"`
+	UserId            int    `json:"user_id" gorm:"index"`
+	Username          string `json:"username" gorm:"size:128;index"`
+	ModelName         string `json:"model_name" gorm:"size:128;index"`
+	Group             string `json:"group" gorm:"column:group;size:64;index"`
+	ChannelId         int    `json:"channel_id" gorm:"index"`
+	ChannelName       string `json:"channel_name,omitempty" gorm:"size:128"`
+	TokenId           int    `json:"token_id,omitempty"`
+	RequestId         string `json:"request_id,omitempty" gorm:"size:128;index"`
+	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"size:128;index"`
+	ErrorType         string `json:"error_type" gorm:"size:128;index"`
+	ErrorCode         string `json:"error_code" gorm:"size:128;index"`
+	StatusCode        int    `json:"status_code" gorm:"index"`
+	ErrorReason       string `json:"error_reason" gorm:"type:text"`
+	RequestPath       string `json:"request_path,omitempty" gorm:"size:256"`
+	UserAgent         string `json:"user_agent,omitempty" gorm:"size:512"`
+}
+
+func (PerfMetricError) TableName() string {
+	return "perf_metric_errors"
+}
+
+type PerfMetricErrorQuery struct {
+	Grouped        bool
+	ErrorGroupID   int64
+	ModelName      string
+	Group          string
+	Username       string
+	ErrorType      string
+	ErrorCode      string
+	UserID         int
+	StatusCode     int
+	StartTimestamp int64
+	EndTimestamp   int64
+	StartIndex     int
+	PageSize       int
+}
+
+type PerfMetricErrorPage struct {
+	Page             int                   `json:"page"`
+	PageSize         int                   `json:"page_size"`
+	Total            int64                 `json:"total"`
+	TotalOccurrences int64                 `json:"total_occurrences"`
+	Items            []PerfMetricErrorItem `json:"items"`
+}
+
+type PerfMetricErrorItem struct {
+	PerfMetricError
+	GroupKey        string `json:"group_key,omitempty"`
+	ErrorGroupID    int64  `json:"error_group_id,omitempty"`
+	OccurrenceCount int64  `json:"occurrence_count,omitempty"`
+	FirstSeen       int64  `json:"first_seen,omitempty"`
+	LastSeen        int64  `json:"last_seen,omitempty"`
+}
+
+func ListPerfMetricErrors(query PerfMetricErrorQuery) (PerfMetricErrorPage, error) {
+	pageSize := query.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	startIndex := query.StartIndex
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	page := PerfMetricErrorPage{
+		Page: startIndex/pageSize + 1, PageSize: pageSize, Items: []PerfMetricErrorItem{},
+	}
+	tx := perfMetricErrorsQuery(query).Session(&gorm.Session{})
+	if query.ErrorGroupID > 0 {
+		var reference PerfMetricError
+		if err := tx.Where("id = ?", query.ErrorGroupID).First(&reference).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return page, nil
+			}
+			return page, err
+		}
+		tx = perfMetricErrorGroupQuery(tx, reference).Where("id <= ?", reference.Id)
+	} else if query.Grouped {
+		return listPerfMetricErrorGroups(tx, page, startIndex)
+	}
+	if err := tx.Count(&page.Total).Error; err != nil {
+		return page, err
+	}
+	items := make([]PerfMetricError, 0, pageSize)
+	if err := tx.Order("created_at desc, id desc").Limit(pageSize).Offset(startIndex).Find(&items).Error; err != nil {
+		return page, err
+	}
+	for _, item := range items {
+		page.Items = append(page.Items, PerfMetricErrorItem{PerfMetricError: item})
+	}
+	page.TotalOccurrences = page.Total
+	return page, nil
+}
+
+func perfMetricErrorsQuery(query PerfMetricErrorQuery) *gorm.DB {
+	tx := DB.Model(&PerfMetricError{}).
+		Where("created_at >= ?", time.Now().Add(-perfMetricErrorRetention).Unix()).
+		Where("NOT (COALESCE(status_code, 0) IN ? AND LOWER(TRIM(COALESCE(error_code, ''))) IN ?)",
+			[]int{http.StatusBadRequest, http.StatusTooManyRequests},
+			[]string{perfMetricSessionCreationLimitCode, perfMetricAccountSessionCapacityCode})
+	if query.ModelName != "" {
+		tx = tx.Where("model_name = ?", query.ModelName)
+	}
+	if query.Group != "" {
+		tx = tx.Where(commonGroupCol+" = ?", query.Group)
+	}
+	if query.Username != "" {
+		tx = tx.Where("username = ?", query.Username)
+	}
+	if query.ErrorType != "" {
+		tx = tx.Where("error_type = ?", query.ErrorType)
+	}
+	if query.ErrorCode != "" {
+		tx = tx.Where("error_code = ?", query.ErrorCode)
+	}
+	if query.UserID > 0 {
+		tx = tx.Where("user_id = ?", query.UserID)
+	}
+	if query.StatusCode > 0 {
+		tx = tx.Where("status_code = ?", query.StatusCode)
+	}
+	if query.StartTimestamp > 0 {
+		tx = tx.Where("created_at >= ?", query.StartTimestamp)
+	}
+	if query.EndTimestamp > 0 {
+		tx = tx.Where("created_at <= ?", query.EndTimestamp)
+	}
+
+	return tx
+}
+
+func CreatePerfMetricError(item *PerfMetricError) error {
+	if item == nil || item.ModelName == "" || IsSessionWindowCapacityError(item.StatusCode, item.ErrorCode) {
+		return nil
+	}
+	if item.CreatedAt <= 0 {
+		item.CreatedAt = time.Now().Unix()
+	}
+	return DB.Create(item).Error
+}
+
+func DeleteExpiredPerfMetricErrors(now time.Time) error {
+	cutoffTs := now.Add(-perfMetricErrorRetention).Unix()
+	if cutoffTs <= 0 {
+		return nil
+	}
+	for {
+		var expiredIDs []int64
+		if err := DB.Model(&PerfMetricError{}).
+			Where("created_at < ?", cutoffTs).
+			Order("created_at ASC, id ASC").Limit(500).
+			Pluck("id", &expiredIDs).Error; err != nil {
+			return err
+		}
+		if len(expiredIDs) == 0 {
+			return nil
+		}
+		if err := DB.Where("id IN ? AND created_at < ?", expiredIDs, cutoffTs).
+			Delete(&PerfMetricError{}).Error; err != nil {
+			return err
+		}
+	}
+}
+
+// ClearPerfMetricErrors removes the current detail history only. Snapshot the
+// ID boundary so errors inserted while cleanup runs remain visible as new.
+func ClearPerfMetricErrors(ctx context.Context) (int64, error) {
+	var lastID int64
+	if err := DB.WithContext(ctx).Model(&PerfMetricError{}).Select("COALESCE(MAX(id), 0)").Scan(&lastID).Error; err != nil {
+		return 0, err
+	}
+	if lastID == 0 {
+		return 0, nil
+	}
+	result := DB.WithContext(ctx).Where("id <= ?", lastID).Delete(&PerfMetricError{})
+	return result.RowsAffected, result.Error
+}

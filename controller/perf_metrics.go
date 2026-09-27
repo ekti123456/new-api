@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"net/http"
 	"strconv"
 
@@ -70,4 +72,51 @@ func GetPerfMetrics(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+func GetPerfMetricErrors(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	userID, _ := strconv.Atoi(c.Query("user_id"))
+	statusCode, _ := strconv.Atoi(c.Query("status_code"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	grouped, _ := strconv.ParseBool(c.Query("grouped"))
+	var errorGroupID int64
+	if c.Request.URL.Query().Has("error_group_id") {
+		var err error
+		errorGroupID, err = strconv.ParseInt(c.Query("error_group_id"), 10, 64)
+		if err != nil || errorGroupID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid error_group_id"})
+			return
+		}
+	}
+	result, err := model.ListPerfMetricErrors(model.PerfMetricErrorQuery{
+		Grouped:        grouped,
+		ErrorGroupID:   errorGroupID,
+		ModelName:      c.Query("model_name"),
+		Group:          c.Query("group"),
+		Username:       c.Query("username"),
+		ErrorType:      c.Query("error_type"),
+		ErrorCode:      c.Query("error_code"),
+		UserID:         userID,
+		StatusCode:     statusCode,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		StartIndex:     pageInfo.GetStartIdx(),
+		PageSize:       pageInfo.GetPageSize(),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func ClearPerfMetricErrors(c *gin.Context) {
+	deleted, err := model.ClearPerfMetricErrors(c.Request.Context())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": deleted})
 }

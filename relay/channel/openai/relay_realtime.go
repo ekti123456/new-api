@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -111,6 +112,13 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 						errChan <- fmt.Errorf("error reading from target: %v", err)
 					}
+					close(targetClosed)
+					return
+				}
+				policyResult := relaychannel.ProcessNewAPIPolicyWebSocketMessage(c, message)
+				message = relaychannel.SanitizeCodexDispatchWebSocketMessage(c, message)
+				if policyResult.Terminate {
+					_ = clientConn.WriteMessage(websocket.TextMessage, message)
 					close(targetClosed)
 					return
 				}

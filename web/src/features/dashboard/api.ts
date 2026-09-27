@@ -1,3 +1,6 @@
+import { api } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
+
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,10 +19,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
-
 import type {
   FlowQuotaDataItem,
+  PerformanceErrorsData,
   QuotaDataItem,
   UptimeGroupResult,
 } from './types'
@@ -90,4 +92,58 @@ export async function getUptimeStatus() {
     '/api/uptime/status'
   )
   return res.data
+}
+
+export type PerformanceErrorQuery = {
+  grouped?: boolean
+  errorGroupId?: number
+  startTimestamp?: number
+  endTimestamp?: number
+  username?: string
+  errorType?: string
+  errorCode?: string
+  group?: string
+  modelName?: string
+  statusCode?: number
+  page: number
+  pageSize: number
+}
+
+export async function getPerformanceErrors(params: PerformanceErrorQuery) {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data: PerformanceErrorsData
+  }>('/api/data/performance-errors', {
+    params: {
+      p: params.page,
+      page_size: params.pageSize,
+      ...(params.grouped != null ? { grouped: params.grouped } : {}),
+      ...(params.errorGroupId != null
+        ? { error_group_id: params.errorGroupId }
+        : {}),
+      ...(params.startTimestamp != null
+        ? { start_timestamp: params.startTimestamp }
+        : {}),
+      ...(params.endTimestamp != null
+        ? { end_timestamp: params.endTimestamp }
+        : {}),
+      ...(params.username ? { username: params.username } : {}),
+      ...(params.errorType ? { error_type: params.errorType } : {}),
+      ...(params.errorCode ? { error_code: params.errorCode } : {}),
+      ...(params.group ? { group: params.group } : {}),
+      ...(params.modelName ? { model_name: params.modelName } : {}),
+      ...(params.statusCode ? { status_code: params.statusCode } : {}),
+    },
+  })
+  return requireServerSuccess(res.data)
+}
+
+export async function clearPerformanceErrors() {
+  const res = await api.delete<{
+    success: boolean
+    message?: string
+    data: { deleted: number }
+  }>('/api/data/performance-errors')
+  return requireServerSuccess(res.data)
 }

@@ -114,6 +114,7 @@ type responsesWSSession struct {
 	lockedKeyIndex  int
 	lockedContext   map[appconstant.ContextKey]any
 	lockedRoute     dto.AdvancedCustomRoute
+	lockedPolicy    *relaychannel.NewAPIPolicyConnection
 }
 
 func ResponsesWebSocketHelper(c *gin.Context, client *websocket.Conn, runner ResponsesWSRequestRunner) *types.NewAPIError {
@@ -225,6 +226,8 @@ func (s *responsesWSSession) runRequest(state *responsesWSCallState, message []b
 }
 
 func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState, create responsesWSCreateRequest) (apiErr *types.NewAPIError) {
+	common.ClearCodexUpstreamError(c)
+	common.ClearCodexDispatchDiagnostic(c)
 	policy := service.RequestPolicy(c)
 	modelName := create.Request.Model
 	started := time.Now()
@@ -239,6 +242,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			info = &relaycommon.RelayInfo{OriginModelName: modelName, UsingGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), StartTime: started}
 		}
 		perfmetrics.RecordRelayResult(c.Request.Context(), info, apiErr)
+		perfmetrics.RecordRelayError(c, info, apiErr)
 		// Settlement already marks the request policy successful, and nothing
 		// reads a termination decision after this point on the WebSocket path,
 		// so neither policy record belongs here.
@@ -282,6 +286,8 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	} else {
 		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
 		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
+			common.ClearCodexUpstreamError(c)
+			common.ClearCodexDispatchDiagnostic(c)
 			var channel *appmodel.Channel
 			channel, apiErr = selectResponsesWSChannel(c, modelName, retry)
 			if apiErr != nil {
@@ -346,6 +352,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					s.lockedContext[key] = value
 				}
 			}
+			s.lockedPolicy = relaychannel.CaptureNewAPIPolicyConnection(c)
 			s.registerChannelClose(channel.Id)
 			s.startTargetReader(target)
 			apiErr = nil
@@ -356,6 +363,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 	}
 
+	s.lockedPolicy.Bind(c)
+	policyTerminated := false
+	defer func() { state.closeAfter = state.closeAfter || policyTerminated }()
 	accumulator := service.NewResponsesUsageAccumulator(info)
 	info.StreamStatus = relaycommon.NewStreamStatus()
 	info.StreamStatus.RequireTerminal()
@@ -399,6 +409,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				if event.Response != nil && event.Response.ID != "" && event.Response.ID == s.lastResponseID {
 					continue
 				}
+				policyResult := relaychannel.ProcessNewAPIPolicyWebSocketMessage(c, incoming.body)
+				policyTerminated = policyTerminated || policyResult.Terminate
+				incoming.body = relaychannel.SanitizeCodexDispatchWebSocketMessage(c, incoming.body)
 				if event.Type == "error" {
 					var rejection responsesWSErrorEvent
 					_ = common.Unmarshal(incoming.body, &rejection)
@@ -628,6 +641,7 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 				case state.inbox <- incoming:
 				case <-state.done:
 					if err == nil {
+						body = relaychannel.SanitizeCodexDispatchWebSocketMessage(nil, body)
 						if writeErr := s.writeClient(kind, body); writeErr != nil {
 							s.shutdown()
 							return
@@ -639,6 +653,7 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 					return
 				}
 			} else if err == nil {
+				body = relaychannel.SanitizeCodexDispatchWebSocketMessage(nil, body)
 				if writeErr := s.writeClient(kind, body); writeErr != nil {
 					s.shutdown()
 					return

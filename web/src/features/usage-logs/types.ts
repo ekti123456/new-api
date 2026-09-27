@@ -116,6 +116,18 @@ export interface ToolSurchargeItem {
 
 export interface LogOtherData {
   admin_info?: {
+    upstream_error?: {
+      message: string
+      code?: string
+      type?: string
+      source: string
+      stage: string
+      transport?: string
+      http_status?: number
+      handshake_status?: number
+      upstream_request_id?: string
+      gateway_request_id?: string
+    }
     request_policy?: PolicyEvent[]
     is_multi_key?: boolean
     multi_key_index?: number

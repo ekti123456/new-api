@@ -73,6 +73,12 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 	other.SetAdmin("use_channel", ctx.GetStringSlice("use_channel"))
 	if relayInfo != nil {
+		if diagnostic, ok := common.GetCodexUpstreamError(ctx, relayInfo.ChannelId); ok {
+			other.SetAdmin("upstream_error", diagnostic)
+		}
+		if diagnostic, ok := common.GetCodexDispatchDiagnostic(ctx, relayInfo.ChannelId, 503); ok {
+			other.SetAdmin("dispatch_diagnostic", diagnostic)
+		}
 		if billingModel := relayInfo.GetBillingModelName(); billingModel != "" && billingModel != relayInfo.OriginModelName {
 			other.SetAdmin("billing_model", billingModel)
 		}

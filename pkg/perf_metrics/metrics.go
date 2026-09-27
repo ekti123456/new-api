@@ -26,6 +26,7 @@ const seriesSchema = "dbcd0a3c01b55203"
 
 func Init() {
 	go flushLoop()
+	go cleanupPerfMetricErrorsLoop()
 }
 
 // RecordRelayResult samples one finished relay exactly once, at the request

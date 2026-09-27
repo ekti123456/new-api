@@ -403,6 +403,9 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	identityRequest.Header = targetHeader
+	if err := applyNewAPIPolicyHeaders(c, identityRequest, info, nil); err != nil {
+		return nil, err
+	}
 	if err := applyCPAIdentity(c, identityRequest, info); err != nil {
 		return nil, err
 	}
@@ -415,6 +418,12 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		dialer.Proxy = http.ProxyURL(proxyURL)
 	}
 	targetConn, resp, err := dialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
+	if resp != nil {
+		resp.Request = identityRequest
+		if processNewAPIPolicyResponse(c, resp) && err != nil {
+			return nil, service.RelayErrorHandler(c, resp, false)
+		}
+	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		if resp != nil {
@@ -527,6 +536,9 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	if err := applyNewAPIPolicyHeaders(c, req, info, nil); err != nil {
+		return nil, err
+	}
 	if err := applyCPAIdentity(c, req, info); err != nil {
 		return nil, err
 	}
@@ -572,6 +584,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	resp, err := relayClient.Do(req)
+	if resp != nil {
+		processNewAPIPolicyResponse(c, resp)
+	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))

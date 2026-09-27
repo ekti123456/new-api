@@ -337,6 +337,8 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		dataRoute := apiRouter.Group("/data")
+		dataRoute.GET("/performance-errors", middleware.AdminAuth(), controller.GetPerfMetricErrors)
+		dataRoute.DELETE("/performance-errors", middleware.AdminAuth(), controller.ClearPerfMetricErrors)
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)

@@ -95,6 +95,12 @@ const LazyConsumptionDistributionChart = lazy(() =>
   }))
 )
 
+const LazyPerformanceErrorsPanel = lazy(() =>
+  import('./components/models/performance-errors-panel').then((m) => ({
+    default: m.PerformanceErrorsPanel,
+  }))
+)
+
 const LazyPerformanceOverview = lazy(() =>
   import('./components/models/performance-overview').then((m) => ({
     default: m.PerformanceOverview,
@@ -360,6 +366,7 @@ export function Dashboard() {
                 <FadeIn delay={0.05}>
                   <Suspense fallback={<PerformanceOverviewFallback />}>
                     <LazyPerformanceOverview />
+                    <LazyPerformanceErrorsPanel filters={modelFilters} />
                   </Suspense>
                 </FadeIn>
               )}

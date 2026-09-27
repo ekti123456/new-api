@@ -90,6 +90,7 @@ import {
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { UpstreamErrorDetails } from '../upstream-error-details'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -748,6 +749,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
+
+        <UpstreamErrorDetails
+          diagnostic={adminInfo?.upstream_error}
+          isAdmin={props.isAdmin}
+        />
 
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (

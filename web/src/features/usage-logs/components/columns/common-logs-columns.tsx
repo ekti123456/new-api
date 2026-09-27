@@ -75,6 +75,7 @@ import { DetailsDialog } from '../dialogs/details-dialog'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
+import { UpstreamErrorDetails } from '../upstream-error-details'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
 interface DetailSegment {
@@ -855,6 +856,14 @@ export function useCommonLogsColumns(
                   </span>
                 )}
               </span>
+            )
+          } else if (isAdmin && other?.admin_info?.upstream_error?.message) {
+            detailPreview = (
+              <UpstreamErrorDetails
+                diagnostic={other.admin_info.upstream_error}
+                isAdmin
+                compact
+              />
             )
           } else if (log.content) {
             detailPreview = (

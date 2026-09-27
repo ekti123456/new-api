@@ -1,0 +1,480 @@
+import {
+  Alert02Icon,
+  FilterIcon,
+  RefreshIcon,
+  RotateLeft01Icon,
+  Search01Icon,
+  Delete02Icon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
+import { IconBadge } from '@/components/ui/icon-badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  clearPerformanceErrors,
+  getPerformanceErrors,
+  type PerformanceErrorQuery,
+} from '@/features/dashboard/api'
+import type { DashboardFilters } from '@/features/dashboard/types'
+import { toIntlLocale } from '@/i18n/languages'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { formatNumber } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
+import { computeTimeRange } from '@/lib/time'
+import { cn } from '@/lib/utils'
+
+import { PerformanceErrorGroup } from './performance-error-group'
+
+type PerformanceErrorsPanelProps = {
+  filters?: DashboardFilters
+}
+
+const PAGE_SIZE = 20
+
+type ErrorFilters = {
+  modelName: string
+  username: string
+  group: string
+  errorType: string
+  errorCode: string
+  statusCode: string
+}
+
+function emptyErrorFilters(username = ''): ErrorFilters {
+  return {
+    modelName: '',
+    username,
+    group: '',
+    errorType: '',
+    errorCode: '',
+    statusCode: '',
+  }
+}
+
+export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
+  const { t, i18n } = useTranslation()
+  const [page, setPage] = useState(1)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const clearMutation = useMutation({
+    mutationFn: () => clearPerformanceErrors(),
+    onSuccess: async () => {
+      setClearOpen(false)
+      setPage(1)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard-performance-errors'],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard-performance-error-details'],
+        }),
+      ])
+      toast.success(t('Performance errors cleared'))
+    },
+    onError: handleServerError,
+  })
+  const [errorFilters, setErrorFilters] = useState<ErrorFilters>(() =>
+    emptyErrorFilters(props.filters?.username)
+  )
+  const [draftFilters, setDraftFilters] = useState<ErrorFilters>(() =>
+    emptyErrorFilters(props.filters?.username)
+  )
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language) || 'en-US'
+  const timeRange = useMemo(
+    () =>
+      computeTimeRange(
+        1,
+        props.filters?.start_timestamp,
+        props.filters?.end_timestamp
+      ),
+    [props.filters?.end_timestamp, props.filters?.start_timestamp]
+  )
+
+  useEffect(() => {
+    setErrorFilters((current) => ({
+      ...current,
+      username: props.filters?.username ?? '',
+    }))
+  }, [props.filters?.username])
+
+  useEffect(() => {
+    setPage(1)
+  }, [
+    errorFilters.errorCode,
+    errorFilters.errorType,
+    errorFilters.group,
+    errorFilters.modelName,
+    errorFilters.statusCode,
+    errorFilters.username,
+    props.filters?.end_timestamp,
+    props.filters?.start_timestamp,
+  ])
+
+  const statusCode = Number.parseInt(errorFilters.statusCode, 10)
+  const hasErrorFilters = Object.values(errorFilters).some(
+    (value) => value.trim() !== ''
+  )
+
+  const queryParams: PerformanceErrorQuery = {
+    grouped: true,
+    startTimestamp: timeRange.start_timestamp,
+    endTimestamp: timeRange.end_timestamp,
+    username: errorFilters.username || undefined,
+    errorType: errorFilters.errorType || undefined,
+    errorCode: errorFilters.errorCode || undefined,
+    group: errorFilters.group || undefined,
+    modelName: errorFilters.modelName || undefined,
+    statusCode:
+      Number.isFinite(statusCode) && statusCode > 0 ? statusCode : undefined,
+    page,
+    pageSize: PAGE_SIZE,
+  }
+  const query = useQuery({
+    queryKey: [
+      'dashboard-performance-errors',
+      timeRange.start_timestamp,
+      timeRange.end_timestamp,
+      errorFilters.errorCode,
+      errorFilters.errorType,
+      errorFilters.group,
+      errorFilters.modelName,
+      errorFilters.statusCode,
+      errorFilters.username,
+      page,
+    ],
+    queryFn: () => getPerformanceErrors(queryParams),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+    retry: false,
+  })
+  const data = query.data?.data
+  const totalPages = data
+    ? Math.max(1, Math.ceil(data.total / data.page_size))
+    : 1
+
+  return (
+    <div className='overflow-hidden rounded-lg border'>
+      <div className='flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 sm:px-5'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <IconBadge tone='destructive' size='sm'>
+            <HugeiconsIcon icon={Alert02Icon} />
+          </IconBadge>
+          <div className='min-w-0'>
+            <div className='truncate text-sm font-semibold'>
+              {t('Performance errors')}
+            </div>
+            <div className='text-muted-foreground text-xs'>
+              {t(
+                'Same user and error code are grouped; expand the count to view individual requests'
+              )}
+            </div>
+          </div>
+        </div>
+        <div className='flex items-center gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            aria-label={t('Clear performance errors')}
+            disabled={clearMutation.isPending}
+            onClick={() => {
+              clearMutation.reset()
+              setClearOpen(true)
+            }}
+          >
+            <HugeiconsIcon icon={Delete02Icon} data-icon='inline-start' />
+            {t('Clear performance errors')}
+          </Button>
+          <ConfirmDialog
+            open={clearOpen}
+            onOpenChange={(open) => {
+              if (!clearMutation.isPending) setClearOpen(open)
+            }}
+            title={t('Clear all performance errors')}
+            desc={t(
+              'Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.'
+            )}
+            confirmText={t('Clear all performance errors')}
+            destructive
+            isLoading={clearMutation.isPending}
+            handleConfirm={() => clearMutation.mutate(undefined)}
+          >
+            {clearMutation.isError && (
+              <p role='alert' className='text-destructive text-sm'>
+                {t('Unable to clear performance errors')}
+              </p>
+            )}
+          </ConfirmDialog>
+          <Dialog
+            open={filterOpen}
+            onOpenChange={setFilterOpen}
+            title={t('Error filters')}
+            description={t(
+              'Filter final performance errors by request metadata'
+            )}
+            contentClassName='sm:max-w-lg'
+            footer={
+              <>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => {
+                    const next = emptyErrorFilters(props.filters?.username)
+                    setDraftFilters(next)
+                    setErrorFilters(next)
+                    setFilterOpen(false)
+                  }}
+                >
+                  <HugeiconsIcon
+                    icon={RotateLeft01Icon}
+                    data-icon='inline-start'
+                  />
+                  {t('Reset')}
+                </Button>
+                <Button
+                  type='button'
+                  onClick={() => {
+                    setErrorFilters({ ...draftFilters })
+                    setFilterOpen(false)
+                  }}
+                >
+                  <HugeiconsIcon icon={Search01Icon} data-icon='inline-start' />
+                  {t('Apply Filters')}
+                </Button>
+              </>
+            }
+            trigger={
+              <Button
+                type='button'
+                variant={hasErrorFilters ? 'default' : 'outline'}
+                size='sm'
+                onClick={() => setDraftFilters({ ...errorFilters })}
+              >
+                <HugeiconsIcon icon={FilterIcon} data-icon='inline-start' />
+                {t('Filter')}
+              </Button>
+            }
+          >
+            <div className='grid gap-3 py-2 sm:grid-cols-2'>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-model'>{t('Model')}</Label>
+                <Input
+                  id='performance-error-model'
+                  value={draftFilters.modelName}
+                  placeholder={t('Model name')}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      modelName: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-user'>{t('User')}</Label>
+                <Input
+                  id='performance-error-user'
+                  value={draftFilters.username}
+                  placeholder={t('Username')}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-group'>{t('Group')}</Label>
+                <Input
+                  id='performance-error-group'
+                  value={draftFilters.group}
+                  placeholder={t('Group')}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      group: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-status'>
+                  {t('Status code')}
+                </Label>
+                <Input
+                  id='performance-error-status'
+                  type='number'
+                  min='100'
+                  max='599'
+                  value={draftFilters.statusCode}
+                  placeholder='503'
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      statusCode: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-type'>
+                  {t('Error type')}
+                </Label>
+                <Input
+                  id='performance-error-type'
+                  value={draftFilters.errorType}
+                  placeholder={t('Error type')}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      errorType: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor='performance-error-code'>
+                  {t('Error code')}
+                </Label>
+                <Input
+                  id='performance-error-code'
+                  value={draftFilters.errorCode}
+                  placeholder={t('Error code')}
+                  onChange={(event) =>
+                    setDraftFilters((current) => ({
+                      ...current,
+                      errorCode: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+          </Dialog>
+          <span className='text-muted-foreground text-xs tabular-nums'>
+            {t('Error groups')}: {formatNumber(data?.total ?? 0, locale)}
+            {' · '}
+            {t('Occurrences')}:{' '}
+            {formatNumber(data?.total_occurrences ?? 0, locale)}
+          </span>
+          <button
+            type='button'
+            className='text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-50'
+            aria-label={t('Refresh')}
+            title={t('Refresh')}
+            disabled={query.isFetching}
+            onClick={() => void query.refetch()}
+          >
+            <HugeiconsIcon
+              icon={RefreshIcon}
+              className={cn('size-3.5', query.isFetching && 'animate-spin')}
+            />
+          </button>
+        </div>
+      </div>
+
+      <div className='max-h-[34rem] overflow-auto'>
+        {query.isLoading && (
+          <div className='space-y-3 px-4 py-4 sm:px-5'>
+            {['error-1', 'error-2', 'error-3'].map((key) => (
+              <Skeleton key={key} className='h-12 w-full' />
+            ))}
+          </div>
+        )}
+        {!query.isLoading && query.isError && (
+          <div className='text-destructive px-4 py-8 text-center text-xs'>
+            {t('Unable to load performance errors')}
+          </div>
+        )}
+        {!query.isLoading && !query.isError && data?.items.length === 0 && (
+          <div className='text-muted-foreground px-4 py-8 text-center text-xs'>
+            {t('No performance errors in the selected period')}
+          </div>
+        )}
+        {!query.isLoading && !query.isError && data?.items.length ? (
+          <div>
+            <div className='text-muted-foreground bg-muted/30 grid min-w-[91rem] grid-cols-[10rem_minmax(9rem,1fr)_minmax(9rem,1fr)_5rem_11rem_minmax(18rem,2fr)_minmax(11rem,1fr)_minmax(9rem,1fr)_5rem] gap-3 px-5 py-2 text-xs font-medium'>
+              <span>{t('Time')}</span>
+              <span>{t('User')}</span>
+              <span>{t('Model')}</span>
+              <span>{t('Status')}</span>
+              <span>{t('Error type')}</span>
+              <span>{t('Reason')}</span>
+              <span>{t('Request ID')}</span>
+              <span>{t('Channel')}</span>
+              <span className='text-right'>{t('Occurrences')}</span>
+            </div>
+            {data.items.map((item) => (
+              <PerformanceErrorGroup
+                key={`${JSON.stringify(queryParams)}:${item.group_key ?? item.id}`}
+                item={item}
+                locale={locale}
+                filters={queryParams}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {data && data.total > data.page_size ? (
+        <div className='flex items-center justify-between gap-3 border-t px-4 py-2.5 sm:px-5'>
+          <span className='text-muted-foreground text-xs tabular-nums'>
+            {t('Page {{current}} of {{total}}', {
+              current: data.page,
+              total: totalPages,
+            })}
+          </span>
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={query.isFetching || data.page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              {t('Previous page')}
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={query.isFetching || data.page >= totalPages}
+              onClick={() =>
+                setPage((current) => Math.min(totalPages, current + 1))
+              }
+            >
+              {t('Next page')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}

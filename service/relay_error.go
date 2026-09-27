@@ -22,6 +22,9 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}
+	if diagnostic, ok := common.GetCodexDispatchDiagnostic(c, c.GetInt("channel_id"), err.StatusCode); ok && (diagnostic.Retry == "stop" || diagnostic.Retry == "backoff_same_route" || diagnostic.Stream) {
+		return PolicyDecision{Action: "stop", Reason: "codex_dispatch_" + diagnostic.Reason, Source: "upstream"}
+	}
 	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		source := RequestPolicy(c).SessionModeSource
 		if source == "" {
