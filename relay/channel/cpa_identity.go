@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -24,7 +23,7 @@ func applyCPAIdentity(c *gin.Context, req *http.Request, info *relaycommon.Relay
 			delete(req.Header, name)
 		}
 	}
-	instance := strings.TrimSpace(os.Getenv("CPA_IDENTITY_INSTANCE_ID"))
+	instance := CPAIdentityInstanceID()
 	if instance == "" || info.UserId <= 0 || info.TokenId <= 0 {
 		return nil
 	}

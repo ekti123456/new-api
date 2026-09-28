@@ -449,6 +449,16 @@ func newAPIPolicySessionFingerprint(secret, platformID, userID, sessionID string
 }
 
 func loadNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
+	if saved, ok, err := savedNewAPIPolicySettings(); ok || err != nil {
+		if err != nil {
+			return newAPIPolicyConfig{}, err
+		}
+		return saved.runtime(), nil
+	}
+	return loadEnvNewAPIPolicyConfig()
+}
+
+func loadEnvNewAPIPolicyConfig() (newAPIPolicyConfig, error) {
 	enabled, err := policyEnvBool("CODEX2API_POLICY_ENABLED", false)
 	if err != nil || !enabled {
 		return newAPIPolicyConfig{Enabled: enabled}, err

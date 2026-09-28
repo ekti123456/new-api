@@ -1,3 +1,4 @@
+import { SystemBehaviorSection } from '../general/system-behavior-section'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { SystemBehaviorSection } from '../general/system-behavior-section'
+import { CodexAuditSettingsSection } from '../integrations/codex-audit-settings-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
@@ -27,6 +28,11 @@ import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
 const OPERATIONS_SECTIONS = [
+  {
+    id: 'codex-audit',
+    titleKey: 'Codex2API Audit',
+    build: () => <CodexAuditSettingsSection />,
+  },
   {
     id: 'behavior',
     titleKey: 'System Behavior',
