@@ -205,6 +205,9 @@ func SetApiRouter(router *gin.Engine) {
 		optionRoute.Use(middleware.RootAuth())
 		{
 			optionRoute.GET("/", controller.GetOptions)
+			optionRoute.GET("/request-rate-limits", controller.GetIndependentRateLimits)
+			optionRoute.PUT("/request-rate-limits", middleware.CriticalRateLimit(), controller.SaveIndependentRateLimits)
+			optionRoute.GET("/request-rate-limits/usage", controller.GetIndependentRateUsage)
 			optionRoute.GET("/codex2api-policy", controller.GetCodex2APIPolicySettings)
 			optionRoute.PUT("/codex2api-policy", middleware.CriticalRateLimit(), controller.SaveCodex2APIPolicySettings)
 			optionRoute.POST("/codex2api-policy/test", middleware.CriticalRateLimit(), controller.TestCodex2APIConnection)

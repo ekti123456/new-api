@@ -19,3 +19,14 @@ func TestCodexAuditSettingsRequireAuthentication(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 	}
 }
+
+func TestIndependentRateSettingsRequireAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	SetApiRouter(router)
+	for _, tc := range []struct{ method, path string }{{"GET", ""}, {"PUT", ""}, {"GET", "/usage"}} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(tc.method, "/api/option/request-rate-limits"+tc.path, nil))
+		require.Equal(t, 401, w.Code)
+	}
+}

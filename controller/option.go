@@ -201,6 +201,9 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case "IndependentRequestRateLimit":
+		common.ApiErrorMsg(c, "Use the independent rate limits editor")
+		return
 	case "Codex2APIPolicySecret":
 		common.ApiErrorMsg(c, "Use the Codex2API audit settings editor")
 		return
