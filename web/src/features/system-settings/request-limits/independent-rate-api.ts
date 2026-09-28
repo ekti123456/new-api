@@ -103,7 +103,7 @@ export function blankRateRule(): RateRule {
     ua_mode: 'exact',
     ua: 'Go-http-client/2.0',
     stream: 'non_stream',
-    limit: 100,
+    limit: 30,
     overrides: [],
   }
 }
