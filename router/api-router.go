@@ -202,6 +202,10 @@ func SetApiRouter(router *gin.Engine) {
 		optionRoute.Use(middleware.RootAuth())
 		{
 			optionRoute.GET("/", controller.GetOptions)
+			optionRoute.GET("/codex2api-policy", controller.GetCodex2APIPolicySettings)
+			optionRoute.PUT("/codex2api-policy", middleware.CriticalRateLimit(), controller.SaveCodex2APIPolicySettings)
+			optionRoute.POST("/codex2api-policy/test", middleware.CriticalRateLimit(), controller.TestCodex2APIConnection)
+			optionRoute.GET("/codex2api-policy/status", controller.GetCodex2APIConnectionStatus)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
