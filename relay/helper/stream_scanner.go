@@ -288,6 +288,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
+				// Closing the body after a terminal event or cancellation is
+				// cleanup, not an additional upstream scanner failure.
+				select {
+				case <-ctx.Done():
+					return
+				case <-stopChan:
+					return
+				default:
+				}
 				logger.LogError(c, "scanner error: "+err.Error())
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
 			}

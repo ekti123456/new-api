@@ -43,7 +43,7 @@ type StreamErrorEntry struct {
 type StreamStatus struct {
 	EndReason StreamEndReason
 	EndError  error
-	endOnce   sync.Once
+	delivery  StreamDeliveryStatus
 
 	mu         sync.Mutex
 	Errors     []StreamErrorEntry
@@ -55,6 +55,16 @@ type StreamStatus struct {
 	errorStatus      int
 	incompleteReason string
 	expectsTerminal  bool
+}
+
+// StreamDeliveryStatus records local delivery separately from model outcome.
+// A successful flush does not prove application-level receipt by the client.
+type StreamDeliveryStatus struct {
+	TerminalEvent      string `json:"terminal_event,omitempty"`
+	TerminalWrite      string `json:"terminal_write,omitempty"`
+	TerminalReceivedAt int64  `json:"terminal_received_at_unix_ms,omitempty"`
+	TerminalFlushedAt  int64  `json:"terminal_flushed_at_unix_ms,omitempty"`
+	ClientCanceledAt   int64  `json:"client_canceled_at_unix_ms,omitempty"`
 }
 
 // StreamOutcome holds classification facts only; upstream messages never
@@ -78,10 +88,50 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	if s == nil {
 		return
 	}
-	s.endOnce.Do(func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if reason == StreamEndReasonClientGone && s.delivery.ClientCanceledAt == 0 {
+		s.delivery.ClientCanceledAt = time.Now().UnixMilli()
+	}
+	terminalFlushed := s.delivery.TerminalEvent != "" && s.delivery.TerminalWrite == "flushed"
+	if s.EndReason == StreamEndReasonNone || (reason == StreamEndReasonDone && s.EndReason == StreamEndReasonClientGone && terminalFlushed) {
 		s.EndReason = reason
 		s.EndError = err
-	})
+	}
+}
+
+func (s *StreamStatus) ObserveTerminal(eventType string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delivery.TerminalEvent = eventType
+	s.delivery.TerminalReceivedAt = time.Now().UnixMilli()
+	s.delivery.TerminalWrite = "pending"
+}
+
+func (s *StreamStatus) RecordTerminalWrite(err error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.delivery.TerminalWrite = "failed"
+		return
+	}
+	s.delivery.TerminalWrite = "flushed"
+	s.delivery.TerminalFlushedAt = time.Now().UnixMilli()
+}
+
+func (s *StreamStatus) DeliverySnapshot() StreamDeliveryStatus {
+	if s == nil {
+		return StreamDeliveryStatus{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.delivery
 }
 
 func (s *StreamStatus) RecordError(msg string) {
@@ -210,6 +260,8 @@ func (s *StreamStatus) IsNormalEnd() bool {
 	if s == nil {
 		return true
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.EndReason == StreamEndReasonDone ||
 		s.EndReason == StreamEndReasonEOF ||
 		s.EndReason == StreamEndReasonHandlerStop
@@ -219,15 +271,15 @@ func (s *StreamStatus) Summary() string {
 	if s == nil {
 		return "StreamStatus<nil>"
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "reason=%s", s.EndReason)
 	if s.EndError != nil {
 		fmt.Fprintf(b, " end_error=%q", s.EndError.Error())
 	}
-	s.mu.Lock()
 	if s.ErrorCount > 0 {
 		fmt.Fprintf(b, " soft_errors=%d", s.ErrorCount)
 	}
-	s.mu.Unlock()
 	return b.String()
 }

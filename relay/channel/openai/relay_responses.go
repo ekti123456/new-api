@@ -91,8 +91,27 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		// Preserve upstream usage and protocol outcome even when delivery fails.
 		accumulator.Observe(&streamResponse)
+		terminal := false
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "response.cancelled", "response.canceled", "error":
+			terminal = true
+			info.StreamStatus.ObserveTerminal(streamResponse.Type)
+		}
+		writeErr := sendResponsesStreamData(c, streamResponse, data)
+		if terminal {
+			info.StreamStatus.RecordTerminalWrite(writeErr)
+		}
+		if writeErr != nil {
+			sr.Stop(fmt.Errorf("failed to write responses stream event %s: %w", streamResponse.Type, writeErr))
+			return
+		}
+		if terminal {
+			// Responses terminates at its protocol event, without requiring
+			// Chat Completions' [DONE] marker or a subsequent transport EOF.
+			sr.Done()
+		}
 	})
 
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)

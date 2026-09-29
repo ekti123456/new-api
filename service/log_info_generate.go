@@ -172,6 +172,9 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther)
 		"status":     status,
 		"end_reason": string(ss.EndReason),
 	}
+	if delivery := ss.DeliverySnapshot(); delivery.TerminalEvent != "" || delivery.ClientCanceledAt != 0 {
+		streamInfo["delivery"] = delivery
+	}
 	if outcome := ss.ResponseOutcome(); outcome != "" {
 		streamInfo["response_status"] = outcome
 	}
