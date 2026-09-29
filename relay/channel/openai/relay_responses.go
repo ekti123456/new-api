@@ -98,7 +98,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		terminal := false
 		switch streamResponse.Type {
-		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "response.cancelled", "response.canceled":
+		case "response.completed", "response.done", "response.incomplete", "response.failed", "response.error", "response.cancelled", "response.canceled", "error":
 			terminal = true
 			responseStatus, incompleteReason := "", ""
 			if streamResponse.Response != nil {
@@ -157,7 +157,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				imageCounter.Commit(info)
 				imageCommitted = true
 			}
-		case "response.failed", "response.error":
+		case "response.failed", "response.error", "error":
 			if !imageCommitted {
 				imageCounter.Reset()
 				imageCounter.Commit(info)

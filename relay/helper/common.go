@@ -3,6 +3,7 @@ package helper
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -29,13 +30,15 @@ func FlushWriter(c *gin.Context) (err error) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return errors.New("streaming error: flusher not found")
+	c.Writer.WriteHeaderNow()
+	if flusher, ok := c.Writer.(interface{ FlushError() error }); ok {
+		return flusher.FlushError()
 	}
-
-	flusher.Flush()
-	return nil
+	if wrapper, ok := c.Writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+		// Gin's Flush discards the underlying transport error.
+		return http.NewResponseController(wrapper.Unwrap()).Flush()
+	}
+	return http.NewResponseController(c.Writer).Flush()
 }
 
 func requestContextDone(c *gin.Context) bool {
@@ -93,11 +96,17 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 	}
 
 	SetEventStreamHeaders(c)
-	if _, err := c.Writer.WriteString(fmt.Sprintf("event: %s\n", resp.Type)); err != nil {
+	eventLine := fmt.Sprintf("event: %s\n", resp.Type)
+	if n, err := c.Writer.WriteString(eventLine); err != nil {
 		return fmt.Errorf("write response event: %w", err)
+	} else if n != len(eventLine) {
+		return io.ErrShortWrite
 	}
-	if _, err := c.Writer.WriteString(fmt.Sprintf("data: %s\n\n", data)); err != nil {
+	dataLine := fmt.Sprintf("data: %s\n\n", data)
+	if n, err := c.Writer.WriteString(dataLine); err != nil {
 		return fmt.Errorf("write response data: %w", err)
+	} else if n != len(dataLine) {
+		return io.ErrShortWrite
 	}
 	return FlushWriter(c)
 }
