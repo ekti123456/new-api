@@ -3,6 +3,9 @@ import { after, test, type TestContext } from 'node:test'
 
 import { Window } from 'happy-dom'
 
+import zhTW from '@/i18n/locales/zh-TW.json'
+import zh from '@/i18n/locales/zh.json'
+
 const browser = new Window()
 for (const key of [
   'window',
@@ -64,19 +67,19 @@ const older = { ...latest, id: 1, request_id: 'older-request' }
 
 async function mountPanel(
   context: TestContext,
-  response: (params: Record<string, unknown>) => unknown
+  response: (params: Record<string, unknown>, method?: string) => unknown
 ) {
   const originalAdapter = api.defaults.adapter
   const requests: Record<string, unknown>[] = []
   api.defaults.adapter = async (config) => {
-    const params = config.params as Record<string, unknown>
+    const params = (config.params ?? {}) as Record<string, unknown>
     requests.push(params)
     return {
       config,
       status: 200,
       statusText: 'OK',
       headers: {},
-      data: response(params),
+      data: await response(params, config.method),
     }
   }
   notifyManager.setScheduler((callback) => callback())
@@ -107,6 +110,172 @@ async function mountPanel(
   })
   return { container, requests, client }
 }
+
+test('Chinese locales translate the cleanup button and confirmation dialog', async (context) => {
+  context.after(async () => {
+    await act(async () => i18next.changeLanguage('en'))
+  })
+  i18next.addResourceBundle('zh', 'translation', zh.translation)
+  i18next.addResourceBundle('zh-TW', 'translation', zhTW.translation)
+  const { container } = await mountPanel(context, () => ({
+    success: true,
+    data: { page: 1, page_size: 20, total: 0, total_occurrences: 0, items: [] },
+  }))
+  for (const [language, label, confirmation] of [
+    ['zh', '清除错误', '清除全部错误明细'],
+    ['zh-TW', '清除錯誤', '清除全部錯誤明細'],
+  ]) {
+    await act(async () => i18next.changeLanguage(language))
+    const clear = container.querySelector<HTMLButtonElement>(
+      `button[aria-label="${label}"]`
+    )
+    assert.ok(clear, `missing translated cleanup button for ${language}`)
+    await act(async () => clear.click())
+    const dialog = document.querySelector('[role="alertdialog"]')
+    assert.ok(dialog)
+    assert.ok(dialog.textContent?.includes(confirmation))
+    assert.equal(
+      dialog.textContent?.includes('Clear all existing performance'),
+      false
+    )
+    const cancel = [...dialog.querySelectorAll('button')].find(
+      (button) => button.textContent === i18next.t('Cancel')
+    )
+    assert.ok(cancel)
+    await act(async () => cancel.click())
+  }
+})
+
+test('clearing performance errors requires confirmation and refreshes groups after success', async (context) => {
+  let cleared = false
+  let deletions = 0
+  const { container } = await mountPanel(context, (_params, method) => {
+    if (method === 'delete') {
+      deletions++
+      cleared = true
+      return { success: true, data: { deleted: 2 } }
+    }
+    return {
+      success: true,
+      data: {
+        page: 1,
+        page_size: 20,
+        total: cleared ? 0 : 1,
+        total_occurrences: cleared ? 0 : 2,
+        items: cleared ? [] : [latest],
+      },
+    }
+  })
+  const clear = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Clear performance errors"]'
+  )
+  assert.ok(clear)
+  await act(async () => clear.click())
+  assert.equal(deletions, 0)
+  const dialog = document.querySelector('[role="alertdialog"]')
+  assert.ok(dialog)
+  assert.match(
+    dialog.textContent || '',
+    /Usage logs, billing and performance statistics are preserved/
+  )
+  const cancel = [...dialog.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Cancel'
+  )
+  assert.ok(cancel)
+  await act(async () => cancel.click())
+  assert.equal(deletions, 0)
+  await act(async () => clear.click())
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((button) => button.textContent === 'Clear all performance errors')
+  assert.ok(confirm)
+  await act(async () => confirm.click())
+  assert.equal(deletions, 1)
+  assert.match(
+    container.textContent || '',
+    /No performance errors in the selected period/
+  )
+  assert.equal(container.textContent?.includes('latest-request'), false)
+})
+
+test('a failed cleanup keeps existing errors and allows retry', async (context) => {
+  const { container } = await mountPanel(context, (_params, method) =>
+    method === 'delete'
+      ? { success: false, message: 'database unavailable' }
+      : {
+          success: true,
+          data: {
+            page: 1,
+            page_size: 20,
+            total: 1,
+            total_occurrences: 2,
+            items: [latest],
+          },
+        }
+  )
+  const clear = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Clear performance errors"]'
+  )
+  assert.ok(clear)
+  await act(async () => clear.click())
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((button) => button.textContent === 'Clear all performance errors')
+  assert.ok(confirm)
+  await act(async () => confirm.click())
+  assert.match(
+    document.body.textContent || '',
+    /Unable to clear performance errors/
+  )
+  assert.match(container.textContent || '', /latest-request/)
+  assert.equal(confirm.disabled, false)
+})
+
+test('cleanup in progress disables confirmation and prevents duplicate submissions', async (context) => {
+  let finish: (value: unknown) => void = () => {}
+  const pending = new Promise((resolve) => {
+    finish = resolve
+  })
+  let deletions = 0
+  const { container } = await mountPanel(context, (_params, method) => {
+    if (method === 'delete') {
+      deletions++
+      return pending
+    }
+    return {
+      success: true,
+      data: {
+        page: 1,
+        page_size: 20,
+        total: 0,
+        total_occurrences: 0,
+        items: [],
+      },
+    }
+  })
+  const clear = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Clear performance errors"]'
+  )
+  assert.ok(clear)
+  await act(async () => clear.click())
+  const confirm = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((button) => button.textContent === 'Clear all performance errors')
+  assert.ok(confirm)
+  await act(async () => confirm.click())
+  assert.equal(confirm.disabled, true)
+  assert.equal(clear.disabled, true)
+  await act(async () => confirm.click())
+  assert.equal(deletions, 1)
+  await act(async () => finish({ success: true, data: { deleted: 0 } }))
+  assert.equal(clear.disabled, false)
+})
 
 test('same-user error groups start folded and clicking the count loads and collapses original requests', async (context) => {
   const { container, requests } = await mountPanel(context, (params) => ({

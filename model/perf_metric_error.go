@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -197,4 +198,18 @@ func DeleteExpiredPerfMetricErrors(now time.Time) error {
 			return err
 		}
 	}
+}
+
+// ClearPerfMetricErrors removes the current detail history only. Snapshot the
+// ID boundary so errors inserted while cleanup runs remain visible as new.
+func ClearPerfMetricErrors(ctx context.Context) (int64, error) {
+	var lastID int64
+	if err := DB.WithContext(ctx).Model(&PerfMetricError{}).Select("COALESCE(MAX(id), 0)").Scan(&lastID).Error; err != nil {
+		return 0, err
+	}
+	if lastID == 0 {
+		return 0, nil
+	}
+	result := DB.WithContext(ctx).Where("id <= ?", lastID).Delete(&PerfMetricError{})
+	return result.RowsAffected, result.Error
 }

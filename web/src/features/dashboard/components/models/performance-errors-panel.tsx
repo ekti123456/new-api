@@ -1,14 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Filter,
   RefreshCw,
   RotateCcw,
   Search,
+  Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { IconBadge } from '@/components/ui/icon-badge'
@@ -16,11 +19,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
+  clearPerformanceErrors,
   getPerformanceErrors,
   type PerformanceErrorQuery,
 } from '@/features/dashboard/api'
 import type { DashboardFilters } from '@/features/dashboard/types'
 import { toIntlLocale } from '@/i18n/languages'
+import { handleServerError } from '@/lib/handle-server-error'
 import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 
@@ -56,6 +61,25 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
   const { t, i18n } = useTranslation()
   const [page, setPage] = useState(1)
   const [filterOpen, setFilterOpen] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const clearMutation = useMutation({
+    mutationFn: clearPerformanceErrors,
+    onSuccess: async () => {
+      setClearOpen(false)
+      setPage(1)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard-performance-errors'],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard-performance-error-details'],
+        }),
+      ])
+      toast.success(t('Performance errors cleared'))
+    },
+    onError: handleServerError,
+  })
   const [errorFilters, setErrorFilters] = useState<ErrorFilters>(() =>
     emptyErrorFilters(props.filters?.username)
   )
@@ -154,6 +178,40 @@ export function PerformanceErrorsPanel(props: PerformanceErrorsPanelProps) {
           </div>
         </div>
         <div className='flex items-center gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            aria-label={t('Clear performance errors')}
+            disabled={clearMutation.isPending}
+            onClick={() => {
+              clearMutation.reset()
+              setClearOpen(true)
+            }}
+          >
+            <Trash2 className='mr-2 size-3.5' />
+            {t('Clear performance errors')}
+          </Button>
+          <ConfirmDialog
+            open={clearOpen}
+            onOpenChange={(open) => {
+              if (!clearMutation.isPending) setClearOpen(open)
+            }}
+            title={t('Clear all performance errors')}
+            desc={t(
+              'Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.'
+            )}
+            confirmText={t('Clear all performance errors')}
+            destructive
+            isLoading={clearMutation.isPending}
+            handleConfirm={() => clearMutation.mutate()}
+          >
+            {clearMutation.isError && (
+              <p role='alert' className='text-destructive text-sm'>
+                {t('Unable to clear performance errors')}
+              </p>
+            )}
+          </ConfirmDialog>
           <Dialog
             open={filterOpen}
             onOpenChange={setFilterOpen}

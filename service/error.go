@@ -177,7 +177,7 @@ func isCodex2APINonRetryableSessionError(resp *http.Response, openAIError *types
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "session_model_unavailable", "codex_background_root_unavailable", "codex_root_account_wait_timeout", "codex_root_already_named", "window_billing_refresh_required":
+	case "session_model_unavailable", "codex_background_root_unavailable", "codex_root_account_wait_timeout", "codex_root_already_named", "window_billing_refresh_required", "native_compaction_required":
 		return resp.StatusCode == http.StatusBadRequest
 	case "account_session_capacity_exceeded":
 		return resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusTooManyRequests
@@ -201,6 +201,11 @@ func isCodex2APINonRetryableSessionError(resp *http.Response, openAIError *types
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
 	if newApiErr == nil {
+		return
+	}
+	// This local protocol rejection cannot be recovered by changing channels.
+	// Keep 400 even when a channel maps general client errors to retryable 5xx.
+	if newApiErr.GetErrorCode() == "native_compaction_required" && types.IsSkipRetryError(newApiErr) {
 		return
 	}
 	if statusCodeMappingStr == "" || statusCodeMappingStr == "{}" {

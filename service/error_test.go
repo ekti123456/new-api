@@ -197,6 +197,17 @@ func TestRelayErrorHandlerKeepsSessionModelUnavailableMessage(test *testing.T) {
 	require.True(test, types.IsSkipRetryError(requestError))
 }
 
+func TestNativeCompactionRejectionCannotBecomeRetryableServerError(t *testing.T) {
+	const message = "当前压缩请求不兼容，请联系管理员调整账号压缩设置。"
+	response := &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"` + message + `","type":"invalid_request_error","code":"native_compaction_required"}}`))}
+	failure := RelayErrorHandler(t.Context(), response, false)
+	require.Equal(t, message, failure.Error())
+	require.Equal(t, types.ErrorCode("native_compaction_required"), failure.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(failure))
+	ResetStatusCode(failure, `{"400":"500"}`)
+	require.Equal(t, http.StatusBadRequest, failure.StatusCode)
+}
+
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	withDebugEnabled(t, true)
 
