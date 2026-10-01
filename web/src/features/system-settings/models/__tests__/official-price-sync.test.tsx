@@ -38,6 +38,8 @@ for (const key of [
   'cancelAnimationFrame',
   'getComputedStyle',
   'localStorage',
+  'ResizeObserver',
+  'Document',
 ] as const) {
   Object.defineProperty(globalThis, key, {
     configurable: true,
@@ -244,5 +246,247 @@ test('saving preserves unrelated edits, posts related options together, and reje
     assert.equal(writes.length, 1)
   } finally {
     api.defaults.adapter = originalAdapter
+  }
+})
+
+test('list selection automatically loads only selected priced and unpriced models without selecting again', async () => {
+  const requests: string[] = []
+  api.defaults.adapter = async (config) => {
+    requests.push(config.url ?? '')
+    const data =
+      config.url === '/api/ratio_sync/official-prices'
+        ? {
+            success: true,
+            data: [
+              {
+                provider: 'deepseek',
+                model: 'deepseek-v4-flash',
+                cost: { input: 10, output: 20 },
+              },
+            ],
+          }
+        : {
+            success: true,
+            data: pricingKeys.map((key) => ({
+              key,
+              value:
+                key === 'ModelRatio'
+                  ? '{"deepseek-v4-flash":1,"unselected":9}'
+                  : '{}',
+            })),
+          }
+    return { config, data, status: 200, statusText: 'OK', headers: {} }
+  }
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false, gcTime: 0 },
+    },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <OfficialPriceSync
+              modelNames={[
+                'channel/DEEPSEEK-V4-FLASH',
+                'deepseek-v4-flash',
+                'unknown',
+              ]}
+            />
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    assert.ok(container.textContent?.includes('Confirm sync (2)'))
+    assert.equal(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Sync deepseek-v4-flash"]'
+      )?.checked,
+      true
+    )
+    assert.equal(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Sync channel/DEEPSEEK-V4-FLASH"]'
+      )?.checked,
+      true
+    )
+    assert.equal(
+      container.querySelector('input[aria-label="Sync unselected"]'),
+      null
+    )
+    assert.equal(requests.includes('/api/channel/models_enabled'), false)
+    const unknownSource = container.querySelector<HTMLInputElement>(
+      '#official-source-0-2'
+    )
+    assert.ok(unknownSource)
+    await act(async () => unknownSource.focus())
+    await act(async () =>
+      unknownSource.dispatchEvent(
+        new browser.KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+        }) as unknown as Event
+      )
+    )
+    await act(async () =>
+      unknownSource.dispatchEvent(
+        new browser.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+        }) as unknown as Event
+      )
+    )
+    assert.equal(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Sync unknown"]'
+      )?.checked,
+      true
+    )
+    assert.ok(container.textContent?.includes('Confirm sync (3)'))
+  } finally {
+    await act(async () => root.unmount())
+    client.clear()
+    container.remove()
+    api.defaults.adapter = originalAdapter
+  }
+})
+
+test('pricing tabs share selection and sync both lists together from the list toolbar', async () => {
+  const { RatioSettingsCard } = await import('../ratio-settings-card')
+  const { SettingsPageProvider } =
+    await import('../../components/settings-page-context')
+  const writes: Record<string, string>[] = []
+  api.defaults.adapter = async (config) => {
+    let data: unknown
+    if (config.url === '/api/channel/models_enabled') {
+      data = { success: true, data: ['kimi-k2.6', 'deepseek-v4-flash'] }
+    } else if (config.url === '/api/ratio_sync/official-prices') {
+      data = {
+        success: true,
+        data: ['kimi-k2.6', 'deepseek-v4-flash'].map((model) => ({
+          provider: model.startsWith('kimi') ? 'moonshotai' : 'deepseek',
+          model,
+          cost: { input: 10, output: 20 },
+        })),
+      }
+    } else if (config.url === '/api/option/') {
+      data = {
+        success: true,
+        data: pricingKeys.map((key) => ({
+          key,
+          value: key === 'ModelRatio' ? '{"deepseek-v4-flash":1}' : '{}',
+        })),
+      }
+    } else if (config.url === '/api/ratio_sync/official-prices/apply') {
+      writes.push(JSON.parse(config.data).values)
+      data = { success: true }
+    } else {
+      throw new Error(`Unexpected request: ${config.url}`)
+    }
+    return { config, data, status: 200, statusText: 'OK', headers: {} }
+  }
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false, gcTime: 0 },
+    },
+  })
+  const container = document.createElement('div')
+  const tabs = document.createElement('span')
+  const content = document.createElement('div')
+  container.append(tabs, content)
+  document.body.append(container)
+  const root = createRoot(content)
+  const modelDefaults = {
+    ModelPrice: '{}',
+    ModelRatio: '{"deepseek-v4-flash":1}',
+    CompletionRatio: '{}',
+    CacheRatio: '{}',
+    CreateCacheRatio: '{}',
+    ImageRatio: '{}',
+    AudioRatio: '{}',
+    AudioCompletionRatio: '{}',
+    ExposeRatioEnabled: false,
+    BillingMode: '{}',
+    BillingExpr: '{}',
+  }
+  const groupDefaults = {
+    GroupRatio: '{}',
+    TopupGroupRatio: '{}',
+    UserUsableGroups: '{}',
+    GroupGroupRatio: '{}',
+    AutoGroups: '[]',
+    MaxTokenAutoGroups: 1,
+    DefaultUseAutoGroup: false,
+    GroupSpecialUsableGroup: '{}',
+  }
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <SettingsPageProvider
+              actionsContainer={null}
+              titleStatusContainer={tabs}
+            >
+              <RatioSettingsCard
+                modelDefaults={modelDefaults}
+                groupDefaults={groupDefaults}
+                toolPricesDefault='{}'
+                visibleTabs={['models', 'unset-models']}
+              />
+            </SettingsPageProvider>
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    const selectRow = () => {
+      const row = container.querySelector<HTMLElement>(
+        '[role="tabpanel"]:not([hidden]) [aria-label="Select row"]'
+      )
+      assert.ok(row)
+      row.click()
+    }
+    await act(async () => selectRow())
+    const unsetTab = [
+      ...tabs.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent === 'Unset price models')
+    assert.ok(unsetTab)
+    await act(async () => unsetTab.click())
+    await act(async () => selectRow())
+    const sync = [
+      ...container.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((button) => button.textContent === 'Sync selected prices (2)')
+    assert.ok(sync)
+    await act(async () => sync.click())
+    const dialog = document.querySelector('[role="dialog"]')
+    assert.ok(dialog)
+    const confirm = [
+      ...dialog.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((button) => button.textContent === 'Confirm sync (2)')
+    assert.ok(confirm)
+    await act(async () => confirm.click())
+    assert.equal(writes.length, 1)
+    assert.deepEqual(JSON.parse(writes[0].ModelRatio), {
+      'deepseek-v4-flash': 5,
+      'kimi-k2.6': 5,
+    })
+    assert.ok(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+        (button) =>
+          button.textContent === 'Sync selected prices (0)' && button.disabled
+      )
+    )
+  } finally {
+    await act(async () => root.unmount())
+    client.clear()
+    container.remove()
+    api.defaults.adapter = originalAdapter
+    browser.localStorage.clear()
   }
 })

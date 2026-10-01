@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import type { OnChangeFn, RowSelectionState } from '@tanstack/react-table'
 import { Code2, Eye, RotateCcw, Save } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
@@ -62,6 +63,9 @@ type ModelFormValues = {
 }
 
 type ModelRatioFormProps = {
+  modelSelection?: RowSelectionState
+  onModelSelectionChange?: OnChangeFn<RowSelectionState>
+  onSyncSelected?: (names: string[]) => void
   form: UseFormReturn<ModelFormValues>
   savedValues: ModelFormValues
   onSave: (values: ModelFormValues) => Promise<void>
@@ -172,6 +176,9 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   isSaving,
   isResetting,
   variant = 'default',
+  modelSelection,
+  onModelSelectionChange,
+  onSyncSelected,
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
   const isUnsetVariant = variant === 'unset'
@@ -288,6 +295,9 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               candidateModelNames={
                 isUnsetVariant ? enabledModelsQuery.data?.data : undefined
               }
+              modelSelection={modelSelection}
+              onModelSelectionChange={onModelSelectionChange}
+              onSyncSelected={onSyncSelected}
               candidateModelsLoading={
                 isUnsetVariant && enabledModelsQuery.isLoading
               }

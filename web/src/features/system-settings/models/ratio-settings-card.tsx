@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { RowSelectionState } from '@tanstack/react-table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +26,13 @@ import { toast } from 'sonner'
 import * as z from 'zod'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { resetModelRatios } from '../api'
@@ -164,6 +172,9 @@ export function RatioSettingsCard({
   const updateOption = useUpdateOption()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [modelSelection, setModelSelection] = useState<RowSelectionState>({})
+  const [syncModels, setSyncModels] = useState<string[] | null>(null)
+  const [syncSaving, setSyncSaving] = useState(false)
 
   const resetMutation = useMutation({
     mutationFn: resetModelRatios,
@@ -430,6 +441,9 @@ export function RatioSettingsCard({
           isSaving={updateOption.isPending}
           isResetting={resetMutation.isPending}
           variant={tab === 'unset-models' ? 'unset' : 'default'}
+          modelSelection={modelSelection}
+          onModelSelectionChange={setModelSelection}
+          onSyncSelected={setSyncModels}
         />
       )
     }
@@ -479,6 +493,42 @@ export function RatioSettingsCard({
           </SettingsSection>
         </Tabs>
       )}
+
+      <Dialog
+        open={syncModels !== null}
+        onOpenChange={(open) => {
+          if (!open && !syncSaving) setSyncModels(null)
+        }}
+      >
+        <DialogContent
+          className='max-h-[90dvh] overflow-y-auto sm:max-w-[min(1200px,calc(100vw-2rem))]'
+          showCloseButton={!syncSaving}
+        >
+          <DialogHeader>
+            <DialogTitle>{t('Sync selected model prices')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'Selections from Model prices and Unset price models are combined. Only selected models will be synced.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {syncModels !== null && (
+            <OfficialPriceSync
+              modelNames={syncModels}
+              onSavingChange={setSyncSaving}
+              onSaved={(names) => {
+                setSyncSaving(false)
+                setModelSelection((previous) => {
+                  const next = { ...previous }
+                  for (const name of names) delete next[name]
+                  return next
+                })
+                setSyncModels(null)
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={confirmOpen}

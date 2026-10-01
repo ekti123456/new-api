@@ -5660,6 +5660,13 @@
     "Failed to fetch models.dev pricing": "Failed to fetch models.dev pricing",
     "models.dev returned invalid JSON": "models.dev returned invalid JSON",
     "models.dev pricing response is unreadable or too large": "models.dev pricing response is unreadable or too large",
-    "models.dev contains no supported official token prices": "models.dev contains no supported official token prices"
+    "models.dev contains no supported official token prices": "models.dev contains no supported official token prices",
+    "Sync selected prices ({{count}})": "Sync selected prices ({{count}})",
+    "Sync selected model prices": "Sync selected model prices",
+    "Selections from Model prices and Unset price models are combined. Only selected models will be synced.": "Selections from Model prices and Unset price models are combined. Only selected models will be synced.",
+    "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.": "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.",
+    "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.": "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.",
+    "Confirm sync ({{count}})": "Confirm sync ({{count}})",
+    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged."
   }
 }

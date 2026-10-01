@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -47,7 +47,13 @@ type Preview = {
   options: PricingOptions
 }
 
-export function OfficialPriceSync() {
+type OfficialPriceSyncProps = {
+  modelNames?: string[]
+  onSaved?: (names: string[]) => void
+  onSavingChange?: (saving: boolean) => void
+}
+
+export function OfficialPriceSync(props: OfficialPriceSyncProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -57,9 +63,17 @@ export function OfficialPriceSync() {
   const [page, setPage] = useState(0)
   const [confirm, setConfirm] = useState(false)
   const [error, setError] = useState('')
+  const autoLoaded = useRef(false)
 
   const load = useMutation({
     mutationFn: async () => {
+      if (props.modelNames !== undefined) {
+        const [prices, options] = await Promise.all([
+          getOfficialPrices(),
+          getPricingOptions(),
+        ])
+        return { prices, names: [...new Set(props.modelNames)], options }
+      }
       const [prices, models, options] = await Promise.all([
         getOfficialPrices(),
         getEnabledModels(),
@@ -94,13 +108,29 @@ export function OfficialPriceSync() {
         )
       )
       setSelected(
-        Object.fromEntries(rows.map((row) => [row.name, row.autoSelect]))
+        Object.fromEntries(
+          rows.map((row) => [
+            row.name,
+            props.modelNames !== undefined
+              ? Boolean(row.candidate) &&
+                !row.blocked &&
+                !row.candidate?.manual_only
+              : row.autoSelect,
+          ])
+        )
       )
       setPreview(data)
       setPage(0)
     },
     onError: (cause: Error) => setError(cause.message),
   })
+
+  const { mutate: loadPrices } = load
+  useEffect(() => {
+    if (props.modelNames === undefined || autoLoaded.current) return
+    autoLoaded.current = true
+    loadPrices()
+  }, [props.modelNames, loadPrices])
 
   const rows = useMemo(
     () =>
@@ -145,6 +175,7 @@ export function OfficialPriceSync() {
       setSelected({})
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
       queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      props.onSaved?.(selections.map((selection) => selection.name))
     },
     onError: (cause: Error) => {
       setError(cause.message)
@@ -155,6 +186,11 @@ export function OfficialPriceSync() {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
     },
   })
+
+  const onSavingChange = props.onSavingChange
+  useEffect(() => {
+    onSavingChange?.(save.isPending)
+  }, [onSavingChange, save.isPending])
 
   const costText = (cost: Partial<OfficialPrice['cost']>) =>
     [cost.input, cost.output, cost.cache_read, cost.cache_write]
@@ -176,24 +212,48 @@ export function OfficialPriceSync() {
           models.dev
         </a>
       </p>
-      <p className='text-muted-foreground text-sm'>
-        {t(
-          'Ignore case after removing slash-separated channel prefixes. Existing prices and different names require manual selection. Context tiers generate billing expressions; fixed prices use the model editor.'
-        )}
-      </p>
+      {props.modelNames !== undefined && (
+        <p className='text-sm'>
+          {t(
+            'Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.',
+            { count: props.modelNames.length }
+          )}
+        </p>
+      )}
+      {props.modelNames === undefined && (
+        <p className='text-muted-foreground text-sm'>
+          {t(
+            'Ignore case after removing slash-separated channel prefixes. Existing prices and different names require manual selection. Context tiers generate billing expressions; fixed prices use the model editor.'
+          )}
+        </p>
+      )}
       <div className='flex flex-wrap gap-2'>
-        <Button
-          onClick={() => load.mutate()}
-          disabled={load.isPending || save.isPending}
-        >
-          {load.isPending ? t('Loading...') : t('Fetch official prices')}
-        </Button>
+        {(props.modelNames === undefined || error) && (
+          <Button
+            onClick={() => load.mutate()}
+            disabled={load.isPending || save.isPending}
+          >
+            {load.isPending ? t('Loading...') : t('Fetch official prices')}
+          </Button>
+        )}
+        {props.modelNames !== undefined && load.isPending && (
+          <span role='status' className='text-muted-foreground text-sm'>
+            {t('Loading...')}
+          </span>
+        )}
         <Button
           variant='secondary'
           disabled={!preview || selections.length === 0 || save.isPending}
-          onClick={() => setConfirm(true)}
+          onClick={() => {
+            if (props.modelNames !== undefined) save.mutate()
+            else setConfirm(true)
+          }}
         >
-          {t('Save selected prices ({{count}})', { count: selections.length })}
+          {props.modelNames !== undefined
+            ? t('Confirm sync ({{count}})', { count: selections.length })
+            : t('Save selected prices ({{count}})', {
+                count: selections.length,
+              })}
         </Button>
       </div>
       {error && (
@@ -203,6 +263,13 @@ export function OfficialPriceSync() {
       )}
       {preview && (
         <>
+          {props.modelNames !== undefined && (
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.'
+              )}
+            </p>
+          )}
           <Input
             aria-label={t('Search local models')}
             placeholder={t('Search local models')}
@@ -213,9 +280,13 @@ export function OfficialPriceSync() {
             }}
           />
           <p className='text-muted-foreground text-sm'>
-            {t(
-              'Prices: input / output / cache read / cache write. A dash means not provided. Flat-price imports preserve existing optional prices; expression imports replace the full pricing rule. Select a row after choosing its source.'
-            )}
+            {props.modelNames !== undefined
+              ? t(
+                  'Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.'
+                )
+              : t(
+                  'Prices: input / output / cache read / cache write. A dash means not provided. Flat-price imports preserve existing optional prices; expression imports replace the full pricing rule. Select a row after choosing its source.'
+                )}
           </p>
           <div className='max-h-[60vh] overflow-auto rounded-md border'>
             <table className='w-full min-w-[900px] text-left text-sm'>
@@ -283,7 +354,10 @@ export function OfficialPriceSync() {
                             }))
                             setSelected((previous) => ({
                               ...previous,
-                              [row.name]: false,
+                              [row.name]:
+                                props.modelNames !== undefined &&
+                                Boolean(pricesByID.get(value)) &&
+                                !pricesByID.get(value)?.manual_only,
                             }))
                           }}
                         />

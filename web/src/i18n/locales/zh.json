@@ -5660,6 +5660,13 @@
     "Failed to fetch models.dev pricing": "获取 models.dev 定价失败",
     "models.dev returned invalid JSON": "models.dev 返回的内容不是有效 JSON",
     "models.dev pricing response is unreadable or too large": "models.dev 定价响应读取失败或内容过大",
-    "models.dev contains no supported official token prices": "models.dev 中没有受支持的原厂 Token 价格"
+    "models.dev contains no supported official token prices": "models.dev 中没有受支持的原厂 Token 价格",
+    "Sync selected prices ({{count}})": "同步定价（{{count}}）",
+    "Sync selected model prices": "同步所选模型价格",
+    "Selections from Model prices and Unset price models are combined. Only selected models will be synced.": "已合并「模型价格」与「未设置价格模型」中的勾选项，仅同步这些模型。",
+    "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.": "已带入列表中勾选的 {{count}} 个模型。精确匹配项已自动选中，未匹配的模型请选择来源。",
+    "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.": "价格顺序：输入 / 输出 / 缓存读取 / 缓存写入。核对后直接确认同步；手选来源后会自动勾选，无需重复选择。",
+    "Confirm sync ({{count}})": "确认同步（{{count}}）",
+    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "确认同步会替换所选模型的价格或表达式，未勾选的模型不受影响。"
   }
 }

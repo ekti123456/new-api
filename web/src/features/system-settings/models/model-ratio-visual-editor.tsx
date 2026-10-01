@@ -24,7 +24,7 @@ import type {
   VisibilityState,
   SortingState,
 } from '@tanstack/react-table'
-import { Copy, Plus } from 'lucide-react'
+import { Copy, Plus, RefreshCw } from 'lucide-react'
 import {
   useState,
   useMemo,
@@ -67,6 +67,9 @@ import {
 import { buildModelRatioColumns } from './model-ratio-table-columns'
 
 type ModelRatioVisualEditorProps = {
+  modelSelection?: RowSelectionState
+  onModelSelectionChange?: OnChangeFn<RowSelectionState>
+  onSyncSelected?: (names: string[]) => void
   savedModelPrice: string
   savedModelRatio: string
   savedCacheRatio: string
@@ -132,6 +135,9 @@ const ModelRatioVisualEditorComponent = forwardRef<
     onChange,
     onSave,
     isSaving,
+    modelSelection,
+    onModelSelectionChange,
+    onSyncSelected,
   },
   ref
 ) {
@@ -143,7 +149,12 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [localSelection, setLocalSelection] = useState<RowSelectionState>({})
+  const rowSelection = modelSelection ?? localSelection
+  const setRowSelection = onModelSelectionChange ?? setLocalSelection
+  const selectedNames = Object.keys(rowSelection).filter(
+    (name) => rowSelection[name]
+  )
   const editorPanelRef = useRef<ModelPricingEditorPanelHandle>(null)
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -527,7 +538,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         value: string | undefined
       ) => {
         if (!value || value === '') return
-        const parsed = parseFloat(value)
+        const parsed = Number.parseFloat(value)
         if (Number.isFinite(parsed)) target[name] = parsed
       }
 
@@ -706,12 +717,26 @@ const ModelRatioVisualEditorComponent = forwardRef<
               },
             ]}
             preActions={
-              filterMode === 'unset' ? undefined : (
-                <Button onClick={handleAdd}>
-                  <Plus data-icon='inline-start' />
-                  {t('Add model')}
-                </Button>
-              )
+              <>
+                {onSyncSelected && (
+                  <Button
+                    variant='outline'
+                    disabled={selectedNames.length === 0 || isSaving}
+                    onClick={() => onSyncSelected(selectedNames)}
+                  >
+                    <RefreshCw data-icon='inline-start' />
+                    {t('Sync selected prices ({{count}})', {
+                      count: selectedNames.length,
+                    })}
+                  </Button>
+                )}
+                {filterMode !== 'unset' && (
+                  <Button onClick={handleAdd}>
+                    <Plus data-icon='inline-start' />
+                    {t('Add model')}
+                  </Button>
+                )}
+              </>
             }
           />
 
@@ -854,6 +879,9 @@ export const ModelRatioVisualEditor = memo(
       prevProps.candidateModelNames === nextProps.candidateModelNames &&
       prevProps.candidateModelsLoading === nextProps.candidateModelsLoading &&
       prevProps.filterMode === nextProps.filterMode &&
+      prevProps.modelSelection === nextProps.modelSelection &&
+      prevProps.onModelSelectionChange === nextProps.onModelSelectionChange &&
+      prevProps.onSyncSelected === nextProps.onSyncSelected &&
       prevProps.onChange === nextProps.onChange &&
       prevProps.onSave === nextProps.onSave &&
       prevProps.isSaving === nextProps.isSaving
