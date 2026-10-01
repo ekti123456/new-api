@@ -42,6 +42,38 @@ await i18n
   .init({ lng: 'en', resources: { en: { translation: {} } } })
 after(() => domWindow.close())
 
+test('opening holiday pricing preserves the full expression without emitting a replacement', async () => {
+  const holidayExpr =
+    'cn_off_peak() ? tier("off_peak", p * 4.5 + c * 13.5 + cr * 0.15) : tier("peak", p * 9 + c * 27 + cr * 0.3)'
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const changes: string[] = []
+  try {
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <TieredPricingEditor
+            billingExpr={holidayExpr}
+            requestRuleExpr=''
+            onBillingExprChange={(value) => changes.push(value)}
+            onRequestRuleExprChange={() => {}}
+          />
+        </I18nextProvider>
+      )
+    )
+    assert.deepEqual(changes, [])
+    assert.ok(
+      [...container.querySelectorAll('textarea')].some(
+        (field) => field.value === holidayExpr
+      )
+    )
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+  }
+})
+
 const expression =
   'channel_id == 12 && len > 272000 ? tier("long", p * 10 + c * 45) : tier("base", p * 5 + c * 30)'
 

@@ -174,3 +174,14 @@ test('regional models with equal base costs but different tiers are not auto-mat
     undefined
   )
 })
+
+test('equal numeric prices in different currencies must not be automatically merged', () => {
+  const sources = [
+    { ...price, currency: 'CNY' as const },
+    { ...price, provider: 'international', currency: 'USD' as const },
+  ]
+  assert.equal(
+    buildOfficialPriceRows([price.model], sources, options)[0].candidate,
+    undefined
+  )
+})

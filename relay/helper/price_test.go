@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -12,9 +13,35 @@ import (
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModelPriceHelperTieredFreezesTimeAcrossRetryAndSettlement(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error { saved[key] = value; return nil }))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_expr": `{"time-test":"cn_off_peak() ? tier(\"off_peak\", p * 4.5) : tier(\"peak\", p * 9)"}`,
+	}))
+	start, err := time.Parse(time.RFC3339, "2026-09-30T08:59:59+08:00")
+	require.NoError(t, err)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{OriginModelName: "time-test", StartTime: start}
+	price, err := modelPriceHelperTiered(ctx, info, 1000, &types.TokenCountMeta{}, hosttypes.GroupRatioInfo{GroupRatio: 1})
+	require.NoError(t, err)
+	require.Equal(t, 2250, price.QuotaToPreConsume)
+	info.StartTime = start.Add(time.Minute)
+	price, err = modelPriceHelperTiered(ctx, info, 1000, &types.TokenCountMeta{}, hosttypes.GroupRatioInfo{GroupRatio: 1})
+	require.NoError(t, err)
+	require.Equal(t, 2250, price.QuotaToPreConsume)
+	require.True(t, info.TieredBillingSnapshot.PricingTime.Equal(start))
+	result, err := billingexpr.ComputeTieredQuotaWithRequest(info.TieredBillingSnapshot, billingexpr.TokenParams{P: 2000}, *info.BillingRequestInput)
+	require.NoError(t, err)
+	require.Equal(t, "off_peak", result.MatchedTier)
+	require.InDelta(t, 4500, result.ActualQuotaBeforeGroup, 1e-8)
+}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

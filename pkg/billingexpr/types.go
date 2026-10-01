@@ -3,14 +3,16 @@ package billingexpr
 import (
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
 
 type RequestInput struct {
-	Headers   map[string]string
-	Body      []byte
-	ChannelID int
+	PricingTime time.Time
+	Headers     map[string]string
+	Body        []byte
+	ChannelID   int
 	// Diagnostic provenance only; expression evaluation still uses Body/Headers.
 	BodySource  string
 	ContentType string
@@ -51,19 +53,20 @@ type RequestRuleMatch struct {
 // auto-group retry and settlement. It is fully serializable and contains no
 // compiled program pointers.
 type BillingSnapshot struct {
-	BillingMode               string  `json:"billing_mode"`
-	ModelName                 string  `json:"model_name"`
-	ExprString                string  `json:"expr_string"`
-	ExprHash                  string  `json:"expr_hash"`
-	GroupRatio                float64 `json:"group_ratio"`
-	ChannelID                 int     `json:"channel_id"`
-	EstimatedPromptTokens     int     `json:"estimated_prompt_tokens"`
-	EstimatedCompletionTokens int     `json:"estimated_completion_tokens"`
-	EstimatedQuotaBeforeGroup float64 `json:"estimated_quota_before_group"`
-	EstimatedQuotaAfterGroup  int     `json:"estimated_quota_after_group"`
-	EstimatedTier             string  `json:"estimated_tier"`
-	QuotaPerUnit              float64 `json:"quota_per_unit"`
-	ExprVersion               int     `json:"expr_version"`
+	PricingTime               time.Time `json:"pricing_time,omitempty"`
+	BillingMode               string    `json:"billing_mode"`
+	ModelName                 string    `json:"model_name"`
+	ExprString                string    `json:"expr_string"`
+	ExprHash                  string    `json:"expr_hash"`
+	GroupRatio                float64   `json:"group_ratio"`
+	ChannelID                 int       `json:"channel_id"`
+	EstimatedPromptTokens     int       `json:"estimated_prompt_tokens"`
+	EstimatedCompletionTokens int       `json:"estimated_completion_tokens"`
+	EstimatedQuotaBeforeGroup float64   `json:"estimated_quota_before_group"`
+	EstimatedQuotaAfterGroup  int       `json:"estimated_quota_after_group"`
+	EstimatedTier             string    `json:"estimated_tier"`
+	QuotaPerUnit              float64   `json:"quota_per_unit"`
+	ExprVersion               int       `json:"expr_version"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.

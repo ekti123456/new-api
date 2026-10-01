@@ -1,0 +1,784 @@
+{
+  "providers": [
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-09-28T06:58:45.887Z",
+        "lastAttemptAt": "2026-09-28T06:58:45.887Z",
+        "consecutiveFailures": 0
+      },
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "displayNames": {
+        "zh-CN": "深度求索",
+        "en": "DeepSeek"
+      },
+      "ownedBy": "deepseek",
+      "baseUrls": {
+        "openai": "https://api.deepseek.com",
+        "anthropic": "https://api.deepseek.com/anthropic"
+      },
+      "models": [
+        {
+          "id": "deepseek-flash",
+          "name": "DeepSeek-V4.1-Flash",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "fimCompletion": "non-thinking-only",
+            "inputModalities": [
+              "text",
+              "image"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 384000,
+            "concurrency": 2500
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "空闲时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "09:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "12:00",
+                    "end": "14:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "18:00",
+                    "end": "00:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "00:00",
+                    "end": "00:00",
+                    "days": [
+                      "sat",
+                      "sun"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.02,
+                "standard": 1
+              },
+              "output": 4,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-09-10T06:04:03.93Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "高峰时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "09:00",
+                    "end": "12:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "14:00",
+                    "end": "18:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.04,
+                "standard": 2
+              },
+              "output": 8,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-09-10T06:04:03.93Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Off-peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "01:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "04:00",
+                    "end": "06:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "10:00",
+                    "end": "00:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "00:00",
+                    "end": "00:00",
+                    "days": [
+                      "sat",
+                      "sun"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.003,
+                "standard": 0.15
+              },
+              "output": 0.6,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-09-10T06:04:03.93Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "01:00",
+                    "end": "04:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "06:00",
+                    "end": "10:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.006,
+                "standard": 0.3
+              },
+              "output": 1.2,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-09-10T06:04:03.93Z"
+            }
+          ]
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek-V4-Pro-0813",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "fimCompletion": "non-thinking-only",
+            "inputModalities": [
+              "text"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 384000,
+            "concurrency": 500
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "空闲时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "09:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "12:00",
+                    "end": "14:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "18:00",
+                    "end": "00:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "00:00",
+                    "end": "00:00",
+                    "days": [
+                      "sat",
+                      "sun"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.15,
+                "standard": 4.5
+              },
+              "output": 13.5,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "高峰时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "09:00",
+                    "end": "12:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "14:00",
+                    "end": "18:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.3,
+                "standard": 9
+              },
+              "output": 27,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Off-peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "01:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "04:00",
+                    "end": "06:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "10:00",
+                    "end": "00:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "00:00",
+                    "end": "00:00",
+                    "days": [
+                      "sat",
+                      "sun"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.022,
+                "standard": 0.66
+              },
+              "output": 1.98,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "01:00",
+                    "end": "04:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  },
+                  {
+                    "start": "06:00",
+                    "end": "10:00",
+                    "days": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri"
+                    ]
+                  }
+                ]
+              },
+              "effectiveFrom": "2026-08-23T00:00:00+08:00",
+              "input": {
+                "cacheHit": 0.044,
+                "standard": 1.32
+              },
+              "output": 3.96,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-23T02:01:02.268Z"
+            }
+          ],
+          "priceHistory": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "空闲时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "09:00"
+                  },
+                  {
+                    "start": "12:00",
+                    "end": "14:00"
+                  },
+                  {
+                    "start": "18:00",
+                    "end": "00:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.15,
+                "standard": 4.5
+              },
+              "output": 13.5,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-17T07:45:18.777Z",
+              "validTo": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "高峰时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "09:00",
+                    "end": "12:00"
+                  },
+                  {
+                    "start": "14:00",
+                    "end": "18:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.3,
+                "standard": 9
+              },
+              "output": 27,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-17T07:45:18.777Z",
+              "validTo": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Off-peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "01:00"
+                  },
+                  {
+                    "start": "04:00",
+                    "end": "06:00"
+                  },
+                  {
+                    "start": "10:00",
+                    "end": "00:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.022,
+                "standard": 0.66
+              },
+              "output": 1.98,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-17T07:45:18.777Z",
+              "validTo": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "01:00",
+                    "end": "04:00"
+                  },
+                  {
+                    "start": "06:00",
+                    "end": "10:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.044,
+                "standard": 1.32
+              },
+              "output": 3.96,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-17T07:45:18.777Z",
+              "validTo": "2026-08-23T02:01:02.268Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.025,
+                "standard": 3
+              },
+              "output": 6,
+              "effectiveTo": "2026-08-17T00:00:00+08:00",
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-01T09:23:24.396Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "空闲时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "09:00"
+                  },
+                  {
+                    "start": "12:00",
+                    "end": "14:00"
+                  },
+                  {
+                    "start": "18:00",
+                    "end": "00:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.15,
+                "standard": 4.5
+              },
+              "output": 13.5,
+              "effectiveFrom": "2026-08-17T00:00:00+08:00",
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-13T12:09:04.166Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "高峰时段",
+                "timeZone": "Asia/Shanghai",
+                "intervals": [
+                  {
+                    "start": "09:00",
+                    "end": "12:00"
+                  },
+                  {
+                    "start": "14:00",
+                    "end": "18:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.3,
+                "standard": 9
+              },
+              "output": 27,
+              "effectiveFrom": "2026-08-17T00:00:00+08:00",
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+              "validFrom": "2026-08-13T12:09:04.166Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.003625,
+                "standard": 0.435
+              },
+              "output": 0.87,
+              "effectiveTo": "2026-08-16T16:00:00Z",
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-01T09:23:24.396Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Off-peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "00:00",
+                    "end": "01:00"
+                  },
+                  {
+                    "start": "04:00",
+                    "end": "06:00"
+                  },
+                  {
+                    "start": "10:00",
+                    "end": "00:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.022,
+                "standard": 0.66
+              },
+              "output": 1.98,
+              "effectiveFrom": "2026-08-16T16:00:00Z",
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-13T12:09:04.166Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "dailyTimeRange": {
+                "label": "Peak",
+                "timeZone": "UTC",
+                "intervals": [
+                  {
+                    "start": "01:00",
+                    "end": "04:00"
+                  },
+                  {
+                    "start": "06:00",
+                    "end": "10:00"
+                  }
+                ]
+              },
+              "input": {
+                "cacheHit": 0.044,
+                "standard": 1.32
+              },
+              "output": 3.96,
+              "effectiveFrom": "2026-08-16T16:00:00Z",
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/",
+              "validFrom": "2026-08-13T12:09:04.166Z",
+              "validTo": "2026-08-17T07:45:18.777Z"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-09-20T01:50:43.646Z",
+          "contentHash": "sha256:8fb882ae00b7ee01dd1186f68fca07382e806a17bb190cdaf40bf0249ac4df59"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-09-20T01:50:43.646Z",
+          "contentHash": "sha256:0b620506326749faa031d7ea28e1be78f97d6f6ad28eddbaaa45ab76e71a3f01"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": "1.0"
+}

@@ -5667,6 +5667,14 @@
     "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.": "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.",
     "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.": "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.",
     "Confirm sync ({{count}})": "Confirm sync ({{count}})",
-    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged."
+    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.",
+    "Chinese models use original CNY prices from LLM Abacus, with DeepSeek time bands from models-cn. International models use models.dev USD prices. Numbers are imported without currency conversion.": "Chinese models use original CNY prices from LLM Abacus, with DeepSeek time bands from models-cn. International models use models.dev USD prices. Numbers are imported without currency conversion.",
+    "Official pricing reference": "Official pricing reference",
+    "Source verification date: {{date}}": "Source verification date: {{date}}",
+    "Automatic peak/off-peak pricing (Beijing time, including holidays). The prices above are off-peak prices.": "Automatic peak/off-peak pricing (Beijing time, including holidays). The prices above are off-peak prices.",
+    "LLM Abacus prices are unavailable. Domestic USD prices will not be substituted.": "LLM Abacus prices are unavailable. Domestic USD prices will not be substituted.",
+    "models-cn prices are unavailable. DeepSeek uses verified LLM Abacus time bands when available.": "models-cn prices are unavailable. DeepSeek uses verified LLM Abacus time bands when available.",
+    "models.dev prices are unavailable. International prices were not loaded.": "models.dev prices are unavailable. International prices were not loaded.",
+    "No usable pricing source is available. Existing prices were not changed.": "No usable pricing source is available. Existing prices were not changed."
   }
 }

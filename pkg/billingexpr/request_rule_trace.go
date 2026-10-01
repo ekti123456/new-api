@@ -38,7 +38,7 @@ func (requestRuleTracePatcher) Visit(node *ast.Node) {
 			return false
 		}
 		switch identifier.Value {
-		case "param", "header", "hour", "minute", "weekday", "month", "day":
+		case "param", "header", "hour", "minute", "weekday", "month", "day", "cn_off_peak":
 			return true
 		}
 		return false

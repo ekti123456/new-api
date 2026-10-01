@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -295,6 +296,12 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		return hosttypes.PriceData{}, err
 	}
 
+	if requestInput.PricingTime.IsZero() {
+		requestInput.PricingTime = info.StartTime
+		if requestInput.PricingTime.IsZero() {
+			requestInput.PricingTime = time.Now()
+		}
+	}
 	rawCost, trace, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{
 		P:   float64(promptTokens),
 		C:   float64(estimatedCompletionTokens),
@@ -321,6 +328,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 
 	exprHash := billingexpr.ExprHashString(exprStr)
 	snapshot := &billingexpr.BillingSnapshot{
+		PricingTime:               requestInput.PricingTime,
 		BillingMode:               billing_setting.BillingModeTieredExpr,
 		ModelName:                 info.OriginModelName,
 		ExprString:                exprStr,

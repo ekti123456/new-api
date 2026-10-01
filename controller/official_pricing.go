@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
@@ -34,6 +33,10 @@ type officialModelPrice struct {
 	Cost       map[string]float64 `json:"cost"`
 	ManualOnly bool               `json:"manual_only,omitempty"`
 	Expression string             `json:"expression,omitempty"`
+	Currency   string             `json:"currency,omitempty"`
+	Source     string             `json:"source,omitempty"`
+	SourceURL  string             `json:"source_url,omitempty"`
+	VerifiedAt string             `json:"verified_at,omitempty"`
 }
 
 func parseOfficialModelPrices(reader io.Reader) ([]officialModelPrice, error) {
@@ -94,7 +97,7 @@ func parseOfficialModelPrices(reader io.Reader) ([]officialModelPrice, error) {
 			if err != nil {
 				manualOnly = true
 			}
-			prices = append(prices, officialModelPrice{Provider: provider, Model: model, Cost: cost, ManualOnly: manualOnly, Expression: expression})
+			prices = append(prices, officialModelPrice{Provider: provider, Model: model, Cost: cost, ManualOnly: manualOnly, Expression: expression, Currency: "USD", Source: "models.dev"})
 		}
 	}
 	sort.Slice(prices, func(i, j int) bool {
@@ -109,36 +112,13 @@ func parseOfficialModelPrices(reader io.Reader) ([]officialModelPrice, error) {
 	return prices, nil
 }
 
-// GetOfficialModelPrices fetches a fixed public catalog, without channel URLs or
-// credentials. Numeric costs stay exactly as published; no FX conversion occurs.
+// GetOfficialModelPrices keeps domestic original CNY prices separate from
+// international USD prices. A failed CNY source never falls back to USD.
 func GetOfficialModelPrices(c *gin.Context) {
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "https://models.dev/api.json", nil)
+	prices, warnings, err := loadOfficialPriceCatalog(c.Request.Context(), fetchOfficialPriceSource)
 	if err != nil {
-		common.ApiErrorMsg(c, err.Error())
+		common.ApiError(c, err)
 		return
 	}
-	req.Header.Set("Accept", "application/json")
-	res, err := client.Do(req)
-	if err != nil {
-		common.ApiErrorMsg(c, "Failed to fetch models.dev pricing")
-		return
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		common.ApiErrorMsg(c, fmt.Sprintf("models.dev returned HTTP %d", res.StatusCode))
-		return
-	}
-	const maxCatalogBytes = 20 << 20
-	body, err := io.ReadAll(io.LimitReader(res.Body, maxCatalogBytes+1))
-	if err != nil || len(body) > maxCatalogBytes {
-		common.ApiErrorMsg(c, "models.dev pricing response is unreadable or too large")
-		return
-	}
-	prices, err := parseOfficialModelPrices(strings.NewReader(string(body)))
-	if err != nil {
-		common.ApiErrorMsg(c, err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": prices})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": prices, "warnings": warnings})
 }

@@ -88,6 +88,7 @@ func readIncomingBillingExprBody(c *gin.Context, parsedJSONRequest bool) ([]byte
 
 func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	input := billingexpr.RequestInput{
+		PricingTime: src.PricingTime,
 		Headers:     cloneStringMap(src.Headers),
 		ChannelID:   src.ChannelID,
 		BodySource:  src.BodySource,

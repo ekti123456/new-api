@@ -490,3 +490,88 @@ test('pricing tabs share selection and sync both lists together from the list to
     browser.localStorage.clear()
   }
 })
+
+test('CNY preview displays currency, attribution and partial-source failure without relabeling USD', async () => {
+  api.defaults.adapter = async (config) => {
+    const data =
+      config.url === '/api/ratio_sync/official-prices'
+        ? {
+            success: true,
+            warnings: [
+              'models.dev prices are unavailable. International prices were not loaded.',
+            ],
+            data: [
+              {
+                provider: 'minimax',
+                model: 'minimax-m3',
+                currency: 'CNY',
+                source: 'LLM Abacus',
+                source_url:
+                  'https://platform.minimaxi.com/docs/guides/pricing-paygo',
+                verified_at: '2026-10-01',
+                cost: { input: 2.1, output: 8.4, cache_read: 0.42 },
+              },
+              {
+                provider: 'deepseek',
+                model: 'deepseek-v4-pro',
+                currency: 'CNY',
+                source: 'models-cn',
+                cost: { input: 4.5, output: 13.5, cache_read: 0.15 },
+                expression:
+                  'cn_off_peak() ? tier("off_peak", p * 4.5 + c * 13.5 + cr * 0.15) : tier("peak", p * 9 + c * 27 + cr * 0.3)',
+              },
+            ],
+          }
+        : {
+            success: true,
+            data: pricingKeys.map((key) => ({ key, value: '{}' })),
+          }
+    return { config, data, status: 200, statusText: 'OK', headers: {} }
+  }
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false, gcTime: 0 },
+    },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <OfficialPriceSync modelNames={['minimax-m3', 'deepseek-v4-pro']} />
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    assert.ok(container.textContent?.includes('CNY 2.1 / 8.4 / 0.42 / —'))
+    assert.ok(
+      container.textContent?.includes(
+        'Automatic peak/off-peak pricing (Beijing time, including holidays). The prices above are off-peak prices.'
+      )
+    )
+    assert.ok(
+      container.textContent?.includes('International prices were not loaded')
+    )
+    assert.ok(container.querySelector('a[href="https://www.llmabacus.com"]'))
+    assert.ok(
+      container.querySelector(
+        'a[href="https://platform.minimaxi.com/docs/guides/pricing-paygo"]'
+      )
+    )
+    assert.ok(
+      [...container.querySelectorAll('button')].some(
+        (button) =>
+          button.textContent === 'Confirm sync (2)' && !button.disabled
+      )
+    )
+  } finally {
+    await act(async () => root.unmount())
+    client.clear()
+    container.remove()
+    api.defaults.adapter = originalAdapter
+  }
+})

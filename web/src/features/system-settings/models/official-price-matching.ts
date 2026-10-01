@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 export type OfficialPrice = {
   provider: string
   model: string
+  currency?: 'CNY' | 'USD'
+  source?: string
+  source_url?: string
+  verified_at?: string
   manual_only?: boolean
   expression?: string
   cost: {
@@ -92,7 +96,7 @@ export function buildOfficialPriceRows(
   return [...new Set(names)].sort().map((name) => {
     const matches = index.get(modelNameWithoutPrefix(name)) ?? []
     const signatures = new Set(
-      matches.map(({ cost, manual_only, expression }) =>
+      matches.map(({ cost, manual_only, expression, currency }) =>
         JSON.stringify([
           cost.input,
           cost.output,
@@ -100,6 +104,7 @@ export function buildOfficialPriceRows(
           cost.cache_write,
           Boolean(manual_only),
           expression ?? '',
+          currency ?? 'USD',
         ])
       )
     )

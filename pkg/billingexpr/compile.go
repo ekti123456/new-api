@@ -60,6 +60,7 @@ var compileEnvPrototypeV1 = map[string]interface{}{
 	"weekday":                func(string) int { return 0 },
 	"month":                  func(string) int { return 0 },
 	"day":                    func(string) int { return 0 },
+	"cn_off_peak":            func() (bool, error) { return false, nil },
 	"max":                    math.Max,
 	"min":                    math.Min,
 	"abs":                    math.Abs,

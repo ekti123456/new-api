@@ -43,6 +43,7 @@ import { formatPricingNumber } from './pricing-format'
 
 type Preview = {
   prices: OfficialPrice[]
+  warnings: string[]
   names: string[]
   options: PricingOptions
 }
@@ -68,13 +69,13 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
   const load = useMutation({
     mutationFn: async () => {
       if (props.modelNames !== undefined) {
-        const [prices, options] = await Promise.all([
+        const [catalog, options] = await Promise.all([
           getOfficialPrices(),
           getPricingOptions(),
         ])
-        return { prices, names: [...new Set(props.modelNames)], options }
+        return { ...catalog, names: [...new Set(props.modelNames)], options }
       }
-      const [prices, models, options] = await Promise.all([
+      const [catalog, models, options] = await Promise.all([
         getOfficialPrices(),
         getEnabledModels(),
         getPricingOptions(),
@@ -89,7 +90,7 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
           ...Object.values(maps).flatMap(Object.keys),
         ]),
       ]
-      return { prices, names, options }
+      return { ...catalog, names, options }
     },
     onMutate: () => {
       setError('')
@@ -148,7 +149,7 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
     () =>
       preview?.prices.map((price) => ({
         value: officialPriceID(price),
-        label: `${price.provider} / ${price.model}${price.manual_only ? ` (${t('Use the model editor')})` : ''}`,
+        label: `${price.provider} / ${price.model} · ${price.currency ?? 'USD'} · ${price.source ?? 'models.dev'}${price.manual_only ? ` (${t('Use the model editor')})` : ''}`,
       })) ?? [],
     [preview, t]
   )
@@ -201,8 +202,26 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
     <div className='space-y-4'>
       <p className='text-muted-foreground text-sm'>
         {t(
-          'Use official provider entries from models.dev. Price numbers are copied as-is per 1M tokens, without currency conversion.'
+          'Chinese models use original CNY prices from LLM Abacus, with DeepSeek time bands from models-cn. International models use models.dev USD prices. Numbers are imported without currency conversion.'
         )}{' '}
+        <a
+          href='https://www.llmabacus.com'
+          target='_blank'
+          rel='noreferrer'
+          className='underline'
+        >
+          LLM Abacus
+        </a>
+        {' · '}
+        <a
+          href='https://null-object-0000.github.io/models-cn/'
+          target='_blank'
+          rel='noreferrer'
+          className='underline'
+        >
+          models-cn
+        </a>
+        {' · '}
         <a
           href='https://models.dev/api.json'
           target='_blank'
@@ -263,6 +282,11 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
       )}
       {preview && (
         <>
+          {preview.warnings.map((warning) => (
+            <p key={warning} role='alert' className='text-destructive text-sm'>
+              {t(warning)}
+            </p>
+          ))}
           {props.modelNames !== undefined && (
             <p className='text-muted-foreground text-sm'>
               {t(
@@ -361,6 +385,23 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
                             }))
                           }}
                         />
+                        {choice?.source_url?.startsWith('https://') && (
+                          <a
+                            className='mt-1 block text-xs underline'
+                            href={choice.source_url}
+                            target='_blank'
+                            rel='noreferrer'
+                          >
+                            {t('Official pricing reference')}
+                          </a>
+                        )}
+                        {choice?.verified_at && (
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Source verification date: {{date}}', {
+                              date: choice.verified_at.slice(0, 10),
+                            })}
+                          </p>
+                        )}
                         {!choice && (
                           <p className='text-muted-foreground mt-1 text-xs'>
                             {t(
@@ -389,7 +430,16 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
                         )}
                       </td>
                       <td className='p-3 whitespace-nowrap'>
-                        {choice ? costText(choice.cost) : '—'}
+                        {choice
+                          ? `${choice.currency ?? 'USD'} ${costText(choice.cost)}`
+                          : '—'}
+                        {choice?.expression?.includes('cn_off_peak()') && (
+                          <p className='text-muted-foreground mt-1 max-w-64 text-xs whitespace-normal'>
+                            {t(
+                              'Automatic peak/off-peak pricing (Beijing time, including holidays). The prices above are off-peak prices.'
+                            )}
+                          </p>
+                        )}
                         {choice?.expression && (
                           <details className='mt-1'>
                             <summary>

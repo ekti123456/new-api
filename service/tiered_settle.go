@@ -116,6 +116,9 @@ func refreshTieredBillingRoute(relayInfo *relaycommon.RelayInfo, channelID int) 
 		request.ChannelID = channelID
 	}
 	quotaBeforeGroup := snap.EstimatedQuotaBeforeGroup
+	if !snap.PricingTime.IsZero() {
+		request.PricingTime = snap.PricingTime
+	}
 	estimatedTier := snap.EstimatedTier
 	if channelChanged && billingexpr.UsedVars(snap.ExprString)["channel_id"] {
 		cost, trace, err := billingexpr.RunExprByHashWithRequest(snap.ExprString, snap.ExprHash, billingexpr.TokenParams{

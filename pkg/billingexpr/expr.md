@@ -106,6 +106,7 @@ channel_id == 12 && len > 272000
 | `weekday` | `weekday(tz) → int` | Day of week (0=Sunday, 6=Saturday) |
 | `month` | `month(tz) → int` | Month (1-12) |
 | `day` | `day(tz) → int` | Day of month (1-31) |
+| `cn_off_peak` | `cn_off_peak() → bool` | DeepSeek off-peak band in Beijing time, including Chinese public holidays |
 | `max` | `max(a, b) → float64` | Math max |
 | `min` | `min(a, b) → float64` | Math min |
 | `abs` | `abs(x) → float64` | Absolute value |
@@ -113,6 +114,22 @@ channel_id == 12 && len > 272000
 | `floor` | `floor(x) → float64` | Floor |
 
 ### Expression Examples
+
+#### 国内原币价格与 DeepSeek 峰谷价
+
+原厂同步从 LLM Abacus 读取五家国内厂商的 `*PriceOrig` 人民币数值，models-cn 补充 DeepSeek 峰谷价；国外厂商继续使用 models.dev 的美元数值。数据源明确标注币种和每百万 token 单位，不使用汇率转换后的字段，也不在人民币源故障时回退国内模型美元价。同步只写入管理员选中的模型价格，不修改全局额度单位、余额展示或充值设置；现有配额转换公式保持不变。
+
+`cn_off_peak()` 按 DeepSeek 官方规则在北京时间周一至周五（排除中国法定节假日）09:00–12:00、14:00–18:00 返回 false，其他时段返回 true；周六日即使是调休工作日也属于空闲时段。峰谷价由同一表达式完整保存，例如：
+
+```text
+cn_off_peak()
+  ? tier("off_peak", p * 4.5 + c * 13.5 + cr * 0.15)
+  : tier("peak", p * 9 + c * 27 + cr * 0.3)
+```
+
+请求开始时间存入 `RequestInput.PricingTime` 和 `BillingSnapshot.PricingTime`。预扣、渠道重试和结算使用这一时间，`hour/minute/weekday/month/day` 也遵循该快照；不携带时间的独立表达式调用使用该次计算开始时的时间。
+
+日历来自 [holiday-cn](https://github.com/NateScarlet/holiday-cn) 整理的国务院放假通知。内置 2026 年快照，使用期间每日尝试更新并预取次年，下载失败保留已验证缓存。新年份没有可用日历时，峰值时段计算明确失败，不默认按工作日计价；周末及明确的空闲时段仍可计算。下载有超时、大小限制和失败冷却期。价格源时区或时段结构不受支持时，不生成旧规则的表达式。复杂峰谷表达式使用原始表达式编辑器，打开配置不会重写价格。
 
 ```
 # Simple flat pricing

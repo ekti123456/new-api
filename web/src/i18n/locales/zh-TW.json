@@ -5642,6 +5642,14 @@
     "Syncing {{count}} models selected in the pricing lists. Exact matches are selected; choose sources for unmatched models.": "已帶入清單中勾選的 {{count}} 個模型。精確匹配項已自動選中，未匹配的模型請選擇來源。",
     "Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.": "價格順序：輸入 / 輸出 / 快取讀取 / 快取寫入。核對後直接確認同步；手選來源後會自動勾選，無需重複選擇。",
     "Confirm sync ({{count}})": "確認同步（{{count}}）",
-    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "確認同步會替換所選模型的價格或表達式，未勾選的模型不受影響。"
+    "Confirming sync replaces the selected prices or expressions. Unselected models are unchanged.": "確認同步會替換所選模型的價格或表達式，未勾選的模型不受影響。",
+    "Chinese models use original CNY prices from LLM Abacus, with DeepSeek time bands from models-cn. International models use models.dev USD prices. Numbers are imported without currency conversion.": "國產模型讀取 LLM Abacus 的人民幣原價，DeepSeek 峰谷價由 models-cn 補充；國外模型讀取 models.dev 的美元價格。按原始數字匯入，不換算匯率。",
+    "Official pricing reference": "查看官方定價",
+    "Source verification date: {{date}}": "來源核驗日期：{{date}}",
+    "Automatic peak/off-peak pricing (Beijing time, including holidays). The prices above are off-peak prices.": "按北京時間及法定節假日自動切換峰谷價；上方顯示空閒時段價格。",
+    "LLM Abacus prices are unavailable. Domestic USD prices will not be substituted.": "LLM Abacus 人民幣價格暫不可用，不會用國產模型的美元價格替代。",
+    "models-cn prices are unavailable. DeepSeek uses verified LLM Abacus time bands when available.": "models-cn 暫不可用；如 LLM Abacus 的 DeepSeek 峰谷價通過校驗，將使用該來源。",
+    "models.dev prices are unavailable. International prices were not loaded.": "models.dev 暫不可用，未載入國外模型價格。",
+    "No usable pricing source is available. Existing prices were not changed.": "所有定價來源均不可用，現有價格未被修改。"
   }
 }

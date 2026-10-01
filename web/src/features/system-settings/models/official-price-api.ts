@@ -28,16 +28,20 @@ import {
   type PricingOptions,
 } from './official-price-matching'
 
-export async function getOfficialPrices(): Promise<OfficialPrice[]> {
+export async function getOfficialPrices(): Promise<{
+  prices: OfficialPrice[]
+  warnings: string[]
+}> {
   const response = await api.get<{
     success: boolean
     message?: string
     data: OfficialPrice[]
+    warnings?: string[]
   }>('/api/ratio_sync/official-prices', { timeout: 45000 })
   if (!response.data.success) {
     throw new Error(response.data.message || 'Failed to fetch official prices')
   }
-  return response.data.data
+  return { prices: response.data.data, warnings: response.data.warnings ?? [] }
 }
 
 export async function getPricingOptions(): Promise<PricingOptions> {
