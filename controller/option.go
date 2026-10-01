@@ -142,6 +142,9 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case "Codex2APIPolicySecret":
+		common.ApiErrorMsg(c, "Use the Codex2API audit settings editor")
+		return
 	case "window_expansion_setting.policy":
 		common.ApiErrorMsg(c, "Use the window management policy editor")
 		return
