@@ -75,24 +75,11 @@ type WindowControlResult struct {
 }
 
 func windowControlDestination(info *relaycommon.RelayInfo) (*url.URL, newAPIPolicyBinding, error) {
-	if info == nil || info.ChannelMeta == nil {
-		return nil, newAPIPolicyBinding{}, errors.New("missing window destination")
+	connection, err := captureWindowConnection(info)
+	if err != nil {
+		return nil, newAPIPolicyBinding{}, err
 	}
-	target, err := url.Parse(strings.TrimRight(info.ChannelBaseUrl, "/"))
-	if err != nil || target == nil || target.Host == "" {
-		return nil, newAPIPolicyBinding{}, errors.New("invalid window destination")
-	}
-	target.Path = strings.TrimSuffix(strings.TrimRight(target.Path, "/"), "/v1") + "/v1/session-windows"
-	target.RawPath, target.RawQuery, target.Fragment = "", "", ""
-	config, err := loadNewAPIPolicyConfig()
-	if err != nil || !config.Enabled {
-		return nil, newAPIPolicyBinding{}, errors.New("signed Codex2API integration is unavailable")
-	}
-	binding, matched := matchNewAPIPolicyBinding(config.Bindings, target, info.ApiKey)
-	if !matched {
-		return nil, newAPIPolicyBinding{}, errors.New("window destination requires a verified Codex2API binding")
-	}
-	return target, binding, nil
+	return &connection.target, connection.binding, nil
 }
 
 func windowBindingHash(binding newAPIPolicyBinding, key string) string {
@@ -129,7 +116,18 @@ func InvalidateUserWindowBilling(userID int) {
 }
 
 func RequestUserWindows(requestContext *gin.Context, info *relaycommon.RelayInfo, input WindowControlInput) (WindowControlResult, error) {
+	connection, err := captureWindowConnection(info)
+	if err != nil {
+		return WindowControlResult{}, err
+	}
+	return requestUserWindowsWithConnection(requestContext, info, input, connection)
+}
+
+func requestUserWindowsWithConnection(requestContext *gin.Context, info *relaycommon.RelayInfo, input WindowControlInput, connection *windowConnectionSnapshot) (WindowControlResult, error) {
 	var result WindowControlResult
+	if err := connection.validateDestination(info); err != nil {
+		return result, err
+	}
 	// Dedicated operations make older gateways reject tiered pricing before
 	// reserving or upgrading a window at the old flat price.
 	if input.MultiplierStep > 0 && (input.Operation == "quote" || input.Operation == "upgrade") {
@@ -139,24 +137,20 @@ func RequestUserWindows(requestContext *gin.Context, info *relaycommon.RelayInfo
 	controlInfo.RequestId = common.NewRequestId()
 	controlInfo.WindowBilling = nil
 	info = &controlInfo
-	target, _, err := windowControlDestination(info)
-	if err != nil {
-		return result, err
-	}
 	payload, err := common.Marshal(input)
 	if err != nil {
 		return result, err
 	}
 	ctx, cancel := context.WithTimeout(requestContext.Request.Context(), 2*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, connection.target.String(), bytes.NewReader(payload))
 	if err != nil {
 		return result, err
 	}
 	request.Header.Set("Authorization", "Bearer "+info.ApiKey)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "NewAPI-Window-Control/1")
-	if err = applyNewAPIPolicyHeaders(requestContext, request, info, bytes.NewReader(payload)); err != nil {
+	if err = applyNewAPIPolicyHeadersWithConfig(requestContext, request, info, bytes.NewReader(payload), connection.policy()); err != nil {
 		return result, err
 	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
@@ -267,11 +261,15 @@ func (cache *windowGrantCache) putLocked(key string, value cachedWindowGrant) {
 var windowBillingCache = newWindowGrantCache(8192)
 
 func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayInfo) (func(bool), error) {
+	return prepareWindowBillingWithConnection(requestContext, info, nil)
+}
+
+func prepareWindowBillingWithConnection(requestContext *gin.Context, info *relaycommon.RelayInfo, connection *windowConnectionSnapshot) (func(bool), error) {
 	if info == nil || requestContext == nil || requestContext.Request == nil || requestContext.Request.URL == nil || requestContext.Request.Method != http.MethodPost {
 		return nil, nil
 	}
 	switch requestContext.Request.URL.Path {
-	case "/v1/responses", "/v1/responses/compact", "/v1/chat/completions", "/v1/messages":
+	case "/v1/responses", "/v1/responses/compact", "/v1/chat/completions", "/v1/messages", "/v1/alpha/search":
 	default:
 		return nil, nil
 	}
@@ -285,13 +283,19 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 	if !configured && !info.UserSetting.WindowExpansionJoined && !requestContext.GetBool("window_billing_checked") {
 		return nil, nil
 	}
-	_, binding, err := windowControlDestination(&shadow)
+	var err error
+	if connection == nil {
+		connection, err = captureWindowConnection(&shadow)
+	} else {
+		err = connection.validateDestination(&shadow)
+	}
 	if err != nil {
 		if configured {
 			return nil, err
 		}
 		return nil, nil
 	}
+	binding := connection.binding
 	root := applyCodexPassiveRootSessionOverride(requestContext, analyzeNewAPIPolicyRootSession(requestContext, &shadow, newAPIPolicyStableSessionID(requestContext, &shadow)))
 	if root.state != newAPIPolicyRootSessionResolved {
 		return nil, nil
@@ -312,15 +316,24 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 		}
 		copy := cached.grant
 		info.WindowBilling = &copy
+		rememberWindowConnection(requestContext, connection, &copy)
 		requestContext.Set("window_billing_pinned", true)
-		return func(success bool) { finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success) }, nil
+		return func(success bool) {
+			finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success, connection)
+		}, nil
 	}
 	preferences, err := model.GetUserSetting(info.UserId, true)
 	if err != nil {
 		return nil, errors.New("窗口扩容设置暂时无法确认，请稍后重试")
 	}
 	allow := configured && policy.Enabled && preferences.WindowExpansionEnabled && preferences.WindowExpansionAcceptedRatio >= policy.Multiplier
-	result, err := RequestUserWindows(requestContext, &shadow, WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, MultiplierStep: policy.MultiplierStep, ReservationID: common.GetUUID()})
+	input := WindowControlInput{Operation: "quote", AllowExpansion: allow, ExtraLimit: policy.ExtraLimit, Multiplier: policy.Multiplier, MultiplierStep: policy.MultiplierStep, ReservationID: common.GetUUID()}
+	if requestContext.Request.URL.Path == "/v1/alpha/search" {
+		// Search belongs to an existing turn. Never create a window or change
+		// its tariff just to authorize this auxiliary request.
+		input = WindowControlInput{Operation: "reuse", Multiplier: 1, ExtraLimit: policy.ExtraLimit}
+	}
+	result, err := requestUserWindowsWithConnection(requestContext, &shadow, input, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -336,12 +349,18 @@ func PrepareWindowBilling(requestContext *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
+	if input.Operation == "reuse" && !grant.Confirmed {
+		return nil, errors.New("auxiliary search requires a confirmed window authorization")
+	}
 	info.WindowBilling = grant
+	rememberWindowConnection(requestContext, connection, grant)
 	requestContext.Set("window_billing_pinned", true)
-	return func(success bool) { finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success) }, nil
+	return func(success bool) {
+		finishWindowAuthorization(requestContext, info, &shadow, cacheKey, success, connection)
+	}, nil
 }
 
-func finishWindowAuthorization(request *gin.Context, info, destination *relaycommon.RelayInfo, cacheKey string, success bool) {
+func finishWindowAuthorization(request *gin.Context, info, destination *relaycommon.RelayInfo, cacheKey string, success bool, connection *windowConnectionSnapshot) {
 	grant := info.WindowBilling
 	if grant == nil {
 		return
@@ -360,7 +379,11 @@ func finishWindowAuthorization(request *gin.Context, info, destination *relaycom
 	defer cancel()
 	cleanup := request.Copy()
 	cleanup.Request = request.Request.Clone(cleanupContext)
-	_, _ = RequestUserWindows(cleanup, destination, WindowControlInput{Operation: "release", GrantID: grant.ID, ReservationID: grant.ReservationID, Multiplier: 1})
+	if connection != nil {
+		_, _ = requestUserWindowsWithConnection(cleanup, destination, WindowControlInput{Operation: "release", GrantID: grant.ID, ReservationID: grant.ReservationID, Multiplier: 1}, connection)
+	} else {
+		_, _ = RequestUserWindows(cleanup, destination, WindowControlInput{Operation: "release", GrantID: grant.ID, ReservationID: grant.ReservationID, Multiplier: 1})
+	}
 }
 
 func acceptWindowAuthorizationResponse(request *gin.Context, response *http.Response, info *relaycommon.RelayInfo) error {
@@ -369,10 +392,17 @@ func acceptWindowAuthorizationResponse(request *gin.Context, response *http.Resp
 	if ticket == "" || info.WindowBilling == nil {
 		return nil
 	}
-	_, binding, err := windowControlDestination(info)
+	connection, err := authorizedWindowConnection(request, info)
 	if err != nil {
 		return err
 	}
+	if connection == nil {
+		connection, err = captureWindowConnection(info)
+		if err != nil {
+			return err
+		}
+	}
+	binding := connection.binding
 	previous := info.WindowBilling
 	grant, err := verifyWindowBillingTicket(binding, info.ApiKey, info.UserId, previous.Fingerprint, ticket)
 	if err != nil {
@@ -393,14 +423,18 @@ func RefreshWindowBilling(request *gin.Context, info *relaycommon.RelayInfo) (fu
 	cacheKey := request.GetString("window_billing_scope")
 	destination := *info
 	destination.InitChannelMeta(request)
-	finishWindowAuthorization(request, info, &destination, cacheKey, false)
+	connection, err := authorizedWindowConnection(request, &destination)
+	if err != nil {
+		return nil, err
+	}
+	finishWindowAuthorization(request, info, &destination, cacheKey, false, connection)
 	windowBillingCache.Lock()
 	if current := windowBillingCache.items[cacheKey]; previous == nil || current.grant.ID == previous.ID {
 		windowBillingCache.deleteLocked(cacheKey)
 	}
 	windowBillingCache.Unlock()
 	info.WindowBilling = nil
-	finish, err := PrepareWindowBilling(request, info)
+	finish, err := prepareWindowBillingWithConnection(request, info, connection)
 	if err != nil {
 		info.WindowBilling = previous
 		return nil, err

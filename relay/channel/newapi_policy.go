@@ -142,6 +142,34 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 	if req == nil {
 		return nil
 	}
+	// Clear an earlier attempt even if resolving this attempt's trusted
+	// settings fails. No stale policy context or forwarded signature survives.
+	if c != nil {
+		c.Set(newAPIPolicyRequestContextGinKey, nil)
+	}
+	for _, name := range newAPIPolicyHeaderNames {
+		req.Header.Del(name)
+	}
+	connection, err := authorizedWindowConnection(c, info)
+	if err != nil {
+		return err
+	}
+	var cfg newAPIPolicyConfig
+	if connection != nil {
+		cfg = connection.policy()
+	} else {
+		cfg, err = loadNewAPIPolicyConfig()
+		if err != nil {
+			return err
+		}
+	}
+	return applyNewAPIPolicyHeadersWithConfig(c, req, info, requestBody, cfg)
+}
+
+func applyNewAPIPolicyHeadersWithConfig(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo, requestBody io.Reader, cfg newAPIPolicyConfig) error {
+	if req == nil {
+		return nil
+	}
 	if c != nil {
 		c.Set(newAPIPolicyRequestContextGinKey, nil)
 	}
@@ -149,10 +177,6 @@ func applyNewAPIPolicyHeaders(c *gin.Context, req *http.Request, info *relaycomm
 		req.Header.Del(name)
 	}
 
-	cfg, err := loadNewAPIPolicyConfig()
-	if err != nil {
-		return err
-	}
 	if !cfg.Enabled || c == nil || info == nil || info.ChannelMeta == nil {
 		if info != nil && info.WindowBilling != nil {
 			return fmt.Errorf("window billing requires signed policy forwarding")
