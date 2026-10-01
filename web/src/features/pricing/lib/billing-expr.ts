@@ -188,7 +188,14 @@ export const MATCH_LTE = 'lte'
 export const MATCH_EXISTS = 'exists'
 export const MATCH_RANGE = 'range'
 
-export const TIME_FUNCS = ['hour', 'minute', 'weekday', 'month', 'day'] as const
+export const TIME_FUNCS = [
+  'hour',
+  'minute',
+  'weekday',
+  'month',
+  'day',
+  'cn_off_peak',
+] as const
 export type TimeFunc = (typeof TIME_FUNCS)[number]
 
 export const COMMON_TIMEZONES: { value: string; label: string }[] = [
@@ -294,9 +301,9 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
 export function normalizeTierLabel(label: string | undefined): string {
   if (!label) return ''
   return label
-    .replace(/<[=＝]?|≤|＜[=＝]?/g, '<')
-    .replace(/>[=＝]?|≥|＞[=＝]?/g, '>')
-    .replace(/\s+/g, '')
+    .replaceAll(/<[=＝]?|≤|＜[=＝]?/g, '<')
+    .replaceAll(/>[=＝]?|≥|＞[=＝]?/g, '>')
+    .replaceAll(/\s+/g, '')
     .toLowerCase()
 }
 
@@ -352,6 +359,18 @@ function parseExprLiteral(raw: string): string | null {
 }
 
 function tryParseTimeCondition(expr: string): RequestCondition | null {
+  const calendar = expr.match(/^cn_off_peak\(\) == (true|false)$/)
+  if (calendar) {
+    return {
+      source: 'time',
+      timeFunc: 'cn_off_peak',
+      timezone: 'Asia/Shanghai',
+      mode: MATCH_EQ,
+      value: calendar[1],
+      rangeStart: '',
+      rangeEnd: '',
+    }
+  }
   let m = expr.match(
     /^(hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) \|\| \1\("\2"\) < ([\d.eE+-]+)$/
   )
@@ -413,24 +432,26 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
   if (m) return { source: 'param', path: m[1], mode: MATCH_EXISTS, value: '' }
 
   m = expr.match(/^has\(header\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/)
-  if (m)
+  if (m) {
     return {
       source: 'header',
       path: m[1],
       mode: MATCH_CONTAINS,
       value: JSON.parse(m[2]) as string,
     }
+  }
 
   m = expr.match(
     /^param\("([^"]+)"\) != nil && has\(param\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/
   )
-  if (m && m[1] === m[2])
+  if (m && m[1] === m[2]) {
     return {
       source: 'param',
       path: m[1],
       mode: MATCH_CONTAINS,
       value: JSON.parse(m[3]) as string,
     }
+  }
 
   m = expr.match(
     /^param\("([^"]+)"\) != nil && param\("([^"]+)"\) (>|>=|<|<=) ([\d.eE+-]+)$/
@@ -629,18 +650,29 @@ function isTimeFunc(value: unknown): value is TimeFunc {
 export function normalizeCondition(
   cond: Partial<RequestCondition> | null | undefined
 ): RequestCondition {
-  const source =
-    cond?.source === 'time'
-      ? 'time'
-      : cond?.source === 'header'
-        ? 'header'
-        : 'param'
+  let source: RequestCondition['source'] = 'param'
+  if (cond?.source === 'time') {
+    source = 'time'
+  } else if (cond?.source === 'header') {
+    source = 'header'
+  }
 
   if (source === 'time') {
     const timeCond = cond as Partial<TimeCondition> | null | undefined
     const timeFunc: TimeFunc = isTimeFunc(timeCond?.timeFunc)
       ? timeCond.timeFunc
       : 'hour'
+    if (timeFunc === 'cn_off_peak') {
+      return {
+        source: 'time',
+        timeFunc,
+        timezone: 'Asia/Shanghai',
+        mode: MATCH_EQ,
+        value: timeCond?.value === 'false' ? 'false' : 'true',
+        rangeStart: '',
+        rangeEnd: '',
+      }
+    }
     const options = getRequestRuleMatchOptions(SOURCE_TIME)
     const mode = options.some((item) => item.value === timeCond?.mode)
       ? (timeCond?.mode as string)
@@ -685,6 +717,9 @@ function buildExprLiteral(mode: string, value: string): string {
 function buildTimeConditionExpr(cond: TimeCondition): string {
   const normalized = normalizeCondition(cond) as TimeCondition
   const { timeFunc, timezone, mode } = normalized
+  if (timeFunc === 'cn_off_peak') {
+    return `cn_off_peak() == ${normalized.value}`
+  }
   const tz = JSON.stringify(timezone)
   const fn = `${timeFunc}(${tz})`
 

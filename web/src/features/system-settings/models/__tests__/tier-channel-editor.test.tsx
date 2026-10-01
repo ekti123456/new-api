@@ -36,11 +36,19 @@ const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { TieredPricingEditor } = await import('../tiered-pricing-editor')
+const { QueryClient, QueryClientProvider, notifyManager } =
+  await import('@tanstack/react-query')
+const { api } = await import('@/lib/api')
+const originalAdapter = api.defaults.adapter
+notifyManager.setScheduler((callback) => callback())
 const i18n = createInstance()
 await i18n
   .use(initReactI18next)
   .init({ lng: 'en', resources: { en: { translation: {} } } })
-after(() => domWindow.close())
+after(() => {
+  notifyManager.setScheduler((callback) => setTimeout(callback, 0))
+  domWindow.close()
+})
 
 test('opening holiday pricing preserves the full expression without emitting a replacement', async () => {
   const holidayExpr =
@@ -49,20 +57,34 @@ test('opening holiday pricing preserves the full expression without emitting a r
   document.body.append(container)
   const root = createRoot(container)
   const changes: string[] = []
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  api.defaults.adapter = async (config) => ({
+    config,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    data: { success: true, data: { cn_off_peak: true } },
+  })
   try {
     await act(async () =>
       root.render(
-        <I18nextProvider i18n={i18n}>
-          <TieredPricingEditor
-            billingExpr={holidayExpr}
-            requestRuleExpr=''
-            onBillingExprChange={(value) => changes.push(value)}
-            onRequestRuleExprChange={() => {}}
-          />
-        </I18nextProvider>
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <TieredPricingEditor
+              billingExpr={holidayExpr}
+              requestRuleExpr=''
+              onBillingExprChange={(value) => changes.push(value)}
+              onRequestRuleExprChange={() => {}}
+            />
+          </I18nextProvider>
+        </QueryClientProvider>
       )
     )
     assert.deepEqual(changes, [])
+    assert.ok(!container.textContent?.includes('cn_off_peak is not defined'))
+    assert.ok(container.textContent?.includes('Hit tier: off_peak'))
     assert.ok(
       [...container.querySelectorAll('textarea')].some(
         (field) => field.value === holidayExpr
@@ -71,11 +93,155 @@ test('opening holiday pricing preserves the full expression without emitting a r
   } finally {
     await act(async () => root.unmount())
     container.remove()
+    client.clear()
+    api.defaults.adapter = originalAdapter
   }
 })
 
 const expression =
   'channel_id == 12 && len > 272000 ? tier("long", p * 10 + c * 45) : tier("base", p * 5 + c * 30)'
+
+test('holiday discount is editable as a native time rule and its multiplier affects the estimate', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  api.defaults.adapter = async (config) => ({
+    config,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    data: { success: true, data: { cn_off_peak: true } },
+  })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const changes: string[] = []
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <TieredPricingEditor
+              billingExpr='tier("base", p * 9 + c * 27)'
+              requestRuleExpr='(cn_off_peak() == true ? 0.5 : 1)'
+              onBillingExprChange={() => {}}
+              onRequestRuleExprChange={(value) => changes.push(value)}
+            />
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    assert.ok(
+      container.textContent?.includes('China peak/off-peak (holidays included)')
+    )
+    assert.ok(
+      container
+        .querySelector('[aria-label="Pricing time band"]')
+        ?.textContent?.includes('Off-peak')
+    )
+    const setter = Object.getOwnPropertyDescriptor(
+      domWindow.HTMLInputElement.prototype,
+      'value'
+    )?.set
+    assert.ok(setter)
+    const tokens = container.querySelector<HTMLInputElement>(
+      '#tier-estimator-prompt'
+    )
+    assert.ok(tokens)
+    await act(async () => {
+      setter.call(tokens, '2')
+      tokens.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+    })
+    assert.ok(container.textContent?.includes('Estimated quota cost: 9'))
+    const multiplier = [
+      ...container.querySelectorAll<HTMLInputElement>('input'),
+    ].find((input) => input.value === '0.5')
+    assert.ok(multiplier)
+    await act(async () => {
+      setter.call(multiplier, '0.6')
+      multiplier.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+    })
+    assert.equal(changes.at(-1), '(cn_off_peak() == true ? 0.6 : 1)')
+    assert.ok(container.textContent?.includes('Estimated quota cost: 10.8'))
+  } finally {
+    await act(async () => root.unmount())
+    client.clear()
+    container.remove()
+    api.defaults.adapter = originalAdapter
+  }
+})
+
+test('holiday preview waits for server time and hides stale costs if the calendar request fails', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  let finish: (() => void) | undefined
+  api.defaults.adapter = (config) =>
+    new Promise((resolve) => {
+      finish = () =>
+        resolve({
+          config,
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          data: { success: true, data: { cn_off_peak: false } },
+        })
+    })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <I18nextProvider i18n={i18n}>
+            <TieredPricingEditor
+              billingExpr='cn_off_peak() ? tier("off_peak", p * 4.5 + c * 13.5) : tier("peak", p * 9 + c * 27)'
+              requestRuleExpr=''
+              onBillingExprChange={() => {}}
+              onRequestRuleExprChange={() => {}}
+            />
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    assert.ok(
+      container
+        .querySelector('[role="status"]')
+        ?.textContent?.includes('Loading pricing time')
+    )
+    assert.ok(!container.textContent?.includes('Estimated quota cost'))
+    assert.ok(!container.textContent?.includes('Expression error'))
+    assert.ok(finish)
+    await act(async () => finish?.())
+    assert.ok(container.textContent?.includes('Hit tier: peak'))
+    api.defaults.adapter = async (config) => ({
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      data: { success: false },
+    })
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['billing-pricing-time'] })
+    })
+    assert.ok(
+      [...container.querySelectorAll('[role="alert"]')].some((alert) =>
+        alert.textContent?.includes('Pricing time is unavailable')
+      )
+    )
+    assert.ok(!container.textContent?.includes('Estimated quota cost'))
+  } finally {
+    await act(async () => root.unmount())
+    client.clear()
+    container.remove()
+    api.defaults.adapter = originalAdapter
+  }
+})
 
 test('the visual editor edits channel IDs and explains hidden marketplace tiers', async () => {
   const container = document.createElement('div')

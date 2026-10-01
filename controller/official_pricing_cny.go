@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -319,5 +320,18 @@ func deepSeekTimeExpression(peak, offPeak map[string]float64) string {
 	_, readPeak := peak["cache_read"]
 	_, readOff := offPeak["cache_read"]
 	read := readPeak || readOff
+	// Use the existing visual request-rule multiplier when every dimension
+	// shares one exact discount. Keep separate tiers for nonuniform prices.
+	if peak["input"] > 0 && len(peak) == len(offPeak) {
+		factor := offPeak["input"] / peak["input"]
+		uniform := true
+		for key, value := range peak {
+			off, exists := offPeak[key]
+			uniform = uniform && exists && value*factor == off
+		}
+		if uniform {
+			return "(tier(\"base\", " + officialTierFormula(peak, read, false) + ")) * (cn_off_peak() == true ? " + strconv.FormatFloat(factor, 'f', -1, 64) + " : 1)"
+		}
+	}
 	return "cn_off_peak() ? tier(\"off_peak\", " + officialTierFormula(offPeak, read, false) + ") : tier(\"peak\", " + officialTierFormula(peak, read, false) + ")"
 }

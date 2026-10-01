@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, Copy, Plus, Trash2 } from 'lucide-react'
 import {
   memo,
@@ -100,6 +101,8 @@ import {
   tryParseVisualConfig,
 } from '@/features/pricing/lib/tier-expr'
 import { cn } from '@/lib/utils'
+
+import { getPricingTime } from './pricing-time-api'
 
 const PRICE_SUFFIX = '$/1M tokens'
 const CACHE_PRICE_VARS = BILLING_EXTRA_VARS.filter(
@@ -998,6 +1001,8 @@ function RuleConditionRow({
         return t('Month number')
       case 'day':
         return t('Day of month')
+      case 'cn_off_peak':
+        return t('China peak/off-peak (holidays included)')
       default:
         return timeFunc
     }
@@ -1032,11 +1037,23 @@ function RuleConditionRow({
           label: getTimeFuncLabel(fn),
         }))}
         value={timeCond.timeFunc}
-        onValueChange={(value) =>
-          onChange({ ...timeCond, timeFunc: value as TimeFunc })
-        }
+        onValueChange={(value) => {
+          if (value === 'cn_off_peak') {
+            onChange({
+              ...createEmptyTimeCondition(),
+              timeFunc: value,
+              mode: MATCH_EQ,
+              value: 'true',
+            })
+          } else if (value) {
+            onChange({
+              ...createEmptyTimeCondition(),
+              timeFunc: value as TimeFunc,
+            })
+          }
+        }}
       >
-        <SelectTrigger className='w-32' size='sm'>
+        <SelectTrigger className='max-w-72 min-w-32' size='sm'>
           <SelectValue>{getTimeFuncLabel(timeCond.timeFunc)}</SelectValue>
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
@@ -1049,82 +1066,120 @@ function RuleConditionRow({
           </SelectGroup>
         </SelectContent>
       </Select>
-      <Select
-        items={COMMON_TIMEZONES.map((tz) => ({
-          value: tz.value,
-          label: tz.label,
-        }))}
-        value={timeCond.timezone}
-        onValueChange={(value) =>
-          value !== null && onChange({ ...timeCond, timezone: value })
-        }
-      >
-        <SelectTrigger className='w-56' size='sm'>
-          <SelectValue>
-            {COMMON_TIMEZONES.find((tz) => tz.value === timeCond.timezone)
-              ?.label ?? timeCond.timezone}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
-          <SelectGroup>
-            {COMMON_TIMEZONES.map((tz) => (
-              <SelectItem key={tz.value} value={tz.value}>
-                {tz.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      <Select
-        items={matchOptions.map((option) => ({
-          value: option.value,
-          label: getMatchLabel(option.value),
-        }))}
-        value={timeCond.mode}
-        onValueChange={(v) => v !== null && handleModeChange(v)}
-      >
-        <SelectTrigger className='w-32' size='sm'>
-          <SelectValue>{getMatchLabel(timeCond.mode)}</SelectValue>
-        </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
-          <SelectGroup>
-            {matchOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {getMatchLabel(option.value)}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      {timeCond.mode === MATCH_RANGE ? (
+      {timeCond.timeFunc === 'cn_off_peak' && (
         <>
-          <DraftNumberInput
-            value={timeCond.rangeStart}
+          <span className='text-muted-foreground text-xs'>
+            {t('Beijing time')}
+          </span>
+          <Select
+            value={timeCond.value}
+            items={[
+              { value: 'true', label: t('Off-peak') },
+              { value: 'false', label: t('Peak period') },
+            ]}
             onValueChange={(value) =>
-              onChange({ ...timeCond, rangeStart: String(value) })
+              value !== null && onChange({ ...timeCond, value })
             }
-            placeholder={t('Start')}
-            className='w-20'
-          />
-          <span className='text-muted-foreground text-xs'>~</span>
-          <DraftNumberInput
-            value={timeCond.rangeEnd}
-            onValueChange={(value) =>
-              onChange({ ...timeCond, rangeEnd: String(value) })
-            }
-            placeholder={t('End')}
-            className='w-20'
-          />
+          >
+            <SelectTrigger
+              size='sm'
+              className='w-32'
+              aria-label={t('Pricing time band')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='true'>{t('Off-peak')}</SelectItem>
+              <SelectItem value='false'>{t('Peak period')}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className='text-muted-foreground max-w-96 text-xs'>
+            {t(
+              'Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.'
+            )}
+          </span>
         </>
-      ) : (
-        <DraftNumberInput
-          value={timeCond.value}
-          onValueChange={(value) =>
-            onChange({ ...timeCond, value: String(value) })
-          }
-          placeholder={t('Value')}
-          className='w-24'
-        />
+      )}
+      {timeCond.timeFunc !== 'cn_off_peak' && (
+        <>
+          <Select
+            items={COMMON_TIMEZONES.map((tz) => ({
+              value: tz.value,
+              label: tz.label,
+            }))}
+            value={timeCond.timezone}
+            onValueChange={(value) =>
+              value !== null && onChange({ ...timeCond, timezone: value })
+            }
+          >
+            <SelectTrigger className='w-56' size='sm'>
+              <SelectValue>
+                {COMMON_TIMEZONES.find((tz) => tz.value === timeCond.timezone)
+                  ?.label ?? timeCond.timezone}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {COMMON_TIMEZONES.map((tz) => (
+                  <SelectItem key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            items={matchOptions.map((option) => ({
+              value: option.value,
+              label: getMatchLabel(option.value),
+            }))}
+            value={timeCond.mode}
+            onValueChange={(v) => v !== null && handleModeChange(v)}
+          >
+            <SelectTrigger className='w-32' size='sm'>
+              <SelectValue>{getMatchLabel(timeCond.mode)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {matchOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {getMatchLabel(option.value)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {timeCond.mode === MATCH_RANGE ? (
+            <>
+              <DraftNumberInput
+                value={timeCond.rangeStart}
+                onValueChange={(value) =>
+                  onChange({ ...timeCond, rangeStart: String(value) })
+                }
+                placeholder={t('Start')}
+                className='w-20'
+              />
+              <span className='text-muted-foreground text-xs'>~</span>
+              <DraftNumberInput
+                value={timeCond.rangeEnd}
+                onValueChange={(value) =>
+                  onChange({ ...timeCond, rangeEnd: String(value) })
+                }
+                placeholder={t('End')}
+                className='w-20'
+              />
+            </>
+          ) : (
+            <DraftNumberInput
+              value={timeCond.value}
+              onValueChange={(value) =>
+                onChange({ ...timeCond, value: String(value) })
+              }
+              placeholder={t('Value')}
+              className='w-24'
+            />
+          )}
+        </>
       )}
     </>
   )
@@ -1384,9 +1439,29 @@ function PresetSection({ applyPreset }: PresetSectionProps) {
 
 type EstimatorProps = {
   effectiveExpr: string
+  pricingTime?: { pending: boolean; failed: boolean; offPeak?: boolean }
 }
 
-function CostEstimator({ effectiveExpr }: EstimatorProps) {
+function CalendarCostEstimator({ effectiveExpr }: EstimatorProps) {
+  const time = useQuery({
+    queryKey: ['billing-pricing-time'],
+    queryFn: getPricingTime,
+    refetchInterval: 60_000,
+    retry: false,
+  })
+  return (
+    <CostEstimator
+      effectiveExpr={effectiveExpr}
+      pricingTime={{
+        pending: time.isPending,
+        failed: time.isError,
+        offPeak: time.data,
+      }}
+    />
+  )
+}
+
+function CostEstimator({ effectiveExpr, pricingTime }: EstimatorProps) {
   const { t } = useTranslation()
   const [promptTokens, setPromptTokens] = useState(0)
   const [completionTokens, setCompletionTokens] = useState(0)
@@ -1413,10 +1488,21 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
         promptTokens,
         completionTokens,
         extras,
-        channelID
+        channelID,
+        pricingTime?.offPeak
       ),
-    [effectiveExpr, promptTokens, completionTokens, extras, channelID]
+    [
+      effectiveExpr,
+      promptTokens,
+      completionTokens,
+      extras,
+      channelID,
+      pricingTime?.offPeak,
+    ]
   )
+  const previewError = pricingTime?.failed
+    ? 'Pricing time is unavailable'
+    : result.error
 
   return (
     <div className='bg-muted/30 space-y-3 rounded-md border p-3'>
@@ -1428,18 +1514,36 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
           )}
         </p>
       </div>
+      {pricingTime && (
+        <p className='text-muted-foreground text-xs'>
+          {t(
+            'Peak/off-peak preview uses the server calendar and refreshes every minute.'
+          )}
+        </p>
+      )}
+      {/\b(param|header)\s*\(/.test(effectiveExpr) && (
+        <p className='text-muted-foreground text-xs'>
+          {t('Request body and headers are empty in this preview.')}
+        </p>
+      )}
       <div className='grid grid-cols-2 gap-3'>
         <div className='space-y-1'>
-          <Label className='text-xs'>{t('Input tokens')}</Label>
+          <Label className='text-xs' htmlFor='tier-estimator-prompt'>
+            {t('Input tokens')}
+          </Label>
           <DraftNumberInput
+            id='tier-estimator-prompt'
             min={0}
             value={promptTokens}
             onValueChange={setPromptTokens}
           />
         </div>
         <div className='space-y-1'>
-          <Label className='text-xs'>{t('Output tokens')}</Label>
+          <Label className='text-xs' htmlFor='tier-estimator-completion'>
+            {t('Output tokens')}
+          </Label>
           <DraftNumberInput
+            id='tier-estimator-completion'
             min={0}
             value={completionTokens}
             onValueChange={setCompletionTokens}
@@ -1491,27 +1595,31 @@ function CostEstimator({ effectiveExpr }: EstimatorProps) {
       <div
         className={cn(
           'rounded-md border p-3 text-sm',
-          result.error
+          previewError && !pricingTime?.pending
             ? 'border-destructive/50 bg-destructive/10 text-destructive'
             : 'border-primary/50 bg-primary/10'
         )}
       >
-        {result.error ? (
-          <span>
-            {t('Expression error')}: {result.error}
-          </span>
-        ) : (
-          <div className='flex items-center gap-2'>
-            <span className='font-medium'>
-              {t('Estimated quota cost')}: {result.cost.toLocaleString()}
-            </span>
-            {result.matchedTier && (
-              <Badge variant='outline' className='text-xs'>
-                {t('Hit tier')}: {result.matchedTier}
-              </Badge>
-            )}
-          </div>
+        {pricingTime?.pending && (
+          <span role='status'>{t('Loading pricing time...')}</span>
         )}
+        {!pricingTime?.pending &&
+          (previewError ? (
+            <span role='alert'>
+              {t('Expression error')}: {t(previewError)}
+            </span>
+          ) : (
+            <div className='flex items-center gap-2'>
+              <span className='font-medium'>
+                {t('Estimated quota cost')}: {result.cost.toLocaleString()}
+              </span>
+              {result.matchedTier && (
+                <Badge variant='outline' className='text-xs'>
+                  {t('Hit tier')}: {result.matchedTier}
+                </Badge>
+              )}
+            </div>
+          ))}
       </div>
     </div>
   )
@@ -1820,6 +1928,13 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
     setRequestRuleGroups(next)
   }, [])
 
+  const estimatorExpr = combineBillingExpr(
+    effectiveExpr,
+    editorMode === 'visual'
+      ? buildRequestRuleExpr(requestRuleGroups)
+      : splitBillingExprAndRequestRules(rawExpr).requestRuleExpr
+  )
+
   return (
     <div className='space-y-5'>
       <div className='grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end'>
@@ -1924,7 +2039,11 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         )}
       </div>
 
-      <CostEstimator effectiveExpr={effectiveExpr} />
+      {/\bcn_off_peak\s*\(/.test(estimatorExpr) ? (
+        <CalendarCostEstimator effectiveExpr={estimatorExpr} />
+      ) : (
+        <CostEstimator effectiveExpr={estimatorExpr} />
+      )}
     </div>
   )
 })

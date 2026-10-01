@@ -242,6 +242,7 @@ func SetApiRouter(router *gin.Engine) {
 		ratioSyncRoute.Use(middleware.RootAuth())
 		{
 			ratioSyncRoute.GET("/official-prices", controller.GetOfficialModelPrices)
+			ratioSyncRoute.GET("/pricing-time", controller.GetBillingPricingTime)
 			ratioSyncRoute.POST("/official-prices/apply", controller.ApplyOfficialPrices)
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)

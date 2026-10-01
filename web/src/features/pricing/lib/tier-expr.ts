@@ -231,7 +231,7 @@ export function tryParseVisualConfig(
 
     const cfg = normalizeVisualConfig({ tiers })
     const regenerated = generateExprFromVisualConfig(cfg)
-    if (regenerated.replace(/\s+/g, '') !== body.replace(/\s+/g, '')) {
+    if (regenerated.replaceAll(/\s+/g, '') !== body.replaceAll(/\s+/g, '')) {
       return null
     }
     return cfg
@@ -270,7 +270,9 @@ export function evalExprLocally(
   promptTokens: number,
   completionTokens: number,
   extraTokenValues: ExtraTokenValues,
-  channelID = 0
+  channelID = 0,
+  cnOffPeak?: boolean,
+  pricingTime = new Date()
 ): EvalResult {
   try {
     if (!exprStr || !exprStr.trim()) {
@@ -292,11 +294,49 @@ export function evalExprLocally(
       len,
       channel_id: channelID,
       tier: tierFn,
+      // The token estimator has no request payload/header inputs.
+      param: () => null,
+      header: () => '',
+      has: (source: unknown, substring: string) =>
+        String(source ?? '').includes(substring),
+      nil: null,
+      cn_off_peak: () => {
+        if (cnOffPeak === undefined) {
+          throw new Error('Pricing time is unavailable')
+        }
+        return cnOffPeak
+      },
       max: Math.max,
       min: Math.min,
       abs: Math.abs,
       ceil: Math.ceil,
       floor: Math.floor,
+    }
+    for (const field of [
+      'hour',
+      'minute',
+      'weekday',
+      'month',
+      'day',
+    ] as const) {
+      env[field] = (timezone: string) => {
+        const options: Intl.DateTimeFormatOptions = {
+          timeZone: timezone || 'UTC',
+          hourCycle: 'h23',
+        }
+        if (field === 'weekday') options.weekday = 'short'
+        else options[field] = 'numeric'
+        const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(
+          pricingTime
+        )
+        const value = parts.find((part) => part.type === field)?.value ?? ''
+        if (field === 'weekday') {
+          return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(
+            value
+          )
+        }
+        return Number(value)
+      }
     }
     for (const field of ESTIMATOR_VARS) {
       env[field.var] = extraTokenValues[field.stateKey] || 0

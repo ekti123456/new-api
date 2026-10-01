@@ -126,6 +126,10 @@ function describeCondition(
   t: (key: string) => string
 ): string {
   if (cond.source === SOURCE_TIME) {
+    if (cond.timeFunc === 'cn_off_peak') {
+      const band = cond.value === 'false' ? t('Peak period') : t('Off-peak')
+      return `${t('China peak/off-peak (holidays included)')}: ${band} (${t('Beijing time')})`
+    }
     const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc)
     const tz = cond.timezone || 'UTC'
     if (cond.mode === MATCH_RANGE) {

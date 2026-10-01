@@ -5725,6 +5725,16 @@
     "Remove connection": "Remove connection",
     "Removal takes effect after saving. The Codex2API binding itself is not deleted.": "Removal takes effect after saving. The Codex2API binding itself is not deleted.",
     "Audit request failed. Reload settings and try again.": "Audit request failed. Reload settings and try again.",
-    "Audit request failed": "Audit request failed"
+    "Audit request failed": "Audit request failed",
+    "Loading pricing time...": "Loading pricing time...",
+    "Peak/off-peak preview uses the server calendar and refreshes every minute.": "Peak/off-peak preview uses the server calendar and refreshes every minute.",
+    "Pricing time is unavailable": "Pricing time is unavailable",
+    "Pricing time band": "Pricing time band",
+    "China peak/off-peak (holidays included)": "China peak/off-peak (holidays included)",
+    "Off-peak": "Off-peak",
+    "Beijing time": "Beijing time",
+    "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.": "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.",
+    "Request body and headers are empty in this preview.": "Request body and headers are empty in this preview.",
+    "Peak period": "Peak period"
   }
 }

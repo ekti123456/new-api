@@ -89,6 +89,16 @@ func TestCNYPricesChangedTimeSchedulesCannotImportOldBillingRules(t *testing.T) 
 	require.Error(t, err)
 }
 
+func TestCNYPricesNonuniformTimeDiscountKeepsSeparatePrices(t *testing.T) {
+	expression := deepSeekTimeExpression(map[string]float64{"input": 9, "output": 27, "cache_read": 0.3}, map[string]float64{"input": 4.5, "output": 12, "cache_read": 0.15})
+	at, err := time.Parse(time.RFC3339, "2026-10-01T10:00:00+08:00")
+	require.NoError(t, err)
+	cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{P: 1, C: 1, CR: 1}, billingexpr.RequestInput{PricingTime: at})
+	require.NoError(t, err)
+	assert.InDelta(t, 16.65, cost, 1e-10)
+	assert.Equal(t, "off_peak", trace.MatchedTier)
+}
+
 func TestCNYPricesModelsCNOverridesDeepSeekWithAutomaticTimeExpression(t *testing.T) {
 	files := map[string]string{abacusPricingURL: "testdata/official_pricing_abacus_cny.json", modelsCNPricingURL: "testdata/official_pricing_deepseek_cny.json"}
 	prices, _, err := loadOfficialPriceCatalog(context.Background(), func(_ context.Context, address string) ([]byte, error) {
@@ -117,7 +127,9 @@ func TestCNYPricesModelsCNOverridesDeepSeekWithAutomaticTimeExpression(t *testin
 		cost, trace, err := billingexpr.RunExprWithRequest(selected[0].Expression, billingexpr.TokenParams{P: 1, C: 1, CR: 1}, billingexpr.RequestInput{PricingTime: at})
 		require.NoError(t, err)
 		assert.InDelta(t, tc.want, cost, 1e-10)
-		assert.Equal(t, tc.tier, trace.MatchedTier)
+		assert.Equal(t, "base", trace.MatchedTier)
+		require.Len(t, trace.RequestRuleMatches, 1)
+		assert.Equal(t, tc.tier == "off_peak", trace.RequestRuleMatches[0].Matched)
 	}
 	// Unknown schema versions must not be treated as a compatible CNY source.
 	var malformed map[string]any

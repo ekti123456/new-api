@@ -5700,6 +5700,16 @@
     "Remove connection": "移除连接",
     "Removal takes effect after saving. The Codex2API binding itself is not deleted.": "保存后生效，不会删除 Codex2API 一侧的绑定。",
     "Audit request failed. Reload settings and try again.": "审计操作失败，请重新加载设置后重试。",
-    "Audit request failed": "审计操作失败"
+    "Audit request failed": "审计操作失败",
+    "Loading pricing time...": "正在取得計費時段…",
+    "Peak/off-peak preview uses the server calendar and refreshes every minute.": "峰谷價試算使用伺服器節假日日曆，每分鐘自動重新整理。",
+    "Pricing time is unavailable": "暫時無法取得計費時段，請稍後重試",
+    "Pricing time band": "計費時段",
+    "China peak/off-peak (holidays included)": "中國峰谷時段（含節假日）",
+    "Off-peak": "空閒時段",
+    "Beijing time": "北京時間",
+    "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.": "高峰：週一至週五 09–12、14–18，排除中國法定節假日。週末均為空閒時段，含調休工作日。",
+    "Request body and headers are empty in this preview.": "本試算使用空的請求本文和請求標頭。",
+    "Peak period": "高峰時段"
   }
 }

@@ -32,6 +32,21 @@ after(() => {
   }
 })
 
+test('the price breakdown describes holiday discounts without exposing function names', async () => {
+  const i18n = createInstance()
+  await i18n
+    .use(initReactI18next)
+    .init({ lng: 'en', resources: { en: { translation: {} } } })
+  const rendered = renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <DynamicPricingBreakdown billingExpr='(tier("base", p * 9 + c * 27)) * (cn_off_peak() == true ? 0.5 : 1)' />
+    </I18nextProvider>
+  )
+  assert.ok(rendered.includes('China peak/off-peak (holidays included)'))
+  assert.ok(rendered.includes('Off-peak'))
+  assert.ok(!rendered.includes('cn_off_peak'))
+})
+
 test('marketplace hides channel tiers while the administrator breakdown remains available', async () => {
   const i18n = createInstance()
   await i18n
