@@ -5592,14 +5592,14 @@
     "Remove connection": "Remove connection",
     "Removal takes effect after saving. The Codex2API binding itself is not deleted.": "Removal takes effect after saving. The Codex2API binding itself is not deleted.",
     "Audit request failed. Reload settings and try again.": "Audit request failed. Reload settings and try again.",
-    "Audit request failed": "Audit request failed"
+    "Audit request failed": "Audit request failed",
+    "Enable Responses WebSocket": "Enable Responses WebSocket",
+    "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
+    "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
   },
   "Clear performance errors": "Очистить ошибки производительности",
   "Clear all performance errors": "Очистить все ошибки производительности",
   "Performance errors cleared": "Ошибки производительности очищены",
   "Unable to clear performance errors": "Не удалось очистить ошибки производительности",
-  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Все существующие сведения об ошибках будут удалены, включая записи вне текущих фильтров. Новые ошибки продолжат записываться. Журналы использования, расчёты и статистика сохранятся.",
-  "Enable Responses WebSocket": "Enable Responses WebSocket",
-  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
-  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Все существующие сведения об ошибках будут удалены, включая записи вне текущих фильтров. Новые ошибки продолжат записываться. Журналы использования, расчёты и статистика сохранятся."
 }

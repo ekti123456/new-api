@@ -5643,14 +5643,14 @@
     "Remove connection": "移除连接",
     "Removal takes effect after saving. The Codex2API binding itself is not deleted.": "保存后生效，不会删除 Codex2API 一侧的绑定。",
     "Audit request failed. Reload settings and try again.": "审计操作失败，请重新加载设置后重试。",
-    "Audit request failed": "审计操作失败"
+    "Audit request failed": "审计操作失败",
+    "Enable Responses WebSocket": "啟用 Responses WebSocket",
+    "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "僅在上游支援 Responses WebSocket 時開啟。關閉不影響 HTTP 請求。",
+    "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "進階自訂渠道僅對未設定協定轉換的 /v1/responses 路由生效。"
   },
   "Clear performance errors": "清理效能錯誤",
   "Clear all performance errors": "清空全部效能錯誤",
   "Performance errors cleared": "效能錯誤明細已清空",
   "Unable to clear performance errors": "清理效能錯誤失敗，請重試",
-  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "將清空現有的全部效能錯誤明細，包括目前篩選範圍外的錯誤。新錯誤會繼續記錄，用量日誌、計費和效能統計均保留。",
-  "Enable Responses WebSocket": "Enable Responses WebSocket",
-  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
-  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "將清空現有的全部效能錯誤明細，包括目前篩選範圍外的錯誤。新錯誤會繼續記錄，用量日誌、計費和效能統計均保留。"
 }
