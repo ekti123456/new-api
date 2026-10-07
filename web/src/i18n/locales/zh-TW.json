@@ -5649,5 +5649,8 @@
   "Clear all performance errors": "清空全部效能錯誤",
   "Performance errors cleared": "效能錯誤明細已清空",
   "Unable to clear performance errors": "清理效能錯誤失敗，請重試",
-  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "將清空現有的全部效能錯誤明細，包括目前篩選範圍外的錯誤。新錯誤會繼續記錄，用量日誌、計費和效能統計均保留。"
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "將清空現有的全部效能錯誤明細，包括目前篩選範圍外的錯誤。新錯誤會繼續記錄，用量日誌、計費和效能統計均保留。",
+  "Enable Responses WebSocket": "Enable Responses WebSocket",
+  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
+  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
 }

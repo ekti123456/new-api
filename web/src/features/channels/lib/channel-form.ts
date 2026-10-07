@@ -1,3 +1,20 @@
+import { z } from 'zod'
+
+import {
+  CHANNEL_TYPE_NEW_API,
+  CHANNEL_STATUS,
+  ERROR_MESSAGES,
+  MODEL_FETCHABLE_TYPES,
+} from '../constants'
+import type { Channel } from '../types'
+import {
+  CHANNEL_TYPE_ADVANCED_CUSTOM,
+  advancedCustomConfigUsesRelativeUpstreamPath,
+  hasValidAdvancedCustomModelListRoute,
+  parseAdvancedCustomConfig,
+  stringifyAdvancedCustomConfig,
+  validateAdvancedCustomConfig,
+} from './advanced-custom'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,23 +33,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
-
-import {
-  CHANNEL_TYPE_NEW_API,
-  CHANNEL_STATUS,
-  ERROR_MESSAGES,
-  MODEL_FETCHABLE_TYPES,
-} from '../constants'
-import type { Channel } from '../types'
-import {
-  CHANNEL_TYPE_ADVANCED_CUSTOM,
-  advancedCustomConfigUsesRelativeUpstreamPath,
-  hasValidAdvancedCustomModelListRoute,
-  parseAdvancedCustomConfig,
-  stringifyAdvancedCustomConfig,
-  validateAdvancedCustomConfig,
-} from './advanced-custom'
+import { supportsResponsesWebSocket } from './responses-websocket'
 
 // ============================================================================
 // Form Validation Schema
@@ -260,6 +261,7 @@ export const channelFormSchema = z
     http_protocol: z.enum(['auto', 'http1']).optional(),
     http2_connection_shards: z.number().int().optional(),
     pass_through_body_enabled: z.boolean().optional(),
+    responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -433,6 +435,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
   pass_through_body_enabled: false,
+  responses_websocket_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -473,6 +476,7 @@ export function transformChannelToFormDefaults(
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
     pass_through_body_enabled: false,
+    responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
   }
@@ -491,6 +495,8 @@ export function transformChannelToFormDefaults(
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
+        responses_websocket_enabled:
+          parsed.responses_websocket_enabled === true,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
       }
@@ -609,6 +615,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
+    responses_websocket_enabled:
+      supportsResponsesWebSocket(formData.type) &&
+      formData.responses_websocket_enabled === true,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
   }

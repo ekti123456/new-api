@@ -115,10 +115,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 	return GetRandomSatisfiedChannelWithRoutingMode(group, model, retry, requestPath, false)
 }
 
-func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool) (*Channel, error) {
+func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool, responsesWS ...bool) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannelWithRoutingMode(group, model, retry, requestPath, uaRoutingOnly)
+		return GetChannelWithRoutingMode(group, model, retry, requestPath, uaRoutingOnly, responsesWS...)
 	}
 
 	channelSyncLock.RLock()
@@ -127,12 +127,31 @@ func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry 
 	// First, try to find channels with the exact model name.
 	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][model], requestPath, model)
 	channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
+	if len(responsesWS) > 0 && responsesWS[0] {
+		filtered := make([]int, 0, len(channels))
+		for _, id := range channels {
+			if channelsIDM[id].SupportsResponsesWebSocket(model) {
+				filtered = append(filtered, id)
+			}
+		}
+		channels = filtered
+	}
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, model)
 		channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
+		if len(responsesWS) > 0 && responsesWS[0] {
+			filtered := make([]int, 0, len(channels))
+			for _, id := range channels {
+				if channelsIDM[id].SupportsResponsesWebSocket(model) {
+					filtered = append(filtered, id)
+				}
+			}
+			channels = filtered
+		}
+
 	}
 
 	if len(channels) == 0 {

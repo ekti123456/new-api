@@ -5598,5 +5598,8 @@
   "Clear all performance errors": "すべてのパフォーマンスエラーを消去",
   "Performance errors cleared": "パフォーマンスエラーを消去しました",
   "Unable to clear performance errors": "パフォーマンスエラーを消去できません",
-  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "現在のフィルター範囲外を含む既存のエラー詳細をすべて消去します。新しいエラーは引き続き記録されます。使用量ログ、課金、パフォーマンス統計は保持されます。"
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "現在のフィルター範囲外を含む既存のエラー詳細をすべて消去します。新しいエラーは引き続き記録されます。使用量ログ、課金、パフォーマンス統計は保持されます。",
+  "Enable Responses WebSocket": "Enable Responses WebSocket",
+  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
+  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
 }

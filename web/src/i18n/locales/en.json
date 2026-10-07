@@ -5674,5 +5674,8 @@
   "Clear all performance errors": "Clear all performance errors",
   "Performance errors cleared": "Performance errors cleared",
   "Unable to clear performance errors": "Unable to clear performance errors",
-  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved."
+  "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.": "Clear all existing performance error details, including errors outside the current filters. New errors will continue to be recorded. Usage logs, billing and performance statistics are preserved.",
+  "Enable Responses WebSocket": "Enable Responses WebSocket",
+  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
+  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
 }

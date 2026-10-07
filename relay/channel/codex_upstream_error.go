@@ -106,6 +106,9 @@ func decodeCodexUpstreamError(encoded string, request newAPIPolicyRequestContext
 			return diagnostic, fmt.Errorf("invalid upstream status")
 		}
 	}
+	if request.LogRequestID != "" {
+		diagnostic.RequestID = request.LogRequestID
+	}
 	return diagnostic, nil
 }
 

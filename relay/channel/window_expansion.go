@@ -96,7 +96,11 @@ func windowControlDestination(info *relaycommon.RelayInfo) (*url.URL, newAPIPoli
 }
 
 func windowBindingHash(binding newAPIPolicyBinding, key string) string {
-	digest := sha256.Sum256([]byte(binding.PlatformID + "\n" + binding.Target + "\n" + binding.Secret + "\n" + key))
+	scope := binding.PlatformID + "\n" + binding.Target + "\n" + binding.Secret + "\n" + key
+	if instance := common.GatewayInstanceID(); instance != "" {
+		scope += "\ninstance:" + instance
+	}
+	digest := sha256.Sum256([]byte(scope))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -204,6 +208,7 @@ func verifyWindowBillingTicket(binding newAPIPolicyBinding, key string, userID i
 	var envelope struct {
 		Version       int                            `json:"version"`
 		Platform      string                         `json:"platform"`
+		InstanceID    string                         `json:"instance_id,omitempty"`
 		UserID        string                         `json:"user_id"`
 		Fingerprint   string                         `json:"root_fingerprint"`
 		Grant         relaycommon.WindowBillingGrant `json:"grant"`
@@ -213,7 +218,7 @@ func verifyWindowBillingTicket(binding newAPIPolicyBinding, key string, userID i
 		return nil, errors.New("invalid billing grant")
 	}
 	grant := envelope.Grant
-	if envelope.Version != 1 || envelope.Platform != binding.PlatformID || envelope.UserID != strconv.Itoa(userID) || envelope.Fingerprint != fingerprint || grant.ID == "" || len(envelope.ReservationID) > 64 || (grant.NoWindow && grant.Expanded) || !grant.ExpiresAt.After(time.Now()) || grant.Multiplier < 1 || grant.Multiplier > 10 || math.IsNaN(grant.Multiplier) || math.IsInf(grant.Multiplier, 0) || (!grant.Expanded && grant.Multiplier != 1) {
+	if envelope.Version != 1 || (envelope.InstanceID != "" && envelope.InstanceID != common.GatewayInstanceID()) || envelope.Platform != binding.PlatformID || envelope.UserID != strconv.Itoa(userID) || envelope.Fingerprint != fingerprint || grant.ID == "" || len(envelope.ReservationID) > 64 || (grant.NoWindow && grant.Expanded) || !grant.ExpiresAt.After(time.Now()) || grant.Multiplier < 1 || grant.Multiplier > 10 || math.IsNaN(grant.Multiplier) || math.IsInf(grant.Multiplier, 0) || (!grant.Expanded && grant.Multiplier != 1) {
 		return nil, errors.New("window billing scope or tariff mismatch")
 	}
 	grant.Ticket, grant.BindingHash, grant.Fingerprint = ticket, windowBindingHash(binding, key), fingerprint

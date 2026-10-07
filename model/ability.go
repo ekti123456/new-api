@@ -60,15 +60,18 @@ func GetAllEnableAbilities() []Ability {
 	return abilities
 }
 
-func getPriority(group string, model string, retry int, uaRoutingOnly bool) (int, error) {
+func getPriority(group string, model string, retry int, uaRoutingOnly bool, allowedIDs ...[]int) (int, error) {
 
 	var priorities []int
-	err := DB.Model(&Ability{}).
+	query := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
 		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
 		Where("channel_id IN (?)", DB.Model(&Channel{}).Select("id").Where("ua_routing_only = ?", uaRoutingOnly)).
-		Order("priority DESC").              // 按优先级降序排序
-		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
+		Order("priority DESC")
+	if len(allowedIDs) > 0 {
+		query = query.Where("channel_id IN ?", allowedIDs[0])
+	}
+	err := query.Pluck("priority", &priorities).Error
 
 	if err != nil {
 		// 处理错误
@@ -91,8 +94,11 @@ func getPriority(group string, model string, retry int, uaRoutingOnly bool) (int
 	return priorityToUse, nil
 }
 
-func getChannelQuery(group string, model string, retry int, uaRoutingOnly bool) (*gorm.DB, error) {
+func getChannelQuery(group string, model string, retry int, uaRoutingOnly bool, allowedIDs ...[]int) (*gorm.DB, error) {
 	matchingChannelIDs := DB.Model(&Channel{}).Select("id").Where("ua_routing_only = ?", uaRoutingOnly)
+	if len(allowedIDs) > 0 {
+		matchingChannelIDs = matchingChannelIDs.Where("id IN ?", allowedIDs[0])
+	}
 	maxPrioritySubQuery := DB.Model(&Ability{}).
 		Select("MAX(priority)").
 		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
@@ -101,7 +107,7 @@ func getChannelQuery(group string, model string, retry int, uaRoutingOnly bool) 
 		Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery).
 		Where("channel_id IN (?)", matchingChannelIDs)
 	if retry != 0 {
-		priority, err := getPriority(group, model, retry, uaRoutingOnly)
+		priority, err := getPriority(group, model, retry, uaRoutingOnly, allowedIDs...)
 		if err != nil {
 			return nil, err
 		} else {
@@ -120,11 +126,29 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 
 // GetChannelWithRoutingMode strictly separates normal channels from channels
 // reserved for User-Agent routing.
-func GetChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool) (*Channel, error) {
+func GetChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool, responsesWS ...bool) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry, uaRoutingOnly)
+	var allowedIDs [][]int
+	if len(responsesWS) > 0 && responsesWS[0] {
+		var candidates []*Channel
+		query := DB.Model(&Ability{}).Select("channel_id").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+		if err := DB.Where("id IN (?)", query).Where("ua_routing_only = ?", uaRoutingOnly).Find(&candidates).Error; err != nil {
+			return nil, err
+		}
+		ids := []int{}
+		for _, candidate := range candidates {
+			if candidate.SupportsResponsesWebSocket(model) {
+				ids = append(ids, candidate.Id)
+			}
+		}
+		if len(ids) == 0 {
+			return nil, nil
+		}
+		allowedIDs = append(allowedIDs, ids)
+	}
+	channelQuery, err := getChannelQuery(group, model, retry, uaRoutingOnly, allowedIDs...)
 	if err != nil {
 		return nil, err
 	}

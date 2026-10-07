@@ -442,12 +442,31 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	targetHeader = policyRequest.Header
 	requestContext, _ := policyRequest.Context().Value(newAPIPolicyRequestContextKey{}).(newAPIPolicyRequestContext)
-	targetConn, policyResponse, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	// Responses adaptors return HTTP URLs; the upgrade still uses the same
+	// destination and audit signature as the equivalent authenticated GET.
+	websocketURL := fullRequestURL
+	if strings.HasPrefix(websocketURL, "https://") {
+		websocketURL = "wss://" + strings.TrimPrefix(websocketURL, "https://")
+	} else if strings.HasPrefix(websocketURL, "http://") {
+		websocketURL = "ws://" + strings.TrimPrefix(websocketURL, "http://")
+	}
+	configuredProxy := ""
+	if info.ChannelMeta != nil {
+		configuredProxy = info.ChannelSetting.Proxy
+	}
+	dialer, dialerErr := service.NewResponsesWebSocketDialer(configuredProxy)
+	if dialerErr != nil {
+		return nil, dialerErr
+	}
+	targetConn, policyResponse, err := dialer.DialContext(c.Request.Context(), websocketURL, targetHeader)
 	if policyResponse != nil && policyRequest.URL != nil {
 		model.UpdateUserSessionWindowFromHeader(info.UserId, policyRequest.URL.Scheme+"://"+policyRequest.URL.Host, policyResponse.Header)
 	}
 	verifiedPolicyDecision := processNewAPIPolicyResponseWithContext(c, policyResponse, requestContext)
 	if err != nil {
+		if policyResponse != nil && policyResponse.Body != nil {
+			defer policyResponse.Body.Close()
+		}
 		if verifiedPolicyDecision && policyResponse != nil {
 			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseStatusCode, policyResponse.StatusCode, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
@@ -456,7 +475,11 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 				return nil, types.NewErrorWithStatusCode(errors.New("Request temporarily unavailable"), types.ErrorCodeBadResponseStatusCode, policyResponse.StatusCode)
 			}
 		}
-		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
+		status := http.StatusBadGateway
+		if policyResponse != nil {
+			status = policyResponse.StatusCode
+		}
+		return nil, types.NewErrorWithStatusCode(fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err), types.ErrorCodeDoRequestFailed, status)
 	}
 	// send request body
 	//all, err := io.ReadAll(requestBody)

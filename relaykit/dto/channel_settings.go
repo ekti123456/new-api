@@ -11,6 +11,7 @@ import (
 )
 
 type ChannelSettings struct {
+	ResponsesWebSocketEnabled bool `json:"responses_websocket_enabled,omitempty"`
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
 	Proxy                  string `json:"proxy"`

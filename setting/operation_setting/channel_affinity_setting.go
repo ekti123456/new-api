@@ -168,3 +168,6 @@ func init() {
 func GetChannelAffinitySetting() *ChannelAffinitySetting {
 	return &channelAffinitySetting
 }
+
+// CodexCLIRequestHeaders returns a copy of the existing forwarding allowlist.
+func CodexCLIRequestHeaders() []string { return append([]string(nil), codexCliPassThroughHeaders...) }

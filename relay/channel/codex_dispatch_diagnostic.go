@@ -77,6 +77,9 @@ func decodeCodexDispatchDiagnostic(encoded string, request newAPIPolicyRequestCo
 			return diagnostic, fmt.Errorf("invalid diagnostic reason")
 		}
 	}
+	if request.LogRequestID != "" {
+		diagnostic.RequestID = request.LogRequestID
+	}
 	return diagnostic, nil
 }
 

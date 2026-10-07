@@ -70,6 +70,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
+	// Each response.create repeats authentication, rate and concurrency checks.
+	relayV1Router.GET("/responses", controller.ResponsesWebSocket)
 	relayV1Router.Use(middleware.SpecifiedModelRPMRateLimit())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	relayV1Router.Use(middleware.ModelRequestConcurrencyLimit())
