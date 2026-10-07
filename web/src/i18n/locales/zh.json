@@ -5735,9 +5735,9 @@
     "Beijing time": "北京时间",
     "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.": "高峰：周一至周五 09–12、14–18，排除中国法定节假日。周末均为空闲时段，含调休工作日。",
     "Request body and headers are empty in this preview.": "本试算使用空的请求正文和请求头。",
-    "Peak period": "高峰时段"
-  },
-  "Enable Responses WebSocket": "Enable Responses WebSocket",
-  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
-  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
+    "Peak period": "高峰时段",
+    "Enable Responses WebSocket": "启用 Responses WebSocket",
+    "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "仅在上游支持 Responses WebSocket 时开启。关闭不影响 HTTP 请求。",
+    "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "高级自定义渠道仅对未配置协议转换的 /v1/responses 路由生效。"
+  }
 }

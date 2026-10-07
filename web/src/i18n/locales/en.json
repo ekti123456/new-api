@@ -5735,9 +5735,9 @@
     "Beijing time": "Beijing time",
     "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.": "Peak: weekdays 09–12 and 14–18, excluding Chinese public holidays. Weekends stay off-peak, including make-up working days.",
     "Request body and headers are empty in this preview.": "Request body and headers are empty in this preview.",
-    "Peak period": "Peak period"
-  },
-  "Enable Responses WebSocket": "Enable Responses WebSocket",
-  "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
-  "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
+    "Peak period": "Peak period",
+    "Enable Responses WebSocket": "Enable Responses WebSocket",
+    "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.": "Enable only if the upstream supports Responses WebSocket. HTTP requests are unaffected when disabled.",
+    "For advanced custom channels this applies only to /v1/responses routes without protocol conversion.": "For advanced custom channels this applies only to /v1/responses routes without protocol conversion."
+  }
 }
