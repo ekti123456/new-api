@@ -27,6 +27,22 @@ import (
 
 func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	common2.OptionMapRWMutex.Lock()
+	oldInstance, hadInstance := common2.OptionMap[common2.GatewayInstanceIDOption]
+	if common2.OptionMap == nil {
+		common2.OptionMap = make(map[string]string)
+	}
+	common2.OptionMap[common2.GatewayInstanceIDOption] = "trusted-server-instance"
+	common2.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common2.OptionMapRWMutex.Lock()
+		defer common2.OptionMapRWMutex.Unlock()
+		if hadInstance {
+			common2.OptionMap[common2.GatewayInstanceIDOption] = oldInstance
+		} else {
+			delete(common2.OptionMap, common2.GatewayInstanceIDOption)
+		}
+	})
 	secret := "0123456789abcdef0123456789abcdef"
 	apiKey := "sk-codex2api-test"
 	keyDigest := sha256.Sum256([]byte(apiKey))
@@ -45,6 +61,7 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	context.Request = httptest.NewRequest(http.MethodPost, "http://newapi.example/v1/responses?client=true", nil)
 	context.Request.RemoteAddr = "203.0.113.9:4567"
 	context.Request.Header.Set("Session-Id", "conversation-42")
+	context.Request.Header.Set("X-NewAPI-Instance-ID", "forged-client-instance")
 	context.Request.Header.Set("X-Codex-Installation-Id", "device-42")
 	common2.SetContextKey(context, constant.ContextKeyUserName, "policy-user")
 
@@ -90,6 +107,7 @@ func TestApplyNewAPIPolicyHeadersSignsV1IdentityAndMetadata(t *testing.T) {
 	var meta newAPIPolicyMeta
 	require.NoError(t, common2.Unmarshal(metaJSON, &meta))
 	assert.Equal(t, binding.PlatformID, meta.PlatformID)
+	assert.Equal(t, "trusted-server-instance", meta.InstanceID)
 	assert.Equal(t, "policy-user", meta.UserName)
 	assert.Equal(t, binding.Profile, meta.Profile)
 	assert.Equal(t, binding.Mode, meta.Mode)

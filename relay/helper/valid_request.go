@@ -404,3 +404,6 @@ func GetAndValidateGeminiBatchEmbeddingRequest(c *gin.Context) (*dto.GeminiBatch
 	}
 	return request, nil
 }
+
+// ExceedsMaxTokensLimit shares the same quantity bound with WebSocket requests.
+func ExceedsMaxTokensLimit(values ...*uint) bool { return exceedsMaxTokensLimit(values...) }

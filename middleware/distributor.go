@@ -143,6 +143,17 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
+		if pinned, group, pinErr := responsesWSChannelPin(c, modelRequest.Model); pinErr != nil {
+			abortWithOpenAiMessage(c, http.StatusForbidden, pinErr.Error(), types.ErrorCodeAccessDenied)
+			return
+		} else if pinned != nil {
+			if rootChannel != nil && rootChannel.Id != pinned.Id {
+				abortWithOpenAiMessage(c, http.StatusConflict, "root channel changed; reconnect required", types.ErrorCodeAccessDenied)
+				return
+			}
+			rootChannel, rootSelectedGroup = pinned, group
+		}
+
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -323,6 +334,15 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 			return
 		}
+		if c.GetBool("responses_websocket") {
+			value, _ := c.Get("responses_websocket_pin")
+			pin, _ := value.(ResponsesWSConnectionPin)
+			if channel == nil || !channel.SupportsResponsesWebSocket(modelRequest.Model) || pin.ChannelID != 0 && channel.Id != pin.ChannelID {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, "Responses WebSocket is unavailable on the selected channel", types.ErrorCode("responses_websocket_disabled"))
+				return
+			}
+		}
+
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		if channel != nil {
 			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
@@ -688,6 +708,17 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	if pinnedErr != nil {
 		return types.NewError(pinnedErr, types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
 	}
+	if value, exists := c.Get("responses_websocket_pin"); exists {
+		pin, _ := value.(ResponsesWSConnectionPin)
+		if pin.ChannelID != 0 {
+			current, keyErr := channel.GetEnabledKeyAt(pin.KeyIndex)
+			if channel.Id != pin.ChannelID || keyErr != nil || current != pin.Key || pinned && (key != pin.Key || index != pin.KeyIndex) {
+				return types.NewErrorWithStatusCode(errors.New("upstream credential changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			}
+			key, index, pinned = current, pin.KeyIndex, true
+		}
+	}
+
 	var newAPIError *types.NewAPIError
 	if !pinned {
 		if rawFallback, found := c.Get(codexFallbackChannelKeyContextKey); found {

@@ -29,6 +29,7 @@ const (
 )
 
 var newAPIPolicyHeaderNames = []string{
+	"X-NewAPI-Instance-ID",
 	"X-NewAPI-User-ID",
 	"X-NewAPI-Client-IP",
 	"X-NewAPI-Request-ID",
@@ -71,12 +72,45 @@ type newAPIPolicyRequestContext struct {
 	ErrorAttempt    *common2.CodexUpstreamErrorAttempt
 	DispatchAttempt *common2.CodexDispatchAttempt
 	RequestID       string
+	LogRequestID    string
 	UserID          int
 	ClientIP        string
 	PlatformID      string
 	ChannelID       int
 	Secret          string
 	Enforcement     newAPIPolicyEnforcementConfig
+}
+
+// NewAPIPolicyConnection keeps the verified handshake binding for a persistent
+// WebSocket. Attempt recorders are renewed for every authenticated client call.
+type NewAPIPolicyConnection struct{ request newAPIPolicyRequestContext }
+
+func CaptureNewAPIPolicyConnection(c *gin.Context) *NewAPIPolicyConnection {
+	if c == nil {
+		return nil
+	}
+	value, _ := c.Get(newAPIPolicyRequestContextGinKey)
+	request, ok := value.(newAPIPolicyRequestContext)
+	if !ok || request.Secret == "" {
+		return nil
+	}
+	request.ErrorAttempt, request.DispatchAttempt = nil, nil
+	return &NewAPIPolicyConnection{request: request}
+}
+
+func (connection *NewAPIPolicyConnection) Bind(c *gin.Context) {
+	if connection == nil || c == nil {
+		return
+	}
+	c.Set(newAPIPolicyRequestContextGinKey, nil)
+	request := connection.request
+	if c.GetInt("id") != request.UserID || c.GetInt("channel_id") != request.ChannelID {
+		return
+	}
+	request.LogRequestID = c.GetString(common2.RequestIdKey)
+	request.ErrorAttempt = common2.CodexUpstreamErrorAttemptForContext(c)
+	request.DispatchAttempt = common2.CodexDispatchAttemptForContext(c)
+	c.Set(newAPIPolicyRequestContextGinKey, request)
 }
 
 type newAPIPolicyRequestContextKey struct{}
@@ -90,6 +124,7 @@ type newAPIPolicyMeta struct {
 
 	WindowGrant      string `json:"window_grant,omitempty"`
 	PlatformID       string `json:"platform_id"`
+	InstanceID       string `json:"instance_id,omitempty"`
 	UserName         string `json:"user_name,omitempty"`
 	UserEmail        string `json:"user_email,omitempty"`
 	UserGroup        string `json:"user_group,omitempty"`
@@ -229,6 +264,7 @@ func applyNewAPIPolicyHeadersWithConfig(c *gin.Context, req *http.Request, info 
 			common2.GetContextKeyInt(c, constant.ContextKeyUserStatus) == common2.UserStatusEnabled &&
 			common2.GetContextKeyInt(c, constant.ContextKeyUserRole) >= common2.RoleAdminUser,
 		PlatformID:         binding.PlatformID,
+		InstanceID:         common2.GatewayInstanceID(),
 		UserName:           common2.GetContextKeyString(c, constant.ContextKeyUserName),
 		UserEmail:          info.UserEmail,
 		UserGroup:          info.UserGroup,
