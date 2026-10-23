@@ -529,6 +529,11 @@ export function PolicyIPManagement() {
       >
         {release && (
           <div className='space-y-3'>
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'Releasing restrictions does not exempt future violations. Strikes are kept unless you explicitly reset them.'
+              )}
+            </p>
             <p>
               {t('User ID')}: {release.user_id}
             </p>

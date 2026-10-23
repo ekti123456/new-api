@@ -84,4 +84,38 @@ func TestPolicyRestrictionAdminEndpointsRequireRootAndReleasePersistently(t *tes
 	blocked, err := model.IsCodexPolicyIPBlocked(block.IP, time.Now())
 	require.NoError(t, err)
 	assert.False(t, blocked)
+
+	// A release changes only the current ban; it must not grant a lasting
+	// exemption in the authenticated access middleware or the next policy write.
+	router.GET("/access", middleware.UserAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	for _, decisionID := range []string{"", "new-violation-after-release"} {
+		expected := http.StatusNoContent
+		if decisionID != "" {
+			result, err := model.ApplyCodexPolicyDecision(model.CodexPolicyDecisionInput{
+				Decision: model.CodexPolicyDecision{
+					DecisionID: decisionID, RequestID: "new-request", UserID: user.Id, ClientIP: block.IP,
+					Action: "block", ReasonCode: model.CodexPolicyReasonUpstreamCyberPolicy, StrikeEligible: true,
+				},
+				AuditEnabled: true, StrikeEnabled: true, IPBlockEnabled: true, BanAfter: 1, WindowSeconds: 3600,
+			})
+			require.NoError(t, err)
+			require.True(t, result.IPBlocked)
+			expected = http.StatusForbidden
+		}
+		request = httptest.NewRequest(http.MethodGet, "/access", nil)
+		request.Header.Set("Authorization", "Bearer "+userKey)
+		request.RemoteAddr = block.IP + ":1234"
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		require.Equal(t, expected, recorder.Code, recorder.Body.String())
+	}
+	// Re-submitting the previous confirmation must not revoke this new ban.
+	request = httptest.NewRequest(http.MethodPost, "/policy/release", strings.NewReader(string(raw)))
+	request.Header.Set("Authorization", "Bearer "+rootKey)
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusConflict, recorder.Code, recorder.Body.String())
+	blocked, err = model.IsCodexPolicyIPBlocked(block.IP, time.Now())
+	require.NoError(t, err)
+	assert.True(t, blocked)
 }

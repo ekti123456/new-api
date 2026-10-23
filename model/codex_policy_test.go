@@ -103,6 +103,7 @@ func TestApplyCodexPolicyDecisionRebansAfterManualUnbanOnEveryNewCYB(t *testing.
 	createdAt := time.Now().Unix()
 	input := codexPolicyTestInput(user.Id, "dec_cyb_first", createdAt)
 	input.AccountBanEnabled = true
+	input.IPBlockEnabled = true
 	input.WindowSeconds = 7 * 24 * 60 * 60
 
 	first, err := ApplyCodexPolicyDecision(input)
@@ -117,13 +118,35 @@ func TestApplyCodexPolicyDecisionRebansAfterManualUnbanOnEveryNewCYB(t *testing.
 	assert.Equal(t, int64(2), second.StrikeCount)
 	assert.True(t, second.AccountBanned)
 
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("status", common.UserStatusEnabled).Error)
-	input.Decision.DecisionID = "dec_cyb_third"
-	input.Decision.CreatedAt++
-	third, err := ApplyCodexPolicyDecision(input)
-	require.NoError(t, err)
-	assert.Equal(t, int64(3), third.StrikeCount)
-	assert.True(t, third.AccountBanned)
+	for index, decisionID := range []string{"dec_cyb_third", "dec_cyb_fourth"} {
+		snapshot, err := GetCodexPolicyRestrictions(user.Id, input.WindowSeconds, time.Now().Unix())
+		require.NoError(t, err)
+		require.True(t, snapshot.PolicyDisabled)
+		require.Len(t, snapshot.ActiveIPs, 1)
+		release := CodexPolicyRelease{
+			UserID: user.Id, StateRevision: &snapshot.State.Revision, UserAuthVersion: snapshot.UserAuthVersion,
+			IPs:            []CodexPolicyIPRelease{{IP: snapshot.ActiveIPs[0].IP, DecisionID: snapshot.ActiveIPs[0].DecisionID}},
+			RestoreAccount: true, Reason: "reviewed without resetting strikes",
+		}
+		require.NoError(t, ReleaseCodexPolicyRestrictions(release, 99))
+		unblocked, err := GetCodexPolicyRestrictions(user.Id, input.WindowSeconds, time.Now().Unix())
+		require.NoError(t, err)
+		assert.Equal(t, common.UserStatusEnabled, unblocked.UserStatus)
+		assert.Equal(t, snapshot.ActiveStrikes, unblocked.ActiveStrikes)
+		assert.Zero(t, unblocked.ActiveIPCount)
+
+		input.Decision.DecisionID = decisionID
+		input.Decision.CreatedAt++
+		next, err := ApplyCodexPolicyDecision(input)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3+index), next.StrikeCount)
+		assert.True(t, next.AccountBanned)
+		assert.True(t, next.IPBlocked)
+		blocked, err := IsCodexPolicyIPBlocked(input.Decision.ClientIP, time.Now())
+		require.NoError(t, err)
+		assert.True(t, blocked, "a manual release must not exempt new violations")
+		require.ErrorIs(t, ReleaseCodexPolicyRestrictions(release, 99), ErrPolicyRestrictionsChanged)
+	}
 }
 
 func TestApplyCodexPolicyDecisionExpiresCYBOutsideWindow(t *testing.T) {
@@ -225,6 +248,16 @@ func TestPolicyReleasePreservesHistoryAndRejectsStaleConfirmation(t *testing.T) 
 	require.NoError(t, err)
 	assert.True(t, next.AccountBanned)
 	assert.True(t, next.IPBlocked)
+	blocked, err := IsCodexPolicyIPBlocked(input.Decision.ClientIP, time.Now())
+	require.NoError(t, err)
+	assert.True(t, blocked, "new violations reaching the threshold must replace the revoked IP ban")
+	snapshot, err = GetCodexPolicyRestrictions(user.Id, input.WindowSeconds, time.Now().Unix())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), snapshot.ActiveStrikes)
+	assert.True(t, snapshot.PolicyDisabled)
+	require.Len(t, snapshot.ActiveIPs, 1)
+	assert.Zero(t, snapshot.ActiveIPs[0].RevokedBy)
+	assert.Empty(t, snapshot.ActiveIPs[0].RevokeReason)
 }
 
 func TestPolicyIPOnlyReleaseAndManualAccountDisableRemainIndependent(t *testing.T) {
