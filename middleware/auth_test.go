@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -268,4 +269,104 @@ func TestEnforceCodexPolicyIPBlockRejectsActivePenalty(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, response.Code)
 	assert.Contains(t, response.Body.String(), "access_denied")
+}
+
+func TestCodexPolicyIPBlockUsesSavedSettingsOverEnvironment(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.CodexPolicyIPBlock{}))
+	require.NoError(t, model.DB.Create(&model.CodexPolicyIPBlock{
+		IP: "203.0.113.42", UserID: 7, DecisionID: "settings-regression",
+		CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}).Error)
+	common.OptionMapRWMutex.Lock()
+	previous := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previous
+		common.OptionMapRWMutex.Unlock()
+	})
+	for _, test := range []struct {
+		name, saved, env string
+		blocked          bool
+	}{
+		{"saved on, environment off", "true", "false", true},
+		{"saved off, environment on", "false", "true", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CODEX2API_POLICY_IP_BLOCK_ENABLED", test.env)
+			common.OptionMapRWMutex.Lock()
+			common.OptionMap["Codex2APIPolicySecret"] = `{"enabled":true,"identity_forward_enabled":true,"strike_enabled":true,"ip_block_enabled":` + test.saved + `,"ban_after":2,"window_seconds":604800,"bindings":[]}`
+			common.OptionMapRWMutex.Unlock()
+			response := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(response)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			assert.Equal(t, test.blocked, enforceCodexPolicyIPBlock(ctx, "203.0.113.42"))
+		})
+	}
+}
+
+func TestPolicyIPBanAppliesToDashboardAndAllTokenAuthPaths(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	previousDB, previousMaster, previousPath := model.DB, common.IsMasterNode, common.SQLitePath
+	t.Setenv("SQL_DSN", "")
+	common.IsMasterNode, common.SQLitePath = false, filepath.Join(t.TempDir(), "policy-auth.db")
+	require.NoError(t, model.InitDB())
+	sqlDB, err := model.DB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, sqlDB.Close())
+		model.DB, common.IsMasterNode, common.SQLitePath = previousDB, previousMaster, previousPath
+	})
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.CodexPolicyIPBlock{}, &model.Token{}))
+	t.Setenv("CODEX2API_POLICY_IP_BLOCK_ENABLED", "true")
+	user := createMiddlewarePATUser(t, "banned-ip-user", "dashboard-pat")
+	token := &model.Token{UserId: user.Id, Key: "policyrelaykey", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}
+	require.NoError(t, model.DB.Create(token).Error)
+	bundle, err := service.CreateLoginSession(user.Id, "password", "203.0.113.42", "test-client")
+	require.NoError(t, err)
+	block := &model.CodexPolicyIPBlock{IP: "203.0.113.42", UserID: user.Id, DecisionID: "all-entrypoints", CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	require.NoError(t, model.DB.Create(block).Error)
+	for _, route := range []struct {
+		name    string
+		handler gin.HandlerFunc
+		key     string
+	}{
+		{"dashboard", UserAuth(), "dashboard-pat"}, {"optional-dashboard", TryUserAuth(), "dashboard-pat"},
+		{"token", TokenAuth(), token.Key}, {"readonly-token", TokenAuthReadOnly(), token.Key},
+		{"combined-token", TokenOrUserAuth(), token.Key}, {"combined-session", TokenOrUserAuth(), bundle.AccessToken},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			router.GET("/test", route.handler, func(c *gin.Context) { c.Status(204) })
+			for _, revoked := range []int64{0, time.Now().Unix()} {
+				require.NoError(t, model.DB.Model(block).Update("revoked_at", revoked).Error)
+				request := httptest.NewRequest(http.MethodGet, "/test", nil)
+				request.RemoteAddr = "[::ffff:203.0.113.42]:1234"
+				request.Header.Set("Authorization", "Bearer "+route.key)
+				request.Header.Set("X-Forwarded-For", "198.51.100.2")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+				if revoked == 0 {
+					assert.Equal(t, 403, response.Code)
+				} else {
+					assert.Equal(t, 204, response.Code, response.Body.String())
+				}
+			}
+		})
+	}
+	require.NoError(t, model.DB.Model(block).Update("revoked_at", 0).Error)
+	admin := createMiddlewarePATUser(t, "shared-ip-admin", "admin-pat")
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", admin.Id).Update("role", common.RoleRootUser).Error)
+	router := gin.New()
+	router.GET("/recovery", RootAuth(), func(c *gin.Context) { c.Status(204) })
+	request := httptest.NewRequest(http.MethodGet, "/recovery", nil)
+	request.RemoteAddr = "203.0.113.42:1234"
+	request.Header.Set("Authorization", "Bearer admin-pat")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assert.Equal(t, 204, response.Code, "verified administrators sharing an IP must retain a recovery path")
 }

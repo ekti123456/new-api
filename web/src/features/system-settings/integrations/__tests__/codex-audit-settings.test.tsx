@@ -37,6 +37,7 @@ const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { api } = await import('@/lib/api')
 const { CodexAuditSettingsSection } =
   await import('../codex-audit-settings-section')
+const { PolicyIPManagement } = await import('../codex-policy-ip-management')
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {} })
 notifyManager.setScheduler((callback) => callback())
@@ -73,6 +74,124 @@ const initial = {
     },
   ],
 }
+
+test('IP bans load on demand and releasing one IP preserves account and strike restrictions', async () => {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const adapter = api.defaults.adapter
+  const requests: string[] = []
+  const releases: Array<{
+    ips: Array<{ ip: string; decision_id: string }>
+    restore_account: boolean
+    reset_strikes: boolean
+    reason: string
+  }> = []
+  const row = {
+    ip: '203.0.113.42',
+    user_id: 7,
+    decision_id: 'decision-1',
+    request_id: 'request-1',
+    reason_code: 'upstream_cyber_policy',
+    created_at: 100,
+    expires_at: 3700,
+    revoked_at: 0,
+    revoked_by: 0,
+    revoke_reason: '',
+  }
+  api.defaults.adapter = async (config) => {
+    requests.push(config.url ?? '')
+    if (config.method === 'post') {
+      releases.push(JSON.parse(config.data as string))
+    }
+    return {
+      data: {
+        success: true,
+        data: {
+          items: [row],
+          total: 1,
+          page_size: 50,
+          server_time: 200,
+          enforcement: { enabled: true, source: 'database' },
+        },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }
+  }
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={query}>
+          <I18nextProvider i18n={i18n}>
+            <PolicyIPManagement />
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+    )
+    assert.equal(
+      requests.length,
+      0,
+      'closed panel must not add polling or queries'
+    )
+    const open = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Manage IP bans'
+    )
+    assert.ok(open)
+    await act(async () => open.click())
+    assert.equal(requests.length, 1)
+    assert.match(requests[0] ?? '', /status=active/)
+    assert.match(container.textContent ?? '', /request-1/)
+    assert.match(container.textContent ?? '', /3500s/)
+    const release = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Release this IP'
+    )
+    assert.ok(release)
+    await act(async () => release.click())
+    const dialog = document.querySelector('[role="alertdialog"]')
+    assert.ok(dialog)
+    assert.match(
+      dialog.textContent ?? '',
+      /Account status will remain unchanged/
+    )
+    assert.equal(dialog.querySelector('#reset-policy-strikes'), null)
+    const confirm = [...dialog.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Release restrictions'
+    )
+    assert.ok(confirm)
+    assert.equal(confirm.disabled, true, 'a reason is required')
+    const reason = dialog.querySelector<HTMLInputElement>('#release-reason')
+    assert.ok(reason)
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )?.set
+    assert.ok(setter)
+    await act(async () => {
+      setter.call(reason, 'reviewed')
+      reason.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    assert.equal(confirm.disabled, false)
+    await act(async () => confirm.click())
+    assert.equal(releases.length, 1)
+    assert.deepEqual(releases[0]?.ips, [
+      { ip: row.ip, decision_id: row.decision_id },
+    ])
+    assert.equal(releases[0]?.restore_account, false)
+    assert.equal(releases[0]?.reset_strikes, false)
+    assert.equal(releases[0]?.reason, 'reviewed')
+  } finally {
+    await act(async () => root.unmount())
+    query.clear()
+    api.defaults.adapter = adapter
+    container.remove()
+  }
+})
 
 test('saving applies settings only after Save and keeps stored secrets blank in the editor', async () => {
   const container = document.createElement('div')

@@ -31,6 +31,34 @@ import (
 
 var responsesWSTestUserSequence atomic.Int64
 
+func TestResponsesWebSocketRechecksIPBanOnEstablishedConnection(t *testing.T) {
+	var calls atomic.Int32
+	fixture := newResponsesWSBillingTest(t, `tier("base", p * 2)`, func(ws *websocket.Conn, _ *http.Request) {
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+			calls.Add(1)
+			if ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.completed","response":{"id":"ip-first","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":0,"total_tokens":10}}}`)) != nil {
+				return
+			}
+		}
+	})
+	require.NoError(t, model.DB.AutoMigrate(&model.CodexPolicyIPBlock{}))
+	t.Setenv("CODEX2API_POLICY_IP_BLOCK_ENABLED", "true")
+	frame := []byte(`{"type":"response.create","model":"ws-billing","input":"IP policy check"}`)
+	require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, frame))
+	require.Equal(t, "response.completed", readResponsesWSTestEvent(t, fixture.client)["type"])
+	require.NoError(t, model.DB.Create(&model.CodexPolicyIPBlock{IP: "127.0.0.1", UserID: fixture.user.Id, DecisionID: "websocket-ip", CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix()}).Error)
+	require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, frame))
+	event := readResponsesWSTestEvent(t, fixture.client)
+	assert.Equal(t, "error", event["type"])
+	assert.Equal(t, float64(403), event["status"])
+	assert.Equal(t, int32(1), calls.Load(), "new ban must stop the next frame before upstream dispatch")
+	fixture.closeAndWait(t)
+	assertResponsesWSAccounting(t, fixture, []int{10})
+}
+
 func TestResponsesWebSocketEnforcesRPMOnEveryFrame(t *testing.T) {
 	var calls atomic.Int32
 	fixture := newResponsesWSBillingTest(t, `tier("base", p * 2)`, func(ws *websocket.Conn, _ *http.Request) {

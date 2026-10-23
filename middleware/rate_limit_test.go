@@ -37,6 +37,36 @@ func useRateLimitMiniRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
 	return redisServer, redisClient
 }
 
+func TestCriticalRateLimitInspectionDoesNotConsumeOrResetWindow(t *testing.T) {
+	server, _ := useRateLimitMiniRedis(t)
+	previousEnabled, previousNum, previousDuration := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = true, 2, 60
+	t.Cleanup(func() {
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = previousEnabled, previousNum, previousDuration
+	})
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	router.GET("/login", CriticalRateLimit(), func(c *gin.Context) { c.Status(204) })
+	const ip = "203.0.113.80"
+	assert.Equal(t, 204, performRateLimitRequest(router, "/login", ip+":1234").Code)
+	assert.Equal(t, 204, performRateLimitRequest(router, "/login", ip+":1234").Code)
+	server.FastForward(17 * time.Second)
+	first, err := GetCriticalRateLimitStatus(context.Background(), "::ffff:"+ip)
+	require.NoError(t, err)
+	assert.True(t, first.Blocked)
+	assert.Equal(t, int64(2), first.Count)
+	assert.Equal(t, int64(43), first.RemainingSeconds)
+	second, err := GetCriticalRateLimitStatus(context.Background(), ip)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	assert.Equal(t, 429, performRateLimitRequest(router, "/login", ip+":1234").Code)
+	server.FastForward(43 * time.Second)
+	last, err := GetCriticalRateLimitStatus(context.Background(), ip)
+	require.NoError(t, err)
+	assert.False(t, last.Blocked)
+	assert.Zero(t, last.Count)
+}
+
 func performRateLimitRequest(router http.Handler, path string, remoteAddr string) *httptest.ResponseRecorder {
 	return performRateLimitRequestWithHeaders(router, path, remoteAddr, nil)
 }

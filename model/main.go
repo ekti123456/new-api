@@ -297,6 +297,8 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CodexPolicyDecision{},
 		&CodexPolicyIPBlock{},
+		&CodexPolicyUserState{},
+		&CodexPolicyRestrictionEvent{},
 		&CasbinRule{},
 		&AuthzRole{},
 	)
@@ -367,6 +369,8 @@ func migrateDBFast() error {
 		{&SystemTaskLock{}, "SystemTaskLock"},
 		{&CodexPolicyDecision{}, "CodexPolicyDecision"},
 		{&CodexPolicyIPBlock{}, "CodexPolicyIPBlock"},
+		{&CodexPolicyUserState{}, "CodexPolicyUserState"},
+		{&CodexPolicyRestrictionEvent{}, "CodexPolicyRestrictionEvent"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

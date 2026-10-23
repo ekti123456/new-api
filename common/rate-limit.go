@@ -11,6 +11,24 @@ type InMemoryRateLimiter struct {
 	expirationDuration time.Duration
 }
 
+// Snapshot is read-only and bounded by this one key's request limit. It does
+// not create a bucket, reset its window or enumerate other clients.
+func (l *InMemoryRateLimiter) Snapshot(key string, duration int64, now int64) (count, remaining int64) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if queue := l.store[key]; queue != nil {
+		for _, at := range *queue {
+			if at+duration > now {
+				count++
+				if remaining == 0 {
+					remaining = at + duration - now
+				}
+			}
+		}
+	}
+	return
+}
+
 func (l *InMemoryRateLimiter) Init(expirationDuration time.Duration) {
 	if l.store == nil {
 		l.mutex.Lock()

@@ -51,6 +51,7 @@ import {
   type AuditEditor,
 } from './codex-audit-api'
 import { AuditConnectionFields } from './codex-audit-connection'
+import { PolicyIPManagement } from './codex-policy-ip-management'
 
 const schema = z.object({
   revision: z.string(),
@@ -136,6 +137,7 @@ function AuditEditorForm(props: { initial: AuditEditor }) {
       form.reset(data)
       client.setQueryData(['codex-audit-settings'], data)
       client.invalidateQueries({ queryKey: ['codex-audit-status'] })
+      client.invalidateQueries({ queryKey: ['codex-policy'] })
       toast.success(t('Audit settings saved and applied'))
     },
   })
@@ -317,6 +319,7 @@ function AuditEditorForm(props: { initial: AuditEditor }) {
           </Button>
         </SettingsForm>
       </Form>
+      <PolicyIPManagement />
       <ConfirmDialog
         open={removeIndex !== null}
         onOpenChange={(open) => {

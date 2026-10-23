@@ -88,6 +88,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       const result = await manageUser(user.id, action)
       if (result.success) {
         toast.success(t(getUserActionMessage(action)))
+        if (result.warning) {
+          toast.warning(t(result.warning), { duration: 10000 })
+        }
         triggerRefresh()
       } else {
         toast.error(

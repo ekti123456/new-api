@@ -64,6 +64,8 @@ func TestMain(m *testing.M) {
 		&SystemTaskLock{},
 		&CodexPolicyDecision{},
 		&CodexPolicyIPBlock{},
+		&CodexPolicyUserState{},
+		&CodexPolicyRestrictionEvent{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -103,6 +105,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_tasks")
 		DB.Exec("DELETE FROM codex_policy_decisions")
 		DB.Exec("DELETE FROM codex_policy_ip_blocks")
+		DB.Exec("DELETE FROM codex_policy_user_states")
+		DB.Exec("DELETE FROM codex_policy_restriction_events")
 	})
 }
 

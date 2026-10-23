@@ -80,6 +80,7 @@ export const userListSchema = z.array(userSchema)
 /** Generic API response */
 export interface ApiResponse<T = unknown> {
   success: boolean
+  warning?: string
   message?: string
   data?: T
 }

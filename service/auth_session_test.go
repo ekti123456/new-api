@@ -62,6 +62,31 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	return user
 }
 
+func TestLoginAndRefreshRejectBannedIPWithoutRotatingSession(t *testing.T) {
+	user := setupAuthSessionTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.CodexPolicyIPBlock{}))
+	t.Setenv("CODEX2API_POLICY_IP_BLOCK_ENABLED", "true")
+	const ip = "203.0.113.42"
+	bundle, err := CreateLoginSession(user.Id, "password", ip, "test-client")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.CodexPolicyIPBlock{IP: ip, UserID: user.Id, DecisionID: "login-ip-ban", CreatedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix()}).Error)
+	_, err = CreateLoginSession(user.Id, "password", "::ffff:"+ip, "test-client")
+	require.ErrorIs(t, err, model.ErrPolicyIPBlocked)
+	status, code := AuthSessionErrorCode(err)
+	assert.Equal(t, 403, status)
+	assert.Equal(t, "AUTH_IP_BLOCKED", code)
+	_, _, err = RefreshLoginSession(bundle.RefreshToken, bundle.Session.SID, ip, "test-client")
+	require.ErrorIs(t, err, model.ErrPolicyIPBlocked)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+	require.NoError(t, model.DB.Model(&model.CodexPolicyIPBlock{}).Where("ip = ?", ip).Update("revoked_at", time.Now().Unix()).Error)
+	_, _, err = RefreshLoginSession(bundle.RefreshToken, bundle.Session.SID, ip, "test-client")
+	require.NoError(t, err, "an IP-only rejection must not consume the refresh token")
+	_, err = CreateLoginSession(user.Id, "password", ip, "test-client")
+	require.NoError(t, err)
+}
+
 func useIndependentAuthSessionRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client, *miniredis.Miniredis, *redis.Client) {
 	t.Helper()
 	previousRedisEnabled := common.RedisEnabled

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -42,6 +44,9 @@ var defNext = func(c *gin.Context) {
 }
 
 func redisIPRateLimitKey(mark string, clientIP string) string {
+	if parsed := net.ParseIP(clientIP); parsed != nil {
+		clientIP = parsed.String()
+	}
 	return fmt.Sprintf("%s:ip:%s:%s", redisRateLimitNamespace, mark, clientIP)
 }
 
@@ -125,11 +130,65 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 }
 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
-	key := mark + c.ClientIP()
+	ip := c.ClientIP()
+	if parsed := net.ParseIP(ip); parsed != nil {
+		ip = parsed.String()
+	}
+	key := mark + ip
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
 		writeRateLimited(c, duration)
 		return
 	}
+}
+
+type CriticalRateLimitStatus struct {
+	Enabled          bool   `json:"enabled"`
+	Blocked          bool   `json:"blocked"`
+	Scope            string `json:"scope"`
+	Count            int64  `json:"count"`
+	Limit            int    `json:"limit"`
+	RemainingSeconds int64  `json:"remaining_seconds"`
+}
+
+// Administration only: inspecting a login limiter must never consume a slot.
+func GetCriticalRateLimitStatus(ctx context.Context, ip string) (CriticalRateLimitStatus, error) {
+	result := CriticalRateLimitStatus{Enabled: common.CriticalRateLimitEnable, Limit: common.CriticalRateLimitNum, Scope: "instance"}
+	if common.RedisEnabled {
+		result.Scope = "redis"
+	}
+	if !result.Enabled {
+		return result, nil
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return result, fmt.Errorf("invalid IP address")
+	}
+	ip = parsed.String()
+	if common.RedisEnabled {
+		if common.RDB == nil {
+			return result, errors.New("Redis client is not initialized")
+		}
+		values, err := common.RDB.Eval(ctx, `return {tonumber(redis.call('GET', KEYS[1]) or '0'), redis.call('TTL', KEYS[1])}`, []string{redisIPRateLimitKey("CT", ip)}).Slice()
+		if err != nil {
+			return result, err
+		}
+		if len(values) != 2 {
+			return result, errors.New("invalid limiter snapshot")
+		}
+		if result.Count, err = redisReplyInteger(values[0]); err != nil {
+			return result, err
+		}
+		if result.RemainingSeconds, err = redisReplyInteger(values[1]); err != nil {
+			return result, err
+		}
+		if result.RemainingSeconds < 0 {
+			result.RemainingSeconds = 0
+		}
+	} else {
+		result.Count, result.RemainingSeconds = inMemoryRateLimiter.Snapshot("CT"+ip, common.CriticalRateLimitDuration, time.Now().Unix())
+	}
+	result.Blocked = result.Count >= int64(result.Limit)
+	return result, nil
 }
 
 // writeRateLimited rejects the request with 429 and a Retry-After hint so

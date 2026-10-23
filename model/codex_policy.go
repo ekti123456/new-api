@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -12,6 +13,28 @@ import (
 )
 
 const CodexPolicyReasonUpstreamCyberPolicy = "upstream_cyber_policy"
+
+var ErrPolicyIPBlocked = errors.New("access denied by IP policy; contact an administrator")
+
+// Administrators remain able to recover a shared-IP deployment. Identity and
+// role must be authenticated before calling this; client headers are not roles.
+func CheckCodexPolicyAccess(role int, ip string) error {
+	if role >= common.RoleAdminUser {
+		return nil
+	}
+	config, err := common.ReadCodexPolicyIPEnforcement()
+	if err != nil || !config.Enabled {
+		return err
+	}
+	blocked, err := IsCodexPolicyIPBlocked(ip, time.Now())
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrPolicyIPBlocked
+	}
+	return nil
+}
 
 // CodexPolicyDecision is the durable replay boundary and audit record for a
 // verified Codex2API policy response. It stores only bounded metadata and an
@@ -37,11 +60,14 @@ type CodexPolicyDecision struct {
 }
 
 type CodexPolicyIPBlock struct {
-	IP         string `gorm:"size:64;primaryKey"`
-	UserID     int    `gorm:"not null;index"`
-	DecisionID string `gorm:"size:128;not null"`
-	CreatedAt  int64  `gorm:"not null"`
-	ExpiresAt  int64  `gorm:"not null;index"`
+	IP           string `json:"ip" gorm:"size:64;primaryKey"`
+	UserID       int    `json:"user_id" gorm:"not null;index"`
+	DecisionID   string `json:"decision_id" gorm:"size:128;not null"`
+	CreatedAt    int64  `json:"created_at" gorm:"not null"`
+	ExpiresAt    int64  `json:"expires_at" gorm:"not null;index"`
+	RevokedAt    int64  `json:"revoked_at" gorm:"not null;default:0;index"`
+	RevokedBy    int    `json:"revoked_by" gorm:"not null;default:0"`
+	RevokeReason string `json:"revoke_reason" gorm:"size:300;not null;default:''"`
 }
 
 type CodexPolicyDecisionInput struct {
@@ -115,10 +141,18 @@ func ApplyCodexPolicyDecision(input CodexPolicyDecisionInput) (CodexPolicyDecisi
 		if !decision.StrikeCounted {
 			return nil
 		}
+		state := CodexPolicyUserState{UserID: user.Id}
+		if err := tx.Where("user_id = ?", user.Id).FirstOrCreate(&state).Error; err != nil {
+			return err
+		}
+		state.Revision++
+		if err := tx.Save(&state).Error; err != nil {
+			return err
+		}
 
 		windowStart := decision.CreatedAt - int64(input.WindowSeconds)
 		if err := tx.Model(&CodexPolicyDecision{}).
-			Where("user_id = ? AND strike_counted = ? AND created_at >= ?", decision.UserID, true, windowStart).
+			Where("user_id = ? AND strike_counted = ? AND created_at >= ? AND id > ?", decision.UserID, true, windowStart, state.ResetAfterID).
 			Count(&result.StrikeCount).Error; err != nil {
 			return err
 		}
@@ -136,6 +170,13 @@ func ApplyCodexPolicyDecision(input CodexPolicyDecisionInput) (CodexPolicyDecisi
 				return err
 			}
 			result.AccountBanned = true
+			state.BannedAuthVersion = bannedAuthVersion
+			if err := tx.Save(&state).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&CodexPolicyRestrictionEvent{UserID: user.Id, DecisionID: decision.DecisionID, Action: "disable_account", CreatedAt: decision.CreatedAt}).Error; err != nil {
+				return err
+			}
 		}
 
 		if input.IPBlockEnabled {
@@ -149,11 +190,14 @@ func ApplyCodexPolicyDecision(input CodexPolicyDecisionInput) (CodexPolicyDecisi
 			}
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "ip"}},
-				DoUpdates: clause.AssignmentColumns([]string{"user_id", "decision_id", "created_at", "expires_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"user_id", "decision_id", "created_at", "expires_at", "revoked_at", "revoked_by", "revoke_reason"}),
 			}).Create(&block).Error; err != nil {
 				return err
 			}
 			result.IPBlocked = true
+			if err := tx.Create(&CodexPolicyRestrictionEvent{IP: block.IP, UserID: user.Id, DecisionID: decision.DecisionID, Action: "block_ip", CreatedAt: decision.CreatedAt}).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -192,7 +236,7 @@ func IsCodexPolicyIPBlocked(ip string, now time.Time) (bool, error) {
 	}
 	ip = parsedIP.String()
 	var count int64
-	err := DB.Model(&CodexPolicyIPBlock{}).Where("ip = ? AND expires_at > ?", ip, now.Unix()).Count(&count).Error
+	err := DB.Model(&CodexPolicyIPBlock{}).Where("ip = ? AND expires_at > ? AND revoked_at = ?", ip, now.Unix(), 0).Count(&count).Error
 	return count > 0, err
 }
 

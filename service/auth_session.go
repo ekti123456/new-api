@@ -64,6 +64,9 @@ func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, 
 	if expectedAuthVersion > 0 && user.AuthVersion != expectedAuthVersion {
 		return nil, ErrLoginSessionRevoked
 	}
+	if err := model.CheckCodexPolicyAccess(user.Role, ip); err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 	activeCount, err := model.CountActiveUserSessions(userID, now)
 	if err != nil {
@@ -228,6 +231,9 @@ func RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*A
 		currentUser.Status != common.UserStatusEnabled || currentUser.AuthVersion != session.UserAuthVersion {
 		_, _ = model.RevokeUserSession(session.UserID, session.SID, "user_security_changed")
 		return nil, nil, ErrLoginSessionRevoked
+	}
+	if err := model.CheckCodexPolicyAccess(currentUser.Role, ip); err != nil {
+		return nil, nil, err
 	}
 	nextSecret := deriveNextRefreshSecret(sid, secret)
 	rotated, err := model.RotateUserSessionRefresh(session.UserID, sid, hashRefreshSecret(secret), hashRefreshSecret(nextSecret), time.Now().Unix(), RefreshReplayWindow)
@@ -407,6 +413,9 @@ func authSessionErrorCode(err error) (int, string) {
 }
 
 func AuthSessionErrorCode(err error) (int, string) {
+	if errors.Is(err, model.ErrPolicyIPBlocked) {
+		return http.StatusForbidden, "AUTH_IP_BLOCKED"
+	}
 	return authSessionErrorCode(err)
 }
 

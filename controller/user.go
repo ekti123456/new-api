@@ -1311,6 +1311,11 @@ func ManageUser(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+	} else if req.Action == "disable" {
+		if err := user.DisableByAdministrator(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	} else {
 		if err := user.Update(false); err != nil {
 			common.ApiError(c, err)
@@ -1333,10 +1338,17 @@ func ManageUser(c *gin.Context) {
 		Role:   user.Role,
 		Status: user.Status,
 	}
+	var policyWarning string
+	if req.Action == "enable" {
+		// Enabling an account deliberately does not silently clear a shared-IP
+		// penalty or destroy strike history. Point to the explicit release UI.
+		policyWarning = "Account enabled. IP bans and policy strikes are unchanged; check Settings > Operations > Codex2API Audit if access is still restricted."
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data":    clearUser,
+		"warning": policyWarning,
 	})
 	return
 }

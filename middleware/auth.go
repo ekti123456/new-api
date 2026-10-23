@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -64,6 +61,9 @@ func authHelper(c *gin.Context, minRole int) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_USER_INVALID", "message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid)})
 		return
 	}
+	if user.Role < common.RoleAdminUser && enforceCodexPolicyIPBlock(c, c.ClientIP()) {
+		return
+	}
 	setDashboardAuthContext(c, user, identity, useAccessToken)
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
@@ -87,6 +87,9 @@ func TryUserAuth() func(c *gin.Context) {
 			return
 		}
 		if credentialKind != dashboardCredentialUnmatched {
+			if user.Role < common.RoleAdminUser && enforceCodexPolicyIPBlock(c, c.ClientIP()) {
+				return
+			}
 			setDashboardAuthContext(c, user, identity, credentialKind == dashboardCredentialPAT)
 		}
 		c.Next()
@@ -267,6 +270,9 @@ func TokenOrUserAuth() func(c *gin.Context) {
 				writeDashboardAuthError(c, err)
 				return
 			}
+			if user.Role < common.RoleAdminUser && enforceCodexPolicyIPBlock(c, c.ClientIP()) {
+				return
+			}
 			setDashboardAuthContext(c, user, identity, false)
 			c.Next()
 			return
@@ -346,6 +352,9 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 
+		if userCache.Role < common.RoleAdminUser && enforceCodexPolicyIPBlock(c, c.ClientIP()) {
+			return
+		}
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
 		c.Set("token_key", token.Key)
@@ -429,9 +438,6 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		clientIp := c.ClientIP()
-		if enforceCodexPolicyIPBlock(c, clientIp) {
-			return
-		}
 
 		allowIps := token.GetIpLimits()
 		if len(allowIps) > 0 {
@@ -461,6 +467,9 @@ func TokenAuth() func(c *gin.Context) {
 			return
 		}
 
+		if userCache.Role < common.RoleAdminUser && enforceCodexPolicyIPBlock(c, clientIp) {
+			return
+		}
 		userCache.WriteContext(c)
 
 		userGroup := userCache.Group
@@ -517,23 +526,15 @@ func writeUserErrorRateLockResponse(c *gin.Context, status perfmetrics.UserError
 	)
 }
 
-func codexPolicyIPBlockEnabled() bool {
-	enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("CODEX2API_POLICY_IP_BLOCK_ENABLED")))
-	return err == nil && enabled
-}
-
 func enforceCodexPolicyIPBlock(c *gin.Context, clientIP string) bool {
-	if !codexPolicyIPBlockEnabled() {
-		return false
-	}
-	ipBlocked, err := model.IsCodexPolicyIPBlocked(clientIP, time.Now())
-	if err != nil {
+	err := model.CheckCodexPolicyAccess(common.RoleCommonUser, clientIP)
+	if err != nil && !errors.Is(err, model.ErrPolicyIPBlocked) {
 		common.SysLog(fmt.Sprintf("TokenAuth IsCodexPolicyIPBlocked database error for IP %s: %v", clientIP, err))
 		abortWithOpenAiMessage(c, http.StatusInternalServerError,
 			common.TranslateMessage(c, i18n.MsgDatabaseError))
 		return true
 	}
-	if !ipBlocked {
+	if err == nil {
 		return false
 	}
 	abortWithOpenAiMessage(c, http.StatusForbidden, "Access denied due to a verified policy violation", types.ErrorCodeAccessDenied)

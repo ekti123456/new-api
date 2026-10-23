@@ -12,7 +12,7 @@ import (
 
 // This single option is deliberately secret-suffixed and excluded from the
 // generic options API. Only the dedicated redacted editor may read it.
-const NewAPIPolicyOption = "Codex2APIPolicySecret"
+const NewAPIPolicyOption = common.CodexPolicyOption
 
 type NewAPIPolicySettings struct {
 	Enabled                bool                  `json:"enabled"`
