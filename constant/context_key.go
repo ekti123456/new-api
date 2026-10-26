@@ -42,6 +42,9 @@ const (
 	// request that must stay on the conversation's original channel and key.
 	// The relay retry path treats this as strict routing and never falls back.
 	ContextKeyCodexRootChannelPinned ContextKey = "codex_root_channel_pinned"
+	// A background model was delegated to a configured Codex2API destination;
+	// keep its response instead of retrying an unpublished model on another key.
+	ContextKeyCodexBackgroundDelegated ContextKey = "codex_background_delegated"
 	// ContextKeyChannelAffinityUserAgentRouted marks requests routed by a
 	// User-Agent/channel-pool rule. These requests remain visible in consume
 	// and error logs but are excluded from model performance metrics.

@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"errors"
+	"slices"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -38,7 +40,9 @@ func responsesWSChannelPin(c *gin.Context, modelName string) (*model.Channel, st
 		groups = service.GetRequestAutoGroups(c, common.GetContextKeyString(c, constant.ContextKeyUserGroup))
 	}
 	for _, allowed := range groups {
-		if model.IsChannelEnabledForGroupModel(allowed, modelName, channel.Id) {
+		backgroundAllowed := common.GetContextKeyBool(c, constant.ContextKeyCodexBackgroundDelegated) &&
+			slices.Contains(channel.GetGroups(), allowed)
+		if backgroundAllowed || model.IsChannelEnabledForGroupModel(allowed, modelName, channel.Id) {
 			if group == "auto" {
 				common.SetContextKey(c, constant.ContextKeyAutoGroup, allowed)
 			}

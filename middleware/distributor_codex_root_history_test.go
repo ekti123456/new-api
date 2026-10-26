@@ -27,7 +27,7 @@ func TestDistributorBoundRootSurvivesPrefixPublicationFailure(test *testing.T) {
 				ChannelID: channel.Id, SelectedGroup: "pro", KeyFingerprint: fingerprint,
 			}
 			require.NoError(test, service.StoreCodexRootChannelBinding(userID, rootID, binding))
-			scope := codexPassiveRootScope(requestContext)
+			scope := service.CodexPassiveRootScope{UserID: userID, TokenID: tokenID}
 			if failure == "binding_conflict" {
 				stale := binding
 				stale.KeyFingerprint = "stale-key-fingerprint"

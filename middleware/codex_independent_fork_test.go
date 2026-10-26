@@ -61,11 +61,14 @@ func TestIndependentForkDispatchAndNaming(t *testing.T) {
 			Distribute()(c)
 			require.False(t, c.IsAborted(), w.Body.String())
 			common.CleanupBodyStorage(c)
-			// A naming fork of B must resolve B, never follow B back to A.
-			naming, nw := codexForkedNamingContext(user, 982883, child, uuid.NewString(), uuid.NewString(), "thread_title")
+			// The naming fork carries its original graph; Codex2API resolves B.
+			temporary := uuid.NewString()
+			naming, nw := codexForkedNamingContext(user, 982883, child, temporary, uuid.NewString(), "thread_title")
 			Distribute()(naming)
 			require.False(t, naming.IsAborted(), nw.Body.String())
-			require.Equal(t, child, relaychannel.ResolveCodexRootSessionForDistribution(naming).RootID)
+			require.Equal(t, temporary, relaychannel.ResolveCodexRootSessionForDistribution(naming).RootID)
+			require.Equal(t, child, relaychannel.ResolveCodexRootSessionForDistribution(naming).ForkedFromID)
+			require.Empty(t, relaychannel.CodexPassiveRootSessionOverrideFeature(naming))
 			common.CleanupBodyStorage(naming)
 		})
 	}

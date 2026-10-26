@@ -288,6 +288,22 @@ func CacheGetChannel(id int) (*Channel, error) {
 	return c, nil
 }
 
+// CacheGetAllChannels returns a snapshot of the same read-only channel pointers
+// as CacheGetChannel. Routing filters must not query or decode every DB row on
+// each background request when the channel cache is enabled.
+func CacheGetAllChannels() ([]*Channel, error) {
+	if !common.MemoryCacheEnabled {
+		return GetAllChannels(0, 0, true, false)
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	channels := make([]*Channel, 0, len(channelsIDM))
+	for _, channel := range channelsIDM {
+		channels = append(channels, channel)
+	}
+	return channels, nil
+}
+
 func CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 	if !common.MemoryCacheEnabled {
 		channel, err := GetChannelById(id, true)

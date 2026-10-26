@@ -808,6 +808,19 @@ func IsCodex2APIPolicyDestination(baseURL, apiKey string) bool {
 	return Codex2APIPolicyDestinationStatus(baseURL, apiKey) == "matched"
 }
 
+// NewCodex2APIPolicyDestinationMatcher takes one request-local configuration
+// snapshot when routing must inspect several channels. It avoids decoding the
+// same policy settings for every candidate; no snapshot survives the request.
+func NewCodex2APIPolicyDestinationMatcher() func(baseURL, apiKey string) bool {
+	cfg, err := loadNewAPIPolicyConfig()
+	if err != nil || !cfg.Enabled || len(cfg.Bindings) == 0 {
+		return func(string, string) bool { return false }
+	}
+	return func(baseURL, apiKey string) bool {
+		return codex2APIPolicyDestinationStatus(cfg, baseURL, apiKey) == "matched"
+	}
+}
+
 // Codex2APIPolicyDestinationStatus explains why a selected NewAPI channel is
 // or is not covered by an enabled Codex2API policy binding. It intentionally
 // returns only bounded category names and never exposes targets, secrets or
@@ -820,6 +833,10 @@ func Codex2APIPolicyDestinationStatus(baseURL, apiKey string) string {
 	if !cfg.Enabled {
 		return "policy_disabled"
 	}
+	return codex2APIPolicyDestinationStatus(cfg, baseURL, apiKey)
+}
+
+func codex2APIPolicyDestinationStatus(cfg newAPIPolicyConfig, baseURL, apiKey string) string {
 	actual, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || actual == nil || actual.Host == "" {
 		return "channel_base_url_invalid"

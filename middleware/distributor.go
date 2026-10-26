@@ -50,98 +50,79 @@ func Distribute() func(c *gin.Context) {
 		}
 		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		rootSession := relaychannel.ResolveCodexRootSessionForDistribution(c)
-		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
-			return
+		backgroundForward := relaychannel.IsCodexBackgroundRequest(rootSession)
+		// Keep the established user-fork treatment for unknown future desktop
+		// labels; a root/leaf-equal fork is not a background account lookup.
+		if rootSession.IndependentRoot || rootSession.ForkedFromID != "" &&
+			strings.EqualFold(rootSession.RootID, rootSession.ThreadID) &&
+			rootSession.SubagentKind == "" && !isKnownCodexInternalThreadSource(rootSession.ThreadSource) {
+			backgroundForward = false
 		}
-		// A Codex naming request belongs to the user root and must inherit that
-		// root's routing side. The initial thread_title is a fresh ephemeral thread,
-		// while description/reconsideration requests carry an explicit parent graph.
-		if !isCodexNamingRequest(rootSession) && !strings.EqualFold(strings.TrimSpace(rootSession.ThreadSource), "ambient_suggestions") {
-			service.PrepareUserAgentRoutingMode(c, usingGroup)
-		}
-		rootSession, passiveFeature, strictPassiveRoute, passiveRootErr := resolveUnlinkedCodexPassiveRoot(c, rootSession)
-		if rejectRestrictedCodexPassiveModel(c, modelRequest.Model, rootSession) {
-			return
-		}
-		if passiveRootErr != nil {
-			logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, passiveRootErr)
-			if abortCodexBackgroundRootFailure(c, rootSession, passiveRootErr) {
-				return
-			}
-			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-			return
-		}
-		recognizedRootFallbackEligible := canPassThroughRecognizedCodexRoot(c, rootSession)
-		recognizedRootPassThrough := false
-		rootChannel, rootSelectedGroup, rootBindingFound, rootErr := prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
-		if recognizedRootFallbackEligible && rootErr == nil && !rootBindingFound && rootChannel == nil {
-			fallbackChannel, fallbackGroup, fallbackKey, fallbackKeyIndex, fallbackFound, fallbackErr := loadUniqueRecognizedCodexPassThroughChannel(c, usingGroup, modelRequest.Model)
-			if fallbackErr != nil {
-				logCodexPassiveRouteFailure(c, "fallback", modelRequest.Model, rootSession, fallbackErr)
-			} else if fallbackFound {
-				rootChannel = fallbackChannel
-				rootSelectedGroup = fallbackGroup
-				// Treat the unique-channel fallback as authoritative for this
-				// request. It is not a persisted root binding (and therefore does
-				// not publish/claim one), but token-specific routing must not replace
-				// it with another channel.
-				rootBindingFound = true
-				rootErr = nil
-				recognizedRootPassThrough = true
-				c.Set(codexFallbackChannelKeyContextKey, codexFallbackChannelKey{
-					channelID:   fallbackChannel.Id,
-					key:         fallbackKey,
-					index:       fallbackKeyIndex,
-					fingerprint: codexRootChannelKeyFingerprint(fallbackKey),
-				})
-				if usingGroup == "auto" {
-					common.SetContextKey(c, constant.ContextKeyAutoGroup, fallbackGroup)
-				}
-			}
-		}
-		if rootErr != nil {
-			// A stale root channel may be disabled, out of quota, fail the current
-			// model/group/UA filter, or have an invalidated key. Only an ordinary
-			// fresh user root may discard that binding and re-enter normal channel
-			// selection. Related/passive/explicit lineage requests must remain
-			// strict because their upstream state is tied to the original route.
-			if codexRootBindingFallbackAllowed(c, rootSession, rootBindingFound, rootErr) {
-				cleared, clearErr := clearInvalidCodexRootBindingForFreshRequest(c, rootSession)
-				if clearErr != nil {
-					logCodexPassiveRouteFailure(c, "clear", modelRequest.Model, rootSession, clearErr)
-				} else if cleared {
-					rootChannel = nil
-					rootSelectedGroup = ""
-					rootBindingFound = false
-					rootErr = nil
-				} else {
-					// The binding changed between preparation and the CAS delete. A
-					// single re-read lets a concurrently published valid route win;
-					// if it is still invalid, keep the fail-closed behavior below.
-					rootChannel, rootSelectedGroup, rootBindingFound, rootErr = prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
-				}
-			}
-			if rootErr != nil {
-				logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
-				if errors.Is(rootErr, errCodexRootModelUnavailable) {
-					c.Header("X-Should-Retry", "false")
-					abortWithOpenAiMessage(c, http.StatusBadRequest, "当前对话无法继续使用所选模型。请选择其他可用模型继续当前任务；如需使用所选模型，请新建对话后重试。", types.ErrorCode("session_model_unavailable"))
-					return
-				}
-				if abortCodexBackgroundRootFailure(c, rootSession, rootErr) {
-					return
-				}
+		service.PrepareUserAgentRoutingMode(c, usingGroup)
+		var rootChannel *model.Channel
+		var rootSelectedGroup string
+		var rootBindingFound bool
+		backgroundAuthorized := false
+		if backgroundForward {
+			candidate, group, key, index, found, routeErr := loadCodexBackgroundChannel(c, usingGroup, modelRequest.Model)
+			if routeErr != nil {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
+			if found {
+				rootChannel, rootSelectedGroup, backgroundAuthorized = candidate, group, true
+				c.Set(codexFallbackChannelKeyContextKey, codexFallbackChannelKey{channelID: candidate.Id, key: key, index: index, fingerprint: codexRootChannelKeyFingerprint(key)})
+				if usingGroup == "auto" {
+					common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
+				}
+			}
 		}
-		if strictPassiveRoute && (!rootBindingFound || rootChannel == nil) && !recognizedRootPassThrough {
-			logCodexPassiveRouteFailure(c, "strict", modelRequest.Model, rootSession, nil)
-			if abortCodexBackgroundRootFailure(c, rootSession, nil) {
+		common.SetContextKey(c, constant.ContextKeyCodexBackgroundDelegated, backgroundAuthorized)
+		// Ordinary user conversations retain channel/key affinity. Background
+		// requests carry their original graph to Codex2API without consulting,
+		// waiting for, or rewriting a local main-session/turn/prefix binding.
+		if !backgroundForward {
+			var rootErr error
+			rootSession, rootErr = resolveCodexUserRootRoute(c, rootSession)
+			if rootErr != nil {
+				logCodexPassiveRouteFailure(c, "resolve", modelRequest.Model, rootSession, rootErr)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
-			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-			return
+			rootChannel, rootSelectedGroup, rootBindingFound, rootErr = prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+			if rootErr != nil {
+				// A stale root channel may be disabled, out of quota, fail the current
+				// model/group/UA filter, or have an invalidated key. Only an ordinary
+				// fresh user root may discard that binding and re-enter normal channel
+				// selection. Related/passive/explicit lineage requests must remain
+				// strict because their upstream state is tied to the original route.
+				if codexRootBindingFallbackAllowed(c, rootSession, rootBindingFound, rootErr) {
+					cleared, clearErr := clearInvalidCodexRootBindingForFreshRequest(c, rootSession)
+					if clearErr != nil {
+						logCodexPassiveRouteFailure(c, "clear", modelRequest.Model, rootSession, clearErr)
+					} else if cleared {
+						rootChannel = nil
+						rootSelectedGroup = ""
+						rootBindingFound = false
+						rootErr = nil
+					} else {
+						// The binding changed between preparation and the CAS delete. A
+						// single re-read lets a concurrently published valid route win;
+						// if it is still invalid, keep the fail-closed behavior below.
+						rootChannel, rootSelectedGroup, rootBindingFound, rootErr = prepareCodexRootChannelRoute(c, rootSession, modelRequest.Model, usingGroup)
+					}
+				}
+				if rootErr != nil {
+					logCodexPassiveRouteFailure(c, "prepare", modelRequest.Model, rootSession, rootErr)
+					if errors.Is(rootErr, errCodexRootModelUnavailable) {
+						c.Header("X-Should-Retry", "false")
+						abortWithOpenAiMessage(c, http.StatusBadRequest, "当前对话无法继续使用所选模型。请选择其他可用模型继续当前任务；如需使用所选模型，请新建对话后重试。", types.ErrorCode("session_model_unavailable"))
+						return
+					}
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
+			}
 		}
 		if pinned, group, pinErr := responsesWSChannelPin(c, modelRequest.Model); pinErr != nil {
 			abortWithOpenAiMessage(c, http.StatusForbidden, pinErr.Error(), types.ErrorCodeAccessDenied)
@@ -177,12 +158,10 @@ func Distribute() func(c *gin.Context) {
 				channel = rootChannel
 			}
 		} else {
-			passiveInternalAuthorized := strictPassiveRoute && strings.TrimSpace(passiveFeature) != "" &&
-				((rootBindingFound && rootChannel != nil) || recognizedRootPassThrough)
 			// Select a channel for the user
 			// check token model mapping
 			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
-			if modelLimitEnable && !passiveInternalAuthorized {
+			if modelLimitEnable && !backgroundAuthorized {
 				s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
 				if !ok {
 					// token model limit is empty, all models are not allowed
@@ -349,60 +328,41 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), types.ErrorCodeModelNotFound)
 				return
 			}
-			bindingChanged, bindingClaimed, bindingErr := claimProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
-			if bindingErr != nil {
-				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, bindingErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if bindingClaimed && bindingChanged {
-				winnerErr := errors.New("another request claimed a different Codex root channel binding")
-				logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, winnerErr)
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if aliasErr := commitCodexPassiveRootAlias(c); aliasErr != nil {
-				logCodexPassiveRouteFailure(c, "claim", modelRequest.Model, rootSession, aliasErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, aliasErr) {
+			if !backgroundForward {
+				bindingChanged, bindingClaimed, bindingErr := claimProvisionalCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+				if bindingErr != nil {
+					logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, bindingErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
-			if turnBindingErr != nil {
-				logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, turnBindingErr) {
+				if bindingClaimed && bindingChanged {
+					winnerErr := errors.New("another request claimed a different Codex root channel binding")
+					logCodexPassiveRouteFailure(c, "root_claim", modelRequest.Model, rootSession, winnerErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
-			if threadBindingErr != nil {
-				rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
-				logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
-				if abortCodexBackgroundRootFailure(c, rootSession, threadBindingErr) {
+				turnClaim, turnBindingErr := claimProvisionalCodexTurnRootBinding(c, rootSession)
+				if turnBindingErr != nil {
+					logCodexPassiveRouteFailure(c, "turn_claim", modelRequest.Model, rootSession, turnBindingErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 					return
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-				return
-			}
-			if candidateErr := publishProvisionalCodexRootCandidates(c, rootSession); candidateErr != nil {
-				common.SysError(fmt.Sprintf("Codex root history publication failed; continuing bound route: user=%d token=%d model=%s request_id=%s reason=%s",
-					common.GetContextKeyInt(c, constant.ContextKeyUserId),
-					common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-					modelRequest.Model, c.GetString(common.RequestIdKey), candidateErr.Error()))
+				_, threadBindingErr := claimProvisionalCodexThreadRootBinding(c, rootSession)
+				if threadBindingErr != nil {
+					rollbackProvisionalCodexLineageClaims(modelRequest.Model, "thread_claim", turnClaim)
+					logCodexPassiveRouteFailure(c, "thread_claim", modelRequest.Model, rootSession, threadBindingErr)
+					abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
 			}
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
-			recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
-			recordCodexTurnRootBinding(c, rootSession, modelRequest.Model)
-			recordCodexThreadRootBinding(c, rootSession, modelRequest.Model)
-			if promoteErr := promoteCodexPassiveRootAlias(c); promoteErr != nil {
-				logCodexPassiveRouteFailure(c, "promote", modelRequest.Model, rootSession, promoteErr)
+			if !backgroundForward {
+				recordCodexRootChannelBinding(c, rootSession, modelRequest.Model)
+				recordCodexTurnRootBinding(c, rootSession, modelRequest.Model)
+				recordCodexThreadRootBinding(c, rootSession, modelRequest.Model)
 			}
 		}
 	}
@@ -727,7 +687,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 				if keyErr == nil && currentKey == fallback.key && codexRootChannelKeyFingerprint(currentKey) == fallback.fingerprint {
 					key, index = currentKey, fallback.index
 				} else {
-					key, index, newAPIError = channel.GetNextEnabledKey()
+					return types.NewErrorWithStatusCode(errors.New("channel credential changed; retry the request"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 				}
 			} else {
 				key, index, newAPIError = channel.GetNextEnabledKey()
@@ -738,6 +698,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	if newAPIError != nil {
 		return newAPIError
+	}
+	if common.GetContextKeyBool(c, constant.ContextKeyCodexBackgroundDelegated) && !relaychannel.IsCodex2APIPolicyDestination(channel.GetBaseURL(), key) {
+		return types.NewErrorWithStatusCode(errors.New("background channel authorization changed; retry the request"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)

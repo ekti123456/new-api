@@ -363,7 +363,6 @@ func codexUserConcurrencyPolicy(c *gin.Context) (bool, bool) {
 	if !linked && !title && !ambient && !independent {
 		return protected, false
 	}
-	relaychannel.StartCodexRootAccountWait(c, resolution.ThreadSource)
 	return protected, true
 }
 

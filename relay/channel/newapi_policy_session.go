@@ -261,6 +261,14 @@ type CodexRootSessionResolution struct {
 	SubagentKind        string
 }
 
+// IsCodexBackgroundRequest classifies transport metadata only. Resolving the
+// upstream account or proving a parent session belongs to Codex2API, not this
+// gateway. NewAPI still applies authentication and configured channel access.
+func IsCodexBackgroundRequest(resolution CodexRootSessionResolution) bool {
+	source := strings.TrimSpace(resolution.ThreadSource)
+	return source != "" && !strings.EqualFold(source, "user") || strings.TrimSpace(resolution.SubagentKind) != ""
+}
+
 const codexPassiveRootSessionOverrideContextKey = "newapi_codex_passive_root_session_override_v1"
 
 type codexPassiveRootSessionOverride struct {
