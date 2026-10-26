@@ -52,5 +52,9 @@ func recordRelayAdmissionError(c *gin.Context, statusCode int, code, message str
 		metadata["session_id"] = common.GetStringIfEmpty(metadata["session_id"], c.GetHeader("Session-Id"))
 		metadata["subagent_kind"] = common.GetStringIfEmpty(metadata["subagent_kind"], c.GetHeader("X-OpenAI-Subagent"))
 	}
+	if stage := c.GetString("relay_admission_route_stage"); stage != "" {
+		metadata["route_stage"] = stage
+		metadata["route_reason"] = c.GetString("relay_admission_route_reason")
+	}
 	perfmetrics.RecordAdmissionError(c, modelName, statusCode, code, message, metadata)
 }

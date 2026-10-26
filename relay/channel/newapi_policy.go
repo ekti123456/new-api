@@ -118,6 +118,9 @@ type newAPIPolicyRequestContextKey struct{}
 const newAPIPolicyRequestContextGinKey = "newapi_codex2api_policy_request_context"
 
 type newAPIPolicyMeta struct {
+	IndependentRootVersion int `json:"independent_root_version,omitempty"`
+	// Policy ancestry is signed only for lock enforcement, never account routing.
+	PolicyParentSessionID string `json:"policy_parent_session_id,omitempty"`
 	// Only the authenticated user's server-side role may enable this signed
 	// exemption. It preserves source addresses in model output, not credentials.
 	PreserveUpstreamSource bool `json:"preserve_upstream_source,omitempty"`
@@ -282,6 +285,8 @@ func applyNewAPIPolicyHeadersWithConfig(c *gin.Context, req *http.Request, info 
 		RootSessionVersion: 1,
 	}
 	meta.RootAccountWaitMillis = codexRootAccountWaitMillis(c)
+	meta.IndependentRootVersion = independentCodexRootVersion(c)
+	meta.PolicyParentSessionID = c.GetString(independentCodexPolicyParentKey)
 	if association := CodexRequestRootAssociation(c); association.OriginalRootID != "" {
 		meta.OriginalRootFingerprint = newAPIPolicyRootSessionFingerprint(binding.PlatformID, userID, association.OriginalRootID)
 		meta.RootAssociation = association.Basis
@@ -292,6 +297,11 @@ func applyNewAPIPolicyHeadersWithConfig(c *gin.Context, req *http.Request, info 
 		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, sessionID)
 	}
 	rootSession := applyCodexPassiveRootSessionOverride(c, analyzeNewAPIPolicyRootSession(c, info, sessionID))
+	if rootSession.independentRoot {
+		meta.IndependentRootVersion = 1
+		meta.PolicyParentSessionID = rootSession.policyParentID
+		meta.SessionFingerprint = newAPIPolicySessionFingerprint(binding.Secret, binding.PlatformID, userID, rootSession.rootID)
+	}
 	meta.RootSessionState = rootSession.state
 	meta.RootSessionRelation = rootSession.relation
 	meta.ThreadSource = rootSession.threadSource

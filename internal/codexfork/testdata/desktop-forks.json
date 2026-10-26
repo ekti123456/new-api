@@ -1,0 +1,50 @@
+[
+  {
+    "name": "native-capture.json",
+    "root": "01a17357-a8b2-7953-b865-a3ca9e45cf3b",
+    "parent": "01a17357-a6b2-7d00-bbd3-e601f98ebef0",
+    "headers": {
+      "x-codex-window-id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b:0",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b\",\"thread_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b\",\"turn_id\":\"01a17357-a8c3-7990-aef7-2dab05eca6d0\",\"window_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b:0\",\"window_number\":0,\"context_window_id\":\"01a17357-a6b8-7a53-9908-efd2d393ec93\",\"request_kind\":\"turn\",\"history_initialization\":\"warm_fork\",\"forked_from_thread_id\":\"01a17357-a6b2-7d00-bbd3-e601f98ebef0\",\"forked_from_ordinal_exclusive\":18,\"root_turn_id\":\"01a17357-a8c3-7990-aef7-2dab05eca6d0\",\"thread_source\":\"user\",\"turn_trigger\":\"side_chat\"}",
+      "x-client-request-id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b",
+      "session-id": "01a17357-a6b2-7d00-bbd3-e601f98ebef0",
+      "thread-id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b",
+      "originator": "Codex Desktop",
+      "user-agent": "Codex Desktop/0.164.0-alpha.11.1 (Windows 10.0.19045; x86_64) dumb (Codex Desktop; 26.1021.3705.0)"
+    },
+    "model": "gpt-6-astra",
+    "client_metadata": {
+      "x-codex-window-id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b:0",
+      "session_id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b",
+      "turn_id": "01a17357-a8c3-7990-aef7-2dab05eca6d0",
+      "root_turn_id": "01a17357-a8c3-7990-aef7-2dab05eca6d0",
+      "thread_id": "01a17357-a8b2-7953-b865-a3ca9e45cf3b",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b\",\"thread_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b\",\"turn_id\":\"01a17357-a8c3-7990-aef7-2dab05eca6d0\",\"window_id\":\"01a17357-a8b2-7953-b865-a3ca9e45cf3b:0\",\"window_number\":0,\"context_window_id\":\"01a17357-a6b8-7a53-9908-efd2d393ec93\",\"request_kind\":\"turn\",\"history_initialization\":\"warm_fork\",\"forked_from_thread_id\":\"01a17357-a6b2-7d00-bbd3-e601f98ebef0\",\"forked_from_ordinal_exclusive\":18,\"root_turn_id\":\"01a17357-a8c3-7990-aef7-2dab05eca6d0\",\"thread_source\":\"user\",\"turn_trigger\":\"side_chat\"}"
+    },
+    "prompt_cache_key": "01a17357-a6b2-7d00-bbd3-e601f98ebef0"
+  },
+  {
+    "name": "native-ordinary-capture.json",
+    "root": "01a17361-edee-7f02-93d4-d21879a54469",
+    "parent": "01a17361-ec33-7533-bb36-8e0f45c585fd",
+    "headers": {
+      "x-codex-window-id": "01a17361-edee-7f02-93d4-d21879a54469:0",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a17361-edee-7f02-93d4-d21879a54469\",\"thread_id\":\"01a17361-edee-7f02-93d4-d21879a54469\",\"turn_id\":\"01a17361-eefd-7c23-b632-99540829ddfc\",\"window_id\":\"01a17361-edee-7f02-93d4-d21879a54469:0\",\"window_number\":0,\"context_window_id\":\"01a17361-ec37-7bb2-bfab-7affbed6632e\",\"request_kind\":\"turn\",\"history_initialization\":\"warm_fork\",\"forked_from_thread_id\":\"01a17361-ec33-7533-bb36-8e0f45c585fd\",\"forked_from_ordinal_exclusive\":18,\"root_turn_id\":\"01a17361-eefd-7c23-b632-99540829ddfc\",\"thread_source\":\"user\",\"turn_trigger\":\"composer\"}",
+      "x-client-request-id": "01a17361-edee-7f02-93d4-d21879a54469",
+      "session-id": "01a17361-edee-7f02-93d4-d21879a54469",
+      "thread-id": "01a17361-edee-7f02-93d4-d21879a54469",
+      "originator": "Codex Desktop",
+      "user-agent": "Codex Desktop/0.164.0-alpha.11.1 (Windows 10.0.19045; x86_64) dumb (Codex Desktop; 26.1021.3705.0)"
+    },
+    "model": "gpt-6-astra",
+    "client_metadata": {
+      "turn_id": "01a17361-eefd-7c23-b632-99540829ddfc",
+      "x-codex-window-id": "01a17361-edee-7f02-93d4-d21879a54469:0",
+      "session_id": "01a17361-edee-7f02-93d4-d21879a54469",
+      "thread_id": "01a17361-edee-7f02-93d4-d21879a54469",
+      "root_turn_id": "01a17361-eefd-7c23-b632-99540829ddfc",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a17361-edee-7f02-93d4-d21879a54469\",\"thread_id\":\"01a17361-edee-7f02-93d4-d21879a54469\",\"turn_id\":\"01a17361-eefd-7c23-b632-99540829ddfc\",\"window_id\":\"01a17361-edee-7f02-93d4-d21879a54469:0\",\"window_number\":0,\"context_window_id\":\"01a17361-ec37-7bb2-bfab-7affbed6632e\",\"request_kind\":\"turn\",\"history_initialization\":\"warm_fork\",\"forked_from_thread_id\":\"01a17361-ec33-7533-bb36-8e0f45c585fd\",\"forked_from_ordinal_exclusive\":18,\"root_turn_id\":\"01a17361-eefd-7c23-b632-99540829ddfc\",\"thread_source\":\"user\",\"turn_trigger\":\"composer\"}"
+    },
+    "prompt_cache_key": "01a17361-edee-7f02-93d4-d21879a54469"
+  }
+]

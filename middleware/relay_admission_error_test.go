@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -23,6 +25,26 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestCodexRouteFailureIsAuditedBeforeUpstream(test *testing.T) {
+	db := setupAdmissionErrorDatabase(test)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", unreadAdmissionBody{})
+	c.Set("id", 42)
+	c.Set(RouteTagKey, "relay")
+	resolution := relaychannel.CodexRootSessionResolution{IdentityConflict: true, ThreadSource: "user"}
+	logCodexPassiveRouteFailure(c, "resolve", "gpt-6-astra", resolution, errors.New("conflicting session carriers"))
+	abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "No available channel", types.ErrorCodeModelNotFound)
+	require.NoError(test, perfmetrics.FlushAdmissionErrors(test.Context()))
+	var failures []model.PerfMetricError
+	require.NoError(test, db.Find(&failures).Error)
+	require.Len(test, failures, 1)
+	require.Equal(test, c.GetString(common.RequestIdKey), failures[0].RequestId)
+	require.Contains(test, failures[0].ErrorReason, `"route_stage":"resolve"`)
+	require.Contains(test, failures[0].ErrorReason, "conflicting session carriers")
+	require.NotContains(test, response.Body.String(), "conflicting session carriers")
+}
 
 func setupAdmissionErrorDatabase(test *testing.T) *gorm.DB {
 	test.Helper()

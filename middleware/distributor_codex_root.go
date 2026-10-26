@@ -224,9 +224,15 @@ func logCodexPassiveRouteFailure(c *gin.Context, stage, modelName string, resolu
 	if err != nil {
 		reason = err.Error()
 	}
+	c.Set("relay_admission_route_stage", stage)
+	c.Set("relay_admission_route_reason", reason)
+	if c.GetString(common.RequestIdKey) == "" {
+		c.Set(common.RequestIdKey, common.NewRequestId())
+	}
 	association := relaychannel.CodexRequestRootAssociation(c)
 	common.SysError(fmt.Sprintf(
-		"Codex passive route failed: stage=%s user=%d token=%d group=%s model=%s resolved=%t related=%t source=%s kind=%s subagent=%s reason=%s original_root=%q target_root=%q association=%s candidates=%d",
+		"Codex passive route failed: request_id=%s stage=%s user=%d token=%d group=%s model=%s resolved=%t related=%t source=%s kind=%s subagent=%s reason=%s original_root=%q target_root=%q association=%s candidates=%d",
+		c.GetString(common.RequestIdKey),
 		stage,
 		common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
@@ -774,6 +780,10 @@ func applyCodexTurnRootRoute(c *gin.Context, resolution relaychannel.CodexRootSe
 	}
 	storedRole := route.mapping.RouteIdentity()
 	effectiveRole := storedRole
+	if resolution.IndependentRoot && storedRole.RootOwner && strings.EqualFold(mappedRootID, resolution.RootID) {
+		effectiveRole.Related = false
+		effectiveRole.PassiveFeature = ""
+	}
 	if route.matchedOwn && (codexTurnRouteLabelConflict(resolution.ThreadSource, route.mapping.ThreadSource) ||
 		codexTurnRouteLabelConflict(resolution.RequestKind, route.mapping.RequestKind) ||
 		codexTurnRouteLabelConflict(resolution.SubagentKind, route.mapping.SubagentKind)) {

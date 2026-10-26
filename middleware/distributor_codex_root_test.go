@@ -2358,7 +2358,8 @@ func TestUserForkIsNotCollapsedByCanonicalForkMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, strict)
 	require.Equal(t, forkRoot, resolved.RootID)
-	require.True(t, resolved.Related)
+	require.False(t, resolved.Related)
+	require.True(t, resolved.IndependentRoot)
 }
 
 func TestUserForkWithoutTrustedSourceDoesNotUseAncestorTurn(t *testing.T) {
@@ -2387,7 +2388,7 @@ func TestUserForkWithoutTrustedSourceDoesNotUseAncestorTurn(t *testing.T) {
 			require.Equal(t, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelId))
 			resolution := relaychannel.ResolveCodexRootSessionForDistribution(c)
 			require.Equal(t, forkRoot, resolution.RootID)
-			require.True(t, resolution.Related)
+			require.Equal(t, source != "", resolution.Related)
 			require.Equal(t, "user", resolution.ThreadSource)
 			require.Empty(t, resolution.SubagentKind)
 
@@ -2396,7 +2397,7 @@ func TestUserForkWithoutTrustedSourceDoesNotUseAncestorTurn(t *testing.T) {
 			require.True(t, found)
 			require.Equal(t, forkRoot, mapping.RootID)
 			require.True(t, mapping.RootOwner)
-			require.True(t, mapping.Related)
+			require.Equal(t, source != "", mapping.Related)
 			require.Equal(t, "user", mapping.ThreadSource)
 			require.Empty(t, mapping.PassiveFeature)
 
@@ -2409,7 +2410,7 @@ func TestUserForkWithoutTrustedSourceDoesNotUseAncestorTurn(t *testing.T) {
 			require.False(t, fullRetry.IsAborted())
 			fullRetryResolution := relaychannel.ResolveCodexRootSessionForDistribution(fullRetry)
 			require.Equal(t, forkRoot, fullRetryResolution.RootID)
-			require.True(t, fullRetryResolution.Related)
+			require.Equal(t, source != "", fullRetryResolution.Related)
 			require.Equal(t, "user", fullRetryResolution.ThreadSource)
 
 			retry, retryRecorder := codexMainRootTurnContext(userID, 82081+index, 0, forkRoot, turnID)
@@ -2424,7 +2425,7 @@ func TestUserForkWithoutTrustedSourceDoesNotUseAncestorTurn(t *testing.T) {
 			require.True(t, common.GetContextKeyBool(retry, constant.ContextKeyCodexRootChannelPinned))
 			retryResolution := relaychannel.ResolveCodexRootSessionForDistribution(retry)
 			require.Equal(t, forkRoot, retryResolution.RootID)
-			require.True(t, retryResolution.Related)
+			require.Equal(t, source != "", retryResolution.Related)
 			require.Equal(t, "user", retryResolution.ThreadSource)
 		})
 	}

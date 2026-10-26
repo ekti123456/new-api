@@ -29,7 +29,7 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 		},
 	})
 	c.Abort()
-	if userId > 0 && c.GetString(RouteTagKey) == "relay" && (statusCode == http.StatusTooManyRequests || codeStr == "user_error_rate_temporarily_locked") {
+	if userId > 0 && c.GetString(RouteTagKey) == "relay" && (statusCode == http.StatusTooManyRequests || codeStr == "user_error_rate_temporarily_locked" || c.GetString("relay_admission_route_stage") != "" || codeStr == "codex_background_root_unavailable") {
 		recordRelayAdmissionError(c, statusCode, codeStr, message)
 	} else {
 		logger.LogError(c, fmt.Sprintf("user %d | status=%d code=%s | %s", userId, statusCode, codeStr, common.LocalLogPreview(message)))

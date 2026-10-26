@@ -561,7 +561,7 @@ func TestAnalyzeNewAPIPolicyRootSessionUsesForkedLineageForUnknownSource(t *test
 	require.Equal(t, "future_task", resolution.requestKind)
 }
 
-func TestApplyNewAPIPolicyHeadersSignsUserForkSourceAffinity(t *testing.T) {
+func TestApplyNewAPIPolicyHeadersSignsIndependentForkWithoutSourceAffinity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const (
 		secret   = "0123456789abcdef0123456789abcdef"
@@ -605,11 +605,12 @@ func TestApplyNewAPIPolicyHeadersSignsUserForkSourceAffinity(t *testing.T) {
 	var meta newAPIPolicyMeta
 	require.NoError(t, common2.Unmarshal(payload, &meta))
 	require.Equal(t, newAPIPolicyRootSessionResolved, meta.RootSessionState)
-	require.Equal(t, newAPIPolicyRootSessionRelationRelated, meta.RootSessionRelation)
+	require.Equal(t, newAPIPolicyRootSessionRelationRoot, meta.RootSessionRelation)
 	require.Equal(t, "user", meta.ThreadSource)
 	require.Empty(t, meta.SessionAccounting)
 	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", forkID), meta.RootSessionFingerprint)
-	require.Equal(t, newAPIPolicyRootSessionFingerprint(binding.PlatformID, "42", sourceID), meta.ForkedFromSessionFingerprint)
+	require.Empty(t, meta.ForkedFromSessionFingerprint)
+	require.Equal(t, 1, meta.IndependentRootVersion)
 }
 
 func TestResolveNewAPIPolicyRootSessionIDReportsConflictAndUnavailable(t *testing.T) {

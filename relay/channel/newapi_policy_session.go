@@ -3,10 +3,12 @@ package channel
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strconv"
 	"strings"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/codexfork"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
@@ -216,6 +218,8 @@ type newAPIPolicyRootSessionEvidence struct {
 }
 
 type newAPIPolicyRootSessionResolution struct {
+	independentRoot     bool
+	policyParentID      string
 	rootID              string
 	threadID            string
 	windowID            string
@@ -237,6 +241,8 @@ type newAPIPolicyRootSessionResolution struct {
 // parent/fork carrier, or subagent marker proves that this is a derived request;
 // thread_source alone is never sufficient.
 type CodexRootSessionResolution struct {
+	IndependentRoot     bool
+	PolicyParentID      string
 	SessionID           string
 	RootID              string
 	ThreadID            string
@@ -287,6 +293,12 @@ func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionReso
 	}
 	stableSessionID := newAPIPolicyStableSessionID(c, info)
 	resolution := applyCodexPassiveRootSessionOverride(c, analyzeNewAPIPolicyRootSession(c, info, stableSessionID))
+	if resolution.independentRoot && c != nil {
+		c.Set(independentCodexPolicyParentKey, resolution.policyParentID)
+		if err := projectIndependentCodexRoot(c, resolution.rootID, resolution.turnID); err != nil {
+			resolution.state = newAPIPolicyRootSessionConflict
+		}
+	}
 	evidence := collectNewAPIPolicyRootSessionEvidence(c, info)
 	session := evidence.headerSessions
 	session.add(evidence.metadataRoots.resolved())
@@ -294,6 +306,8 @@ func ResolveCodexRootSessionForDistribution(c *gin.Context) CodexRootSessionReso
 		session.conflict = true
 	}
 	return CodexRootSessionResolution{
+		IndependentRoot:     resolution.independentRoot || independentCodexRootVersion(c) == codexfork.Version,
+		PolicyParentID:      independentCodexPolicyParent(c),
 		SessionID:           session.resolved(),
 		RootID:              resolution.rootID,
 		ThreadID:            resolution.threadID,
@@ -537,7 +551,7 @@ func analyzeNewAPIPolicyRootSession(c *gin.Context, info *relaycommon.RelayInfo,
 			relation = newAPIPolicyRootSessionRelationRoot
 		}
 	}
-	return newAPIPolicyRootSessionResolution{
+	result := newAPIPolicyRootSessionResolution{
 		rootID:              rootID,
 		threadID:            evidence.threads.resolved(),
 		windowID:            evidence.windowIDs.resolved(),
@@ -553,6 +567,89 @@ func analyzeNewAPIPolicyRootSession(c *gin.Context, info *relaycommon.RelayInfo,
 		requestKind:         evidence.requestKinds.resolved(),
 		subagentKind:        evidence.subagents.value,
 	}
+	if state == newAPIPolicyRootSessionResolved && independentUserFork(evidence) {
+		result.independentRoot = true
+		result.policyParentID = result.forkedFromID
+		result.relation = newAPIPolicyRootSessionRelationRoot
+		result.forkedFromID, result.parentTurnID = "", ""
+		result.rootTurnID = result.turnID
+		result.threadSource = "user"
+	}
+	return result
+}
+
+const independentCodexRootKey = "codex_independent_root_version"
+const independentCodexPolicyParentKey = "codex_independent_policy_parent"
+
+func independentCodexPolicyParent(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return c.GetString(independentCodexPolicyParentKey)
+}
+
+func independentCodexRootVersion(c *gin.Context) int {
+	if c == nil {
+		return 0
+	}
+	return c.GetInt(independentCodexRootKey)
+}
+
+// A user-created fork owns its own root. The old HTTP session is only a
+// cache-affinity hint when it exactly names the declared source fork.
+func independentUserFork(e newAPIPolicyRootSessionEvidence) bool {
+	if !coherentCodexFork(e) {
+		return false
+	}
+	source := e.threadSources.resolved()
+	if source != "" && !strings.EqualFold(source, "user") {
+		return false
+	}
+	if kind := e.requestKinds.resolved(); kind != "" && kind != "turn" && kind != "compaction" {
+		return false
+	}
+	return true
+}
+
+func coherentCodexFork(e newAPIPolicyRootSessionEvidence) bool {
+	leaf, conflict := newAPIPolicyOneLeaf(e)
+	if conflict || e.conflict() || e.threadSources.conflict || e.requestKinds.conflict || e.subagents.present || e.subagents.broken {
+		return false
+	}
+	return validNewAPIPolicyRootSessionUUID(leaf) && leaf == e.metadataRoots.value &&
+		validNewAPIPolicyRootSessionUUID(e.forkedFrom.value) && e.forkedFrom.value != leaf &&
+		(e.parents.value == "" || e.parents.value == e.forkedFrom.value) &&
+		(e.headerSessions.value == "" || e.headerSessions.value == leaf || e.headerSessions.value == e.forkedFrom.value)
+}
+
+func projectIndependentCodexRoot(c *gin.Context, root, turn string) error {
+	if independentCodexRootVersion(c) == codexfork.Version {
+		return nil
+	}
+	storage, err := common2.GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	body, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	headers, projected, err := codexfork.Project(c.Request.Header, body, root, turn)
+	if err != nil {
+		return err
+	}
+	next, err := common2.CreateBodyStorage(projected)
+	if err != nil {
+		return err
+	}
+	common2.CleanupBodyStorage(c)
+	c.Set(common2.KeyBodyStorage, next)
+	c.Set(common2.KeyRequestBody, nil)
+	c.Request.Body = io.NopCloser(next)
+	c.Request.ContentLength = int64(len(projected))
+	c.Request.Header = headers
+	c.Set(independentCodexRootKey, codexfork.Version)
+	return nil
 }
 
 func collectNewAPIPolicyRootSessionEvidence(c *gin.Context, info *relaycommon.RelayInfo) newAPIPolicyRootSessionEvidence {
@@ -623,7 +720,7 @@ func resolveNewAPIPolicyRootSessionEvidence(c *gin.Context, evidence newAPIPolic
 			// Some converted transports put the exact leaf in Session-Id. Accept
 			// the metadata root only when the remaining graph proves that the
 			// explicit ID is that same leaf.
-			if !corroboratedChild || leafID == "" || headerSession != leafID {
+			if !coherentCodexFork(evidence) && (!corroboratedChild || leafID == "" || headerSession != leafID) {
 				return "", newAPIPolicyRootSessionConflict
 			}
 		}
