@@ -90,6 +90,22 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	defer func() {
+		if d := common.WindowRenewalForRequest(c); d != nil {
+			if newAPIError == nil {
+				d.Result = "completed_without_renewal"
+				if d.Renewals > 0 {
+					d.Result = "completed_after_renewal"
+				}
+			} else {
+				d.FinalCode, d.FinalStatus = string(newAPIError.GetErrorCode()), newAPIError.StatusCode
+				if d.Result == "retry_sent" {
+					d.Result = "retry_failed"
+				}
+			}
+			if encoded, err := common.Marshal(d); err == nil {
+				logger.LogInfo(c, "window renewal: "+string(encoded))
+			}
+		}
 		if newAPIError != nil {
 			if newAPIError.GetErrorCode() == "native_compaction_required" && !c.Writer.Written() {
 				c.Header("X-Should-Retry", "false")
@@ -260,10 +276,24 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		if newAPIError.GetErrorCode() == types.ErrorCode("window_billing_refresh_required") {
+			d := common.BeginWindowRenewalDiagnostic(c, relayInfo.ChannelId)
+			switch {
+			case windowRenewed:
+				d.Result = "renewal_limit_reached"
+			case c.Writer.Written():
+				d.Result = "response_already_started"
+			case !c.GetBool("window_billing_checked"):
+				d.Result = "authorization_not_checked"
+			}
+		}
 		if !windowRenewed && c.GetBool("window_billing_checked") && !c.Writer.Written() && newAPIError.StatusCode == http.StatusBadRequest && newAPIError.GetErrorCode() == types.ErrorCode("window_billing_refresh_required") {
 			windowRenewed = true
+			renewal := common.BeginWindowRenewalDiagnostic(c, relayInfo.ChannelId)
+			renewal.Renewals, renewal.Result = 1, "renewing"
 			refreshedFinish, refreshErr := relaychannel.RefreshWindowBilling(c, relayInfo)
 			if refreshErr != nil {
+				renewal.Result = "renewal_failed"
 				statusCode := http.StatusServiceUnavailable
 				code := types.ErrorCode("window_service_unavailable")
 				var denied *relaychannel.WindowAdmissionDenied
@@ -274,6 +304,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				break
 			}
 			finishWindowBilling = refreshedFinish
+			renewal.Result = "renewed"
 			priceData, err = helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 			if err != nil {
 				newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -292,6 +323,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				}
 			}
 			c.Set("window_billing_retry_request_id", common.NewRequestId())
+			renewal.RetryRequestID, renewal.Result = c.GetString("window_billing_retry_request_id"), "retry_sent"
 			relayInfo.LastError = nil
 			retryParam.ResetRetryNextTry()
 			continue
