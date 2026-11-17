@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Input pre-consume multiplier": "入力の事前引き落とし倍率",
+    "Must be greater than 0": "0 より大きい値にしてください",
+    "Must be greater than or equal to 0": "0 以上にしてください",
+    "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.": "推定入力料金にこの倍率を掛けた額を確保し、出力トークンは推定しません。既定値は 1 で、0.5 や 1.5 などの正の小数を指定できます。最終料金は実際の使用量で精算します。リクエスト単位とタスクの料金には影響しません。",
+    "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.": "ウォレット残高と上限付き API キーの残高が両方ともこの金額を超える場合、事前引き落としを省略します。0 にすると常に事前引き落としを行います。サブスクリプションと非同期タスクでは常にクォータを確保します。",
+    "Wallet pre-consume bypass threshold (USD)": "ウォレットの事前引き落とし省略額（USD）",
     "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "ユーザーの同時実行制限はオフです。メインとバックグラウンドの両方の上限は適用されません。設定値は保持されます。",
     "Window management": "ウィンドウ管理",
     "View and manage personal session windows.": "個人のセッションウィンドウを表示・管理します。",

@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Input pre-consume multiplier": "输入预扣倍率",
+    "Must be greater than 0": "必须大于 0",
+    "Must be greater than or equal to 0": "必须大于或等于 0",
+    "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.": "按预计输入费用乘以此倍率预扣，不预估输出 token。默认为 1，支持 0.5、1.5 等正小数。最终按实际用量结算，按次和任务计费不受影响。",
+    "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.": "钱包余额和有限额的 API 令牌余额都超过此金额时，跳过预扣。设为 0 则始终预扣。订阅和异步任务始终预留额度。",
+    "Wallet pre-consume bypass threshold (USD)": "钱包免预扣门槛（美元）",
     "Original user request": "用户原始请求",
     "codex2api response": "codex2api 回传",
     "No Priority tier matched": "未匹配 Priority",

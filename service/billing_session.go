@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -289,8 +291,8 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 		return false
 	}
 
-	trustQuota := common.GetTrustQuota()
-	if trustQuota <= 0 {
+	trustQuota := operation_setting.GetQuotaSetting().TrustQuotaUSD * common.QuotaPerUnit
+	if trustQuota <= 0 || math.IsNaN(trustQuota) || math.IsInf(trustQuota, 0) {
 		return false
 	}
 
@@ -298,7 +300,7 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	tokenTrusted := s.relayInfo.TokenUnlimited
 	if !tokenTrusted {
 		tokenQuota := c.GetInt("token_quota")
-		tokenTrusted = tokenQuota > trustQuota
+		tokenTrusted = float64(tokenQuota) > trustQuota
 	}
 	if !tokenTrusted {
 		return false
@@ -306,7 +308,7 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 
 	switch s.funding.Source() {
 	case BillingSourceWallet:
-		return s.relayInfo.UserQuota > trustQuota
+		return float64(s.relayInfo.UserQuota) > trustQuota
 	case BillingSourceSubscription:
 		// 订阅不能启用信任旁路。原因：
 		// 1. PreConsumeUserSubscription 要求 amount>0 来创建预扣记录并锁定订阅

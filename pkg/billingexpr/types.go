@@ -62,6 +62,7 @@ type BillingSnapshot struct {
 	ChannelID                 int       `json:"channel_id"`
 	EstimatedPromptTokens     int       `json:"estimated_prompt_tokens"`
 	EstimatedCompletionTokens int       `json:"estimated_completion_tokens"`
+	PreConsumeMultiplier      float64   `json:"pre_consume_multiplier,omitempty"` // Reservation only; zero in older snapshots means 1.
 	EstimatedQuotaBeforeGroup float64   `json:"estimated_quota_before_group"`
 	EstimatedQuotaAfterGroup  int       `json:"estimated_quota_after_group"`
 	EstimatedTier             string    `json:"estimated_tier"`

@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Input pre-consume multiplier": "Множитель предсписания за ввод",
+    "Must be greater than 0": "Значение должно быть больше 0",
+    "Must be greater than or equal to 0": "Значение должно быть не меньше 0",
+    "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.": "Резервируется оценочная стоимость ввода, умноженная на это значение, без оценки выходных токенов. По умолчанию 1; допустимы положительные дроби, например 0,5 и 1,5. Итоговая плата зависит от фактического использования. Тарифы за запрос и за задачу не меняются.",
+    "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.": "Предсписание пропускается, если баланс кошелька и остаток лимита API-ключа превышают эту сумму. Значение 0 включает предсписание всегда. Для подписок и асинхронных задач квота резервируется всегда.",
+    "Wallet pre-consume bypass threshold (USD)": "Порог кошелька без предсписания (USD)",
     "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "Ограничение параллельных запросов отключено как для основных, так и для фоновых запросов. Сохранённые значения остаются без изменений.",
     "Window management": "Управление окнами",
     "View and manage personal session windows.": "Просмотр личных окон сеансов и управление ими.",

@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Input pre-consume multiplier": "Input pre-consume multiplier",
+    "Must be greater than 0": "Must be greater than 0",
+    "Must be greater than or equal to 0": "Must be greater than or equal to 0",
+    "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.": "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.",
+    "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.": "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.",
+    "Wallet pre-consume bypass threshold (USD)": "Wallet pre-consume bypass threshold (USD)",
     "Original user request": "Original user request",
     "codex2api response": "codex2api response",
     "No Priority tier matched": "No Priority tier matched",

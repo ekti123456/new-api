@@ -196,9 +196,11 @@ On save, the expression is validated:
 When a request arrives and the model uses `tiered_expr` billing:
 1. Loads expression from `billing_setting.GetBillingExpr()`
 2. Builds `RequestInput` (headers + body) for `param()` / `header()` functions
-3. Runs expression with estimated tokens: `RunExprWithRequest(expr, {P, C}, requestInput)`
-4. Converts output to quota: `rawCost / 1,000,000 * QuotaPerUnit`
+3. Runs the expression with locally estimated input tokens (`P` and `Len`) and zero output tokens (`C=0`). Client output limits do not affect the reservation. Disabling local token counting makes estimated input zero; cache-read/write estimates are zero.
+4. Converts the result to quota and multiplies by `quota_setting.pre_consume_multiplier` (default 1, any finite positive decimal). The multiplier scales the reservation after evaluating context-length tiers and request conditions; it does not discount the final actual-usage charge. The snapshot freezes the multiplier for channel retries; group-only retries reuse the scaled reservation. Older snapshots with no multiplier use a factor of 1.
 5. Creates `BillingSnapshot` and stores it on `RelayInfo`. Expression and request state stay frozen for settlement. An auto-group retry refreshes group-dependent fields from the selected group before the next upstream attempt. If a free initial group skipped pre-consume and the retry selects a paid group, the billing session is created before that attempt. If an existing session moves to a more expensive group, its reservation is raised to that group's estimate before sending; cheaper groups are refunded only after actual usage is settled.
+
+Wallet trust bypass uses `quota_setting.trust_quota_usd` (default 10; 0 disables bypass), converted with the configured `QuotaPerUnit`. Both the wallet and any limited API token must exceed this threshold; the wallet must still cover the estimated reservation before bypass is considered. Subscriptions and asynchronous tasks do not use the bypass. Legacy ratio pricing reserves estimated input cost times the multiplier, without the old `PreConsumedQuota` floor or output estimate. Fixed per-request and task prices are unchanged. Existing `PreConsumedQuota` values are retained only for old option clients, and are never interpreted as a multiplier.
 
 ### 4. Settlement (Actual Billing)
 

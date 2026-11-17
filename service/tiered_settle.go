@@ -130,6 +130,9 @@ func refreshTieredBillingRoute(relayInfo *relaycommon.RelayInfo, channelID int) 
 			return nil, err
 		}
 		quotaBeforeGroup = cost / 1_000_000 * snap.QuotaPerUnit
+		if snap.PreConsumeMultiplier != 0 {
+			quotaBeforeGroup *= snap.PreConsumeMultiplier
+		}
 		estimatedTier = trace.MatchedTier
 	}
 	estimatedQuotaAfterGroup := quotaBeforeGroup * groupRatio * relayInfo.WindowMultiplier()

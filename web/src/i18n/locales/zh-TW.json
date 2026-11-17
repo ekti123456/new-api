@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Input pre-consume multiplier": "輸入預扣倍率",
+    "Must be greater than 0": "必須大於 0",
+    "Must be greater than or equal to 0": "必須大於或等於 0",
+    "Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.": "按預估輸入費用乘以此倍率預扣，不預估輸出 token。預設為 1，支援 0.5、1.5 等正小數。最終按實際用量結算，按次和任務計費不受影響。",
+    "Skip pre-consumption when the wallet balance and limited API key balance both exceed this amount. Set to 0 to always pre-consume. Subscriptions and asynchronous tasks always reserve quota.": "錢包餘額和有限額的 API 權杖餘額都超過此金額時，略過預扣。設為 0 則一律預扣。訂閱和非同步任務一律預留額度。",
+    "Wallet pre-consume bypass threshold (USD)": "錢包免預扣門檻（美元）",
     "User concurrency limiting is off. Main and background limits are inactive; saved values are retained.": "使用者並行限制已關閉，主請求和背景請求均不受此並行上限限制；已設定的數值會保留。",
     "Upstream error details (redacted)": "上游錯誤詳情（已遮蔽）",
     "Error code": "錯誤碼",

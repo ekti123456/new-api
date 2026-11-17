@@ -254,13 +254,14 @@ export type ModelSettings = {
 
 export type BillingSettings = {
   QuotaForNewUser: number
-  PreConsumedQuota: number
   ReferralBaseRate: number
   ReferralUsersPerTier: number
   ReferralMaxRate: number
   TopUpLink: string
   'general_setting.docs_link': string
   'quota_setting.enable_free_model_pre_consume': boolean
+  'quota_setting.trust_quota_usd': number
+  'quota_setting.pre_consume_multiplier': number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string
