@@ -41,6 +41,9 @@ func usageBillingPathForLog(isLocalCountTokens bool, usage *dto.Usage) string {
 		return usageBillingPathOpenAI
 	case dto.BillingUsageSemanticAnthropic:
 		if usage.BillingUsage.Estimated {
+			if isLocalCountTokens {
+				return usageBillingPathLocal
+			}
 			return usageBillingPathAnthropicEstimated
 		}
 		return usageBillingPathAnthropic

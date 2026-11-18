@@ -71,9 +71,10 @@ type textQuotaSummary struct {
 // hasBillableUsage reports whether this request should incur any charge.
 // A request can carry zero tokens yet still be billable via a tool-call
 // surcharge (e.g. /v1/alpha/search returns no usage but bills one web_search
-// call), so token count alone is not sufficient to decide.
+// call). Claude reports cache input separately from prompt/completion tokens.
 func (s *textQuotaSummary) hasBillableUsage() bool {
-	return s.TotalTokens > 0 || !s.ToolCallSurchargeQuota.IsZero()
+	return s.TotalTokens > 0 || !s.ToolCallSurchargeQuota.IsZero() ||
+		(s.IsClaudeUsageSemantic && (s.CacheTokens > 0 || cacheWriteTokensTotal(*s) > 0))
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -400,7 +401,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
 	}
-	if originUsage != nil {
+	if originUsage != nil && !relayInfo.EmptyUpstreamResponse {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, billingUsage, relayInfo.GetFinalRequestRelayFormat())
 	}
 
@@ -409,7 +410,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
-	if originUsage != nil {
+	if originUsage != nil && !relayInfo.EmptyUpstreamResponse {
 		var tieredUsedVars map[string]bool
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
@@ -443,6 +444,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Audio Input 花费 %s", logger.LogQuota(common.QuotaFromDecimal(q))))
 	}
 
+	if relayInfo.EmptyUpstreamResponse {
+		// Includes fixed-price/minimum fees and pricing-error fallbacks: none may
+		// retain a reservation when the upstream produced no billable evidence.
+		summary.Quota = 0
+	}
 	if !summary.hasBillableUsage() {
 		extraContent = append(extraContent, "未取得可计费用量，本次未扣费；请结合流结束原因排查")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))

@@ -104,7 +104,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 		if claudeResponse.Type == "message_start" {
 			// message_start, 获取usage
-			if claudeResponse.Message != nil {
+			if claudeResponse.Message != nil && claudeResponse.Message.Model != "" {
 				info.UpstreamModelName = claudeResponse.Message.Model
 			}
 		} else if claudeResponse.Type == "message_delta" {
@@ -151,29 +151,51 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
-	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
-		if common.DebugEnabled {
-			common.SysLog("claude response usage is not complete, maybe upstream error")
+	// A request estimate is not evidence that the upstream processed any input.
+	// Retain real input/cache usage and any text, reasoning or tool output, but
+	// do not invent a charge for a connection that ended without either.
+	info.EmptyUpstreamResponse = !dto.HasOpenAIUsageTokens(claudeInfo.Usage) &&
+		claudeInfo.Usage.BillingUsage == nil && !claudeInfo.HasOutput &&
+		claudeInfo.ResponseText.Len() == 0 && c.GetInt("claude_web_search_requests") == 0
+	estimated := false
+	if info.EmptyUpstreamResponse {
+		if info.StreamStatus != nil {
+			info.StreamStatus.SetUsageSource("none")
+			if !claudeInfo.Done && info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
+				info.StreamStatus.RecordError("upstream stream ended without usage or output")
+			}
 		}
-		// 只补缺失字段，不整份覆盖——保留 message_start 已拿到的 cache 字段
-		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		if claudeInfo.Usage.CompletionTokens == 0 ||
-			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
-			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
+	} else if !claudeInfo.HasFinalUsage {
+		// Estimate only missing usage after actual output. In particular, a zero
+		// input count in message_start can mean a fully cached prompt.
+		if claudeInfo.ResponseText.Len() > 0 {
+			outputTokens := service.EstimateTokenByModel(info.UpstreamModelName, claudeInfo.ResponseText.String())
+			if outputTokens > claudeInfo.Usage.CompletionTokens {
+				claudeInfo.Usage.CompletionTokens = outputTokens
+				estimated = true
+			}
 		}
-		if claudeInfo.Usage.PromptTokens == 0 {
-			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+		if !claudeInfo.HasInputUsage && claudeInfo.Usage.BillingUsage == nil &&
+			claudeInfo.Usage.PromptTokens == 0 && (claudeInfo.HasOutput || claudeInfo.ResponseText.Len() > 0) && info.GetEstimatePromptTokens() > 0 {
+			claudeInfo.Usage.PromptTokens = info.GetEstimatePromptTokens()
+			estimated = true
 		}
-		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
+		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
-	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
-		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+	if claudeInfo.Usage != nil && (estimated || claudeInfo.Usage.BillingUsage == nil) {
+		billingUsage := buildMessageDeltaPatchUsage(nil, claudeInfo)
+		billingUsage.OutputTokens = claudeInfo.Usage.CompletionTokens
+		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(billingUsage)
+		if estimated && claudeInfo.Usage.BillingUsage != nil {
+			claudeInfo.Usage.BillingUsage.Estimated = true
+			common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
+			if info.StreamStatus != nil {
+				info.StreamStatus.SetUsageSource("local_estimate")
+			}
+		}
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {

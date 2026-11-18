@@ -253,70 +253,13 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	var texts = make([]string, 0)
 	var fileMeta = make([]*types.FileMeta, 0)
 
-	// system
-	if c.System != nil {
-		if c.IsStringSystem() {
-			sys := c.GetStringSystem()
-			if sys != "" {
-				texts = append(texts, sys)
-			}
-		} else {
-			systemMedia := c.ParseSystem()
-			for _, media := range systemMedia {
-				switch media.Type {
-				case "text":
-					texts = append(texts, media.GetText())
-				case "image":
-					if source := media.ToFileSource(); source != nil {
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeImage,
-							Source:   source,
-						})
-					}
-				}
-			}
-		}
-	}
+	appendClaudeTokenContent(c.System, &texts, &fileMeta)
 
 	// messages
 	for _, message := range c.Messages {
 		tokenCountMeta.MessagesCount++
 		texts = append(texts, message.Role)
-		if message.IsStringContent() {
-			content := message.GetStringContent()
-			if content != "" {
-				texts = append(texts, content)
-			}
-			continue
-		}
-
-		content, _ := message.ParseContent()
-		for _, media := range content {
-			switch media.Type {
-			case "text":
-				texts = append(texts, media.GetText())
-			case "image":
-				if source := media.ToFileSource(); source != nil {
-					fileMeta = append(fileMeta, &types.FileMeta{
-						FileType: types.FileTypeImage,
-						Source:   source,
-					})
-				}
-			case "tool_use":
-				if media.Name != "" {
-					texts = append(texts, media.Name)
-				}
-				if media.Input != nil {
-					b, _ := kitutil.Marshal(media.Input)
-					texts = append(texts, string(b))
-				}
-			case "tool_result":
-				if media.Content != nil {
-					b, _ := kitutil.Marshal(media.Content)
-					texts = append(texts, string(b))
-				}
-			}
-		}
+		appendClaudeTokenContent(message.Content, &texts, &fileMeta)
 	}
 
 	// tools
@@ -355,6 +298,100 @@ func (c *ClaudeRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	tokenCountMeta.CombineText = strings.Join(texts, "\n")
 	tokenCountMeta.Files = fileMeta
 	return &tokenCountMeta
+}
+
+// appendClaudeTokenContent keeps structured media out of text token estimation,
+// including media nested in tool results. Walk decoded values directly: JSON
+// round trips would copy multi-megabyte base64 payloads just to classify them.
+func appendClaudeTokenContent(content any, texts *[]string, files *[]*types.FileMeta) {
+	stack := []any{content}
+	for len(stack) > 0 {
+		item := stack[len(stack)-1]
+		stack[len(stack)-1] = nil
+		stack = stack[:len(stack)-1]
+		var media ClaudeMediaMessage
+		switch value := item.(type) {
+		case string:
+			if value != "" {
+				*texts = append(*texts, value)
+			}
+			continue
+		case []any:
+			for i := len(value) - 1; i >= 0; i-- {
+				stack = append(stack, value[i])
+			}
+			continue
+		case []ClaudeMediaMessage:
+			for i := len(value) - 1; i >= 0; i-- {
+				stack = append(stack, &value[i])
+			}
+			continue
+		case []*ClaudeMediaMessage:
+			for i := len(value) - 1; i >= 0; i-- {
+				stack = append(stack, value[i])
+			}
+			continue
+		case json.RawMessage:
+			var decoded any
+			if kitutil.Unmarshal(value, &decoded) == nil {
+				stack = append(stack, decoded)
+			}
+			continue
+		case ClaudeMediaMessage:
+			media = value
+		case *ClaudeMediaMessage:
+			if value == nil {
+				continue
+			}
+			media = *value
+		case map[string]any:
+			media.Type, _ = value["type"].(string)
+			if text, ok := value["text"].(string); ok {
+				media.Text = &text
+			}
+			media.Name, _ = value["name"].(string)
+			media.Input, media.Content = value["input"], value["content"]
+			switch source := value["source"].(type) {
+			case *ClaudeMessageSource:
+				media.Source = source
+			case ClaudeMessageSource:
+				media.Source = &source
+			case map[string]any:
+				media.Source = &ClaudeMessageSource{Data: source["data"]}
+				media.Source.Type, _ = source["type"].(string)
+				media.Source.MediaType, _ = source["media_type"].(string)
+				media.Source.Url, _ = source["url"].(string)
+			}
+		default:
+			continue
+		}
+		switch media.Type {
+		case "text":
+			*texts = append(*texts, media.GetText())
+		case "image", "document":
+			if media.Type == "document" && media.Source != nil && media.Source.Type == "text" {
+				stack = append(stack, media.Source.Data)
+				continue
+			}
+			if source := media.ToFileSource(); source != nil {
+				fileType := types.FileTypeImage
+				if media.Type == "document" {
+					fileType = types.FileTypeFile
+				}
+				*files = append(*files, &types.FileMeta{FileType: fileType, Source: source})
+			}
+		case "tool_use":
+			if media.Name != "" {
+				*texts = append(*texts, media.Name)
+			}
+			if media.Input != nil {
+				b, _ := kitutil.Marshal(media.Input)
+				*texts = append(*texts, string(b))
+			}
+		case "tool_result":
+			stack = append(stack, media.Content)
+		}
+	}
 }
 
 func (c *ClaudeRequest) IsStream(ctx *http.Request) bool {

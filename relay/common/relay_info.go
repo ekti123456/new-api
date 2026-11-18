@@ -88,6 +88,9 @@ type UpstreamFirstResponseTiming struct {
 }
 
 type RelayInfo struct {
+	// EmptyUpstreamResponse marks a stream with neither measured usage nor output.
+	// Its reservation must be released rather than settled as estimated usage.
+	EmptyUpstreamResponse      bool
 	WindowBilling              *WindowBillingGrant
 	TokenId                    int
 	TokenKey                   string

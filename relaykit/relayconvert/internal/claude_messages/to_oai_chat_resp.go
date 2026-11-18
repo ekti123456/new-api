@@ -19,6 +19,11 @@ type ClaudeResponseInfo struct {
 	ResponseText strings.Builder
 	Usage        *dto.Usage
 	Done         bool
+	// HasOutput includes tool calls and opaque reasoning blocks, not just text.
+	HasOutput bool
+	// Zero usage is still reported usage, and must not become a request estimate.
+	HasInputUsage bool
+	HasFinalUsage bool
 }
 
 func StopReasonClaudeToOpenAI(reason string) string {
@@ -336,6 +341,21 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}
+	var output *dto.ClaudeMediaMessage
+	switch claudeResponse.Type {
+	case "content_block_start":
+		output = claudeResponse.ContentBlock
+	case "content_block_delta":
+		output = claudeResponse.Delta
+	}
+	if output != nil && !claudeInfo.HasOutput {
+		claudeInfo.HasOutput = output.GetText() != "" ||
+			(output.Thinking != nil && *output.Thinking != "") ||
+			(output.PartialJson != nil && *output.PartialJson != "") ||
+			output.Signature != "" ||
+			(claudeResponse.Type == "content_block_start" && output.Type != "" &&
+				output.Type != "text" && output.Type != "thinking")
+	}
 	if claudeResponse.Type == "message_start" {
 		if claudeResponse.Message != nil {
 			claudeInfo.ResponseId = claudeResponse.Message.Id
@@ -343,6 +363,7 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 		}
 
 		if claudeResponse.Message != nil && claudeResponse.Message.Usage != nil {
+			claudeInfo.HasInputUsage = true
 			claudeInfo.Usage.PromptTokens = claudeResponse.Message.Usage.InputTokens
 			claudeInfo.Usage.UsageSemantic = "anthropic"
 			claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Message.Usage.CacheReadInputTokens
@@ -360,9 +381,13 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 			if claudeResponse.Delta.Thinking != nil {
 				claudeInfo.ResponseText.WriteString(*claudeResponse.Delta.Thinking)
 			}
+			if claudeResponse.Delta.PartialJson != nil {
+				claudeInfo.ResponseText.WriteString(*claudeResponse.Delta.PartialJson)
+			}
 		}
 	} else if claudeResponse.Type == "message_delta" {
 		if claudeResponse.Usage != nil {
+			claudeInfo.HasFinalUsage = true
 			claudeInfo.Usage.UsageSemantic = "anthropic"
 			if claudeResponse.Usage.InputTokens > 0 {
 				claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
@@ -379,15 +404,19 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 			if cacheCreation1h := claudeResponse.Usage.GetCacheCreation1hTokens(); cacheCreation1h > 0 {
 				claudeInfo.Usage.ClaudeCacheCreation1hTokens = cacheCreation1h
 			}
-			if claudeResponse.Usage.OutputTokens > 0 {
-				claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-			}
+			claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
 			claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 			claudeInfo.Usage.BillingUsage = claudeBillingUsageFromSemanticUsage(claudeInfo.Usage)
 		}
 
 		claudeInfo.Done = true
 	} else if claudeResponse.Type == "content_block_start" {
+		if claudeResponse.ContentBlock != nil {
+			claudeInfo.ResponseText.WriteString(claudeResponse.ContentBlock.GetText())
+			if claudeResponse.ContentBlock.Thinking != nil {
+				claudeInfo.ResponseText.WriteString(*claudeResponse.ContentBlock.Thinking)
+			}
+		}
 	} else {
 		return false
 	}
