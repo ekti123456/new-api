@@ -634,6 +634,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               modelName={modelInfo.name}
               actualModel={modelInfo.actualModel}
               responseModel={modelInfo.responseModel}
+              billing={parseLogOther(log.other) ?? undefined}
+              isAdmin={isAdmin}
             />
           </div>
         )

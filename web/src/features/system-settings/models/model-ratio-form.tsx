@@ -66,6 +66,7 @@ type ModelRatioFormProps = {
   modelSelection?: RowSelectionState
   onModelSelectionChange?: OnChangeFn<RowSelectionState>
   onSyncSelected?: (names: string[]) => void
+  onSyncFastSelected?: (names: string[]) => void
   form: UseFormReturn<ModelFormValues>
   savedValues: ModelFormValues
   onSave: (values: ModelFormValues) => Promise<void>
@@ -179,6 +180,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   modelSelection,
   onModelSelectionChange,
   onSyncSelected,
+  onSyncFastSelected,
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
   const isUnsetVariant = variant === 'unset'
@@ -298,6 +300,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               modelSelection={modelSelection}
               onModelSelectionChange={onModelSelectionChange}
               onSyncSelected={onSyncSelected}
+              onSyncFastSelected={onSyncFastSelected}
               candidateModelsLoading={
                 isUnsetVariant && enabledModelsQuery.isLoading
               }

@@ -25,6 +25,27 @@ import { I18nextProvider, initReactI18next } from 'react-i18next'
 
 import { ModelBadge } from '../model-badge'
 
+test('requested acceleration is shown below the model badge', () => {
+  const html = renderToStaticMarkup(
+    <ModelBadge
+      modelName='gpt-6.2-sol'
+      isAdmin
+      billing={{
+        admin_info: {
+          billing_request: {
+            source: 'incoming_json',
+            content_type: 'application/json',
+            body_state: 'json',
+            service_tier: { state: 'string', value: 'ultrafast' },
+          },
+        },
+      }}
+    />
+  )
+  assert.ok(html.includes('Ultrafast'))
+  assert.ok(html.indexOf('gpt-6.2-sol') < html.indexOf('Ultrafast'))
+})
+
 test('a reported model appears after the requested badge with an arrow, even when names match', async () => {
   const i18n = createInstance()
   await i18n.use(initReactI18next).init({

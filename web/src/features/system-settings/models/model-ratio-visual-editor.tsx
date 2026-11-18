@@ -70,6 +70,7 @@ type ModelRatioVisualEditorProps = {
   modelSelection?: RowSelectionState
   onModelSelectionChange?: OnChangeFn<RowSelectionState>
   onSyncSelected?: (names: string[]) => void
+  onSyncFastSelected?: (names: string[]) => void
   savedModelPrice: string
   savedModelRatio: string
   savedCacheRatio: string
@@ -138,6 +139,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     modelSelection,
     onModelSelectionChange,
     onSyncSelected,
+    onSyncFastSelected,
   },
   ref
 ) {
@@ -730,6 +732,15 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     })}
                   </Button>
                 )}
+                {filterMode !== 'unset' && onSyncFastSelected && (
+                  <Button
+                    variant='outline'
+                    disabled={selectedNames.length === 0 || isSaving}
+                    onClick={() => onSyncFastSelected?.(selectedNames)}
+                  >
+                    {t('Sync Fast rules')}
+                  </Button>
+                )}
                 {filterMode !== 'unset' && (
                   <Button onClick={handleAdd}>
                     <Plus data-icon='inline-start' />
@@ -882,6 +893,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.modelSelection === nextProps.modelSelection &&
       prevProps.onModelSelectionChange === nextProps.onModelSelectionChange &&
       prevProps.onSyncSelected === nextProps.onSyncSelected &&
+      prevProps.onSyncFastSelected === nextProps.onSyncFastSelected &&
       prevProps.onChange === nextProps.onChange &&
       prevProps.onSave === nextProps.onSave &&
       prevProps.isSaving === nextProps.isSaving

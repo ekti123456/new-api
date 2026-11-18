@@ -309,7 +309,7 @@ export function OfficialPriceSync(props: OfficialPriceSyncProps) {
                   'Prices: input / output / cache read / cache write. Review the matches and save; manually chosen sources are selected automatically.'
                 )
               : t(
-                  'Prices: input / output / cache read / cache write. A dash means not provided. Flat-price imports preserve existing optional prices; expression imports replace the full pricing rule. Select a row after choosing its source.'
+                  'Prices: input / output / cache read / cache write. Existing standalone request rules are preserved. Select a row after choosing its source.'
                 )}
           </p>
           <div className='max-h-[60vh] overflow-auto rounded-md border'>

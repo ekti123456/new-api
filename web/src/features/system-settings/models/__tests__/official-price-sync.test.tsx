@@ -40,6 +40,7 @@ for (const key of [
   'localStorage',
   'ResizeObserver',
   'Document',
+  'matchMedia',
 ] as const) {
   Object.defineProperty(globalThis, key, {
     configurable: true,
@@ -452,7 +453,26 @@ test('pricing tabs share selection and sync both lists together from the list to
       assert.ok(row)
       row.click()
     }
+    const fastSyncButton = () =>
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === 'Sync Fast rules'
+      )
+    assert.equal(fastSyncButton()?.disabled, true)
     await act(async () => selectRow())
+    assert.equal(fastSyncButton()?.disabled, false)
+    await act(async () => fastSyncButton()?.click())
+    const fastDialog = document.querySelector('[role="dialog"]')
+    assert.ok(fastDialog?.textContent?.includes('Fast / Priority ×2'))
+    assert.ok(
+      fastDialog?.textContent?.includes('Skipped: not an OpenAI text model')
+    )
+    const closeFast =
+      fastDialog?.querySelector<HTMLButtonElement>('[aria-label="Close"]') ??
+      [
+        ...(fastDialog?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+      ].find((button) => button.textContent === 'Close')
+    assert.ok(closeFast)
+    await act(async () => closeFast.click())
     const unsetTab = [
       ...tabs.querySelectorAll<HTMLElement>('[role="tab"]'),
     ].find((tab) => tab.textContent === 'Unset price models')

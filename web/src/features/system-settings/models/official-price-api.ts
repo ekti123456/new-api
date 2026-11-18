@@ -52,10 +52,33 @@ export async function getPricingOptions(): Promise<PricingOptions> {
   const values = Object.fromEntries(
     response.data.map(({ key, value }) => [key, value])
   )
-  const result = Object.fromEntries(
+  const result: PricingOptions = Object.fromEntries(
     pricingKeys.map((key) => [key, values[key] ?? '{}'])
-  ) as PricingOptions
+  ) as Record<(typeof pricingKeys)[number], string>
   parsePricingOptions(result)
+  if (values.CompletionRatioMeta) {
+    const metadata: unknown = JSON.parse(values.CompletionRatioMeta)
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      throw new Error('Invalid pricing configuration')
+    }
+    const parsed: NonNullable<PricingOptions['completionRatioMeta']> = {}
+    for (const [name, value] of Object.entries(metadata)) {
+      if (
+        !value ||
+        typeof value !== 'object' ||
+        !('ratio' in value) ||
+        typeof value.ratio !== 'number' ||
+        !Number.isFinite(value.ratio) ||
+        value.ratio < 0 ||
+        !('locked' in value) ||
+        typeof value.locked !== 'boolean'
+      ) {
+        throw new Error('Invalid pricing configuration')
+      }
+      parsed[name] = { ratio: value.ratio, locked: value.locked }
+    }
+    result.completionRatioMeta = parsed
+  }
   return result
 }
 
@@ -63,18 +86,34 @@ export async function saveOfficialPrices(
   snapshot: PricingOptions,
   selections: PriceSelection[]
 ): Promise<void> {
+  return saveSelectedPricing(
+    snapshot,
+    selections.map(({ name }) => name),
+    (current) => importOfficialPrices(current, selections)
+  )
+}
+
+export async function saveSelectedPricing(
+  snapshot: PricingOptions,
+  names: string[],
+  update: (current: PricingOptions) => PricingOptions
+): Promise<void> {
   // Re-read before merging, preserving unrelated edits made since the preview.
   const current = await getPricingOptions()
   const before = parsePricingOptions(snapshot)
   const latest = parsePricingOptions(current)
-  for (const { name } of selections) {
-    if (pricingKeys.some((key) => before[key][name] !== latest[key][name])) {
+  for (const name of names) {
+    if (
+      pricingKeys.some((key) => before[key][name] !== latest[key][name]) ||
+      JSON.stringify(snapshot.completionRatioMeta?.[name]) !==
+        JSON.stringify(current.completionRatioMeta?.[name])
+    ) {
       throw new Error(
         'Pricing changed since preview. Fetch prices again before saving.'
       )
     }
   }
-  const updated = importOfficialPrices(current, selections)
+  const updated = update(current)
   const changed = pricingKeys.filter((key) => updated[key] !== current[key])
   if (changed.length === 0) return
   const response = await api.post<{ success: boolean; message?: string }>(

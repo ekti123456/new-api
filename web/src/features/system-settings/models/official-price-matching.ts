@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  preservePricingRequestRules,
+  ratioPricingExpression,
+  splitPricingRules,
+} from './pricing-request-rules'
+
 export type OfficialPrice = {
   provider: string
   model: string
@@ -46,7 +52,9 @@ export const pricingKeys = [
   'billing_setting.billing_expr',
 ] as const
 export type PricingKey = (typeof pricingKeys)[number]
-export type PricingOptions = Record<PricingKey, string>
+export type PricingOptions = Record<PricingKey, string> & {
+  completionRatioMeta?: Record<string, { ratio: number; locked: boolean }>
+}
 export type PriceSelection = { name: string; price: OfficialPrice }
 export type OfficialPriceRow = {
   name: string
@@ -171,6 +179,13 @@ export function importOfficialPrices(
     if (row.blocked) {
       throw new Error('Edit fixed or expression pricing in the model editor')
     }
+    const previous =
+      maps['billing_setting.billing_mode'][name] === 'tiered_expr'
+        ? String(maps['billing_setting.billing_expr'][name] ?? '')
+        : ''
+    const previousRules = previous
+      ? splitPricingRules(previous).requestRuleExpr
+      : ''
     if (price.expression) {
       // Expression coefficients are already prices per 1M tokens; copy them
       // verbatim. Replacing selected pricing also removes conflicting ratios.
@@ -181,7 +196,10 @@ export function importOfficialPrices(
         }
       }
       maps['billing_setting.billing_mode'][name] = 'tiered_expr'
-      maps['billing_setting.billing_expr'][name] = price.expression
+      maps['billing_setting.billing_expr'][name] = preservePricingRequestRules(
+        previous,
+        price.expression
+      )
       changed.add('billing_setting.billing_mode')
       changed.add('billing_setting.billing_expr')
       continue
@@ -222,6 +240,17 @@ export function importOfficialPrices(
         maps[key][name] = cost[field] / cost.input
         changed.add(key)
       }
+    }
+    if (previousRules) {
+      const base = ratioPricingExpression(maps, name)
+      if (!base) throw new Error('Invalid pricing configuration')
+      maps['billing_setting.billing_mode'][name] = 'tiered_expr'
+      maps['billing_setting.billing_expr'][name] = preservePricingRequestRules(
+        previous,
+        base
+      )
+      changed.add('billing_setting.billing_mode')
+      changed.add('billing_setting.billing_expr')
     }
   }
   const result = { ...options }

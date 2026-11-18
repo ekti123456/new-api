@@ -28,11 +28,16 @@ import {
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
+import type { LogOtherData } from '../types'
+import { ServiceTierBadge } from './service-tier-badge'
+
 interface ModelBadgeProps {
   modelName: string
   actualModel?: string
   responseModel?: string
   className?: string
+  billing?: LogOtherData
+  isAdmin?: boolean
 }
 
 interface ModelProvider {
@@ -203,6 +208,7 @@ export function ModelBadge(props: ModelBadgeProps) {
   return (
     <div className='flex min-w-0 flex-col items-start gap-0.5'>
       <ModelBadgeMapping {...props} />
+      <ServiceTierBadge other={props.billing} isAdmin={props.isAdmin} />
       {responseModel && (
         <span
           className='text-muted-foreground max-w-full truncate text-[11px]'

@@ -247,6 +247,14 @@ codex2api 档位回传（main 和 sever）：绑定目标和 API Key 必须匹�
 
 ## Key Design Decisions
 
+### 手动同步 Fast 规则
+
+模型价格页的「同步 Fast 规则」只处理勾选的 OpenAI 文本模型，按管理员固定策略生成 `service_tier == fast` 与 `priority` 各 2 倍、`ultrafast` 6 倍。这不是官方实时价格或促销价格同步，不读取 models.dev，不添加 Flex 或其他减速折扣。三个条件互斥，重复同步会替换已有简单加速规则，不叠乘。基础价、上下文阶梯及其他独立请求条件保留；已有 Flex 规则也保持原样。
+
+按 token 定价转为表达式时使用服务端返回的有效输出倍率，保留缓存、图片、音频的已配置价格和零值。按次定价、未定价、非 OpenAI 模型及无法安全拆分的复合加速规则在预览中标明跳过；不猜价。后续同步官方价格也保留独立请求规则。保存前复查选中模型配置，通过现有原子价格保存接口写入，过期预览不覆盖新配置。
+
+使用日志的模型名下展示已记录的请求档位；只有上游返回的默认 Fast 不作为用户请求档位。管理员优先使用原始请求诊断，普通用户或旧日志仅在存在明确命中的档位规则时展示，并标注来源为计费规则。缺少记录时不推测。不修改预扣或结算的原始请求快照规则。
+
 ### Token Normalization via AST Introspection
 
 Different upstream APIs report `prompt_tokens` differently:

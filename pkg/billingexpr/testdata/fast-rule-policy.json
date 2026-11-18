@@ -1,0 +1,4 @@
+{
+  "base": "len > 272000 ? tier(\"long\", p * 4 + c * 15 + cr * 0.2) : tier(\"base\", p * 2 + c * 10 + cr * 0.1)",
+  "expression": "(len > 272000 ? tier(\"long\", p * 4 + c * 15 + cr * 0.2) : tier(\"base\", p * 2 + c * 10 + cr * 0.1)) * (param(\"service_tier\") == \"fast\" ? 2 : 1) * (param(\"service_tier\") == \"priority\" ? 2 : 1) * (param(\"service_tier\") == \"ultrafast\" ? 6 : 1)"
+}

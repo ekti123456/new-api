@@ -40,6 +40,7 @@ import { SettingsPageTitleStatusPortal } from '../components/settings-page-conte
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { positiveIntegerSchema } from '../utils/numeric-field'
+import { FastRuleSyncPanel } from './fast-rule-sync-panel'
 import { GroupRatioForm } from './group-ratio-form'
 import { ModelRatioForm } from './model-ratio-form'
 import { OfficialPriceSync } from './official-price-sync'
@@ -175,6 +176,7 @@ export function RatioSettingsCard({
   const [modelSelection, setModelSelection] = useState<RowSelectionState>({})
   const [syncModels, setSyncModels] = useState<string[] | null>(null)
   const [syncSaving, setSyncSaving] = useState(false)
+  const [fastModels, setFastModels] = useState<string[] | null>(null)
 
   const resetMutation = useMutation({
     mutationFn: resetModelRatios,
@@ -444,6 +446,13 @@ export function RatioSettingsCard({
           modelSelection={modelSelection}
           onModelSelectionChange={setModelSelection}
           onSyncSelected={setSyncModels}
+          onSyncFastSelected={(names) => {
+            if (modelForm.formState.isDirty) {
+              toast.error(t('Save model price changes first'))
+              return
+            }
+            setFastModels(names)
+          }}
         />
       )
     }
@@ -542,6 +551,38 @@ export function RatioSettingsCard({
         handleConfirm={handleConfirmReset}
         confirmText={t('Reset')}
       />
+      <Dialog
+        open={fastModels !== null}
+        onOpenChange={(open) => {
+          if (!open && !syncSaving) setFastModels(null)
+        }}
+      >
+        <DialogContent showCloseButton={!syncSaving}>
+          <DialogHeader>
+            <DialogTitle>{t('Sync Fast rules')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'Update acceleration rules for selected models. Keep base prices and other rules.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {fastModels !== null && (
+            <FastRuleSyncPanel
+              modelNames={fastModels}
+              onSavingChange={setSyncSaving}
+              onSaved={(names) => {
+                setSyncSaving(false)
+                setFastModels(null)
+                setModelSelection((previous) => {
+                  const next = { ...previous }
+                  for (const name of names) delete next[name]
+                  return next
+                })
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
