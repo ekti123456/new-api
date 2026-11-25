@@ -18,6 +18,33 @@ For commercial licensing, please contact support@quantumnous.com
 */
 export type SystemInstanceStatus = 'online' | 'stale'
 
+export type ResponsesWebSocketSnapshot = {
+  node: string
+  started_at: number
+  connections: {
+    current: number
+    max_connections: number
+    max_client_handshakes: number
+    max_handshakes: number
+    peak: number
+    client_handshakes: number
+    waiting_first: number
+    active: number
+    idle: number
+    closing: number
+    upstream_handshakes: number
+    upstream_connections: number
+    opened: number
+    released: number
+    dial_attempts: number
+    dial_errors: number
+    dial_canceled: number
+    draining: boolean
+    rejections: Record<string, number>
+    release_reasons: Record<string, number>
+  }
+}
+
 export type SystemInstanceInfo = {
   schema_version?: number
   node?: {

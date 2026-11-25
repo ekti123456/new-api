@@ -11,12 +11,13 @@ import (
 )
 
 type RetryParam struct {
-	Ctx          *gin.Context
-	TokenGroup   string
-	ModelName    string
-	RequestPath  string
-	Retry        *int
-	resetNextTry bool
+	Ctx            *gin.Context
+	TokenGroup     string
+	ModelName      string
+	RequestPath    string
+	Retry          *int
+	FullWSChannels map[int]bool
+	resetNextTry   bool
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -85,8 +86,19 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
-
-	if param.TokenGroup == "auto" {
+	options := model.ChannelRoutingOptions{
+		UserAgentOnly:      common.GetContextKeyBool(param.Ctx, constant.ContextKeyChannelAffinityUserAgentRouted),
+		ResponsesWebSocket: param.Ctx.GetBool("responses_websocket"),
+		FullWSChannels:     param.FullWSChannels,
+	}
+	if len(param.FullWSChannels) > 0 && selectGroup == "auto" && !common.GetContextKeyBool(param.Ctx, constant.ContextKeyTokenCrossGroupRetry) {
+		// Capacity fallback stays in the admitted group unless the token permits a group change.
+		selectGroup = common.GetContextKeyString(param.Ctx, constant.ContextKeyAutoGroup)
+		if selectGroup == "" {
+			return nil, selectGroup, nil
+		}
+	}
+	if selectGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
 		if len(autoGroups) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
@@ -115,7 +127,11 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannelWithRoutingMode(autoGroup, param.ModelName, priorityRetry, param.RequestPath, common.GetContextKeyBool(param.Ctx, constant.ContextKeyChannelAffinityUserAgentRouted), param.Ctx.GetBool("responses_websocket"))
+			var selectionErr error
+			channel, selectionErr = options.SelectChannel(autoGroup, param.ModelName, priorityRetry, param.RequestPath)
+			if selectionErr != nil && len(param.FullWSChannels) > 0 {
+				return nil, autoGroup, selectionErr
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -153,9 +169,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelWithRoutingMode(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, common.GetContextKeyBool(param.Ctx, constant.ContextKeyChannelAffinityUserAgentRouted), param.Ctx.GetBool("responses_websocket"))
+		channel, err = options.SelectChannel(selectGroup, param.ModelName, param.GetRetry(), param.RequestPath)
 		if err != nil {
-			return nil, param.TokenGroup, err
+			return nil, selectGroup, err
 		}
 	}
 	return channel, selectGroup, nil

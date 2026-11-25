@@ -1,12 +1,14 @@
 package relay
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -16,12 +18,17 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	info.RuntimeHeadersOverride = nil
+	info.UseRuntimeHeadersOverride = false
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
 		!common.IsResponsesCompactAPIType(info.ApiType) {
 		return types.NewErrorWithStatusCode(
@@ -90,6 +97,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
+		switch info.ChannelType {
+		case constant.ChannelTypeOpenAI, constant.ChannelTypeNewAPI, constant.ChannelTypeSub2API:
+			if len(info.ParamOverride) != 0 {
+				if err := relaycommon.ApplyRawProtocolHeaderPassthrough(info, operation_setting.CodexCLIRequestHeaders(), storage.Bytes); err != nil {
+					return newAPIErrorFromParamOverride(err)
+				}
+			}
+		}
 		requestBody = common.ReaderOnly(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
@@ -110,7 +125,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 		// apply param override
 		if len(info.ParamOverride) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+			jsonData, err = applyResponsesHTTPParamOverrides(jsonData, convertedRequest, info)
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
@@ -177,6 +192,38 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
+}
+
+// A downstream gateway may translate this HTTP request to a shared WebSocket.
+// Keep the client's choice of operation through channel overrides on that hop.
+func applyResponsesHTTPParamOverrides(body []byte, converted any, info *relaycommon.RelayInfo) ([]byte, error) {
+	out, err := relaycommon.ApplyParamOverrideWithRelayInfo(body, info)
+	if err != nil || info.RelayMode != relayconstant.RelayModeResponses {
+		return out, err
+	}
+	if _, explicit := info.ParamOverride["generate"]; !explicit && info.ParamOverride["operations"] == nil {
+		return out, nil
+	}
+	var generate *bool
+	switch r := converted.(type) {
+	case dto.OpenAIResponsesRequest:
+		generate = r.Generate
+	case *dto.OpenAIResponsesRequest:
+		generate = r.Generate
+	default:
+		return out, nil // The adaptor produced another provider's request schema.
+	}
+	if generate == nil {
+		if !bytes.Contains(out, []byte(`"generate"`)) {
+			return out, nil
+		}
+		return sjson.DeleteBytes(out, "generate")
+	}
+	v := gjson.GetBytes(out, "generate")
+	if v.Type == gjson.True && *generate || v.Type == gjson.False && !*generate {
+		return out, nil
+	}
+	return sjson.SetBytes(out, "generate", *generate)
 }
 
 func ConsumeResponsesQuota(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage) {

@@ -35,7 +35,6 @@ import (
 )
 
 const responsesWSEventTypeResponseCreate = "response.create"
-const responsesWSWriteTimeout = 30 * time.Second
 
 // ResponsesWSRequestRunner executes the existing authentication and rate-limit
 // middleware around one complete request, without a second HTTP connection.
@@ -81,16 +80,19 @@ type responsesWSControl struct {
 // Only the request worker reads or changes billing state. Socket readers pass
 // bounded messages to it; cancellation never performs an independent refund.
 type responsesWSCallState struct {
-	inbox      chan responsesWSMessage
-	controls   chan responsesWSControl
-	done       chan struct{}
-	settling   bool // guarded by session.stateMu
-	closeAfter bool
+	inbox       chan responsesWSMessage
+	controls    chan responsesWSControl
+	done        chan struct{}
+	settling    bool // guarded by session.stateMu
+	closeAfter  bool
+	closeReason string
 }
 
 type responsesWSSession struct {
 	ctx            context.Context
-	cancel         context.CancelFunc
+	lease          *wsmanager.ResponsesSession
+	socketClose    sync.Once
+	writeTimeout   time.Duration
 	client         *websocket.Conn
 	runner         ResponsesWSRequestRunner
 	request        *http.Request
@@ -119,20 +121,33 @@ type responsesWSSession struct {
 	lockedPolicy    *relaychannel.NewAPIPolicyConnection
 }
 
-func ResponsesWebSocketHelper(c *gin.Context, client *websocket.Conn, runner ResponsesWSRequestRunner) *types.NewAPIError {
-	ctx, cancel := context.WithCancel(c.Request.Context())
-	s := &responsesWSSession{ctx: ctx, cancel: cancel, client: client, runner: runner,
+func ResponsesWebSocketHelper(c *gin.Context, client *websocket.Conn, runner ResponsesWSRequestRunner, admitted ...*wsmanager.ResponsesSession) *types.NewAPIError {
+	var lease *wsmanager.ResponsesSession
+	if len(admitted) > 0 {
+		lease = admitted[0]
+	}
+	if lease == nil {
+		var err error
+		lease, err = wsmanager.LocalResponses.Open(c.Request.Context(), c.GetInt("id"))
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+		}
+		defer lease.Release()
+	}
+	cfg := lease.Settings()
+	ctx := common.WithRequestBodyLimitMiB(lease.Context(), cfg.ClientMessageMiB)
+	s := &responsesWSSession{ctx: ctx, lease: lease, writeTimeout: cfg.WriteTimeout(), client: client, runner: runner,
 		request: c.Request.Clone(ctx), requestID: c.GetString(common.RequestIdKey)}
 	if s.requestID == "" {
 		s.requestID = common.NewRequestId()
 	}
-	maxMB := appconstant.MaxRequestBodyMB
-	if maxMB <= 0 {
-		maxMB = 128
-	}
-	client.SetReadLimit(int64(maxMB) << 20)
+	client.SetReadLimit(int64(common.RequestBodyLimitMiB(ctx)) << 20)
+	stopClose := context.AfterFunc(s.ctx, s.closeSockets)
+	lease.Upgraded()
 	defer func() {
-		s.shutdown()
+		stopClose()
+		lease.Close("client_closed")
+		s.closeSockets()
 		s.workers.Wait()
 	}()
 
@@ -167,6 +182,9 @@ func ResponsesWebSocketHelper(c *gin.Context, client *websocket.Conn, runner Res
 		}
 		state := &responsesWSCallState{inbox: make(chan responsesWSMessage), controls: make(chan responsesWSControl, 1), done: make(chan struct{})}
 		if !s.tryReserveCurrent(state) {
+			if s.ctx.Err() != nil {
+				return nil
+			}
 			s.sendError(envelope.EventID, streamID, types.NewErrorWithStatusCode(errors.New("another response.create is already in progress on this websocket connection"), types.ErrorCodeInvalidRequest, http.StatusConflict, types.ErrOptionWithSkipRetry()))
 			continue
 		}
@@ -194,19 +212,24 @@ func (s *responsesWSSession) runRequest(state *responsesWSCallState, message []b
 		s.clientWriteMu.Lock()
 		s.stateMu.Lock()
 		if outgoing != nil {
-			if err := s.client.SetWriteDeadline(time.Now().Add(responsesWSWriteTimeout)); err != nil {
+			if err := s.client.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
 				state.closeAfter = true
 			} else if err := s.client.WriteMessage(outgoing.kind, outgoing.body); err != nil {
 				state.closeAfter = true
 			}
 		}
 		s.current = nil
+		if state.closeAfter {
+			if state.closeReason == "" {
+				state.closeReason = "transport_error"
+			}
+			s.lease.Close(state.closeReason)
+		} else {
+			s.lease.EndTurn()
+		}
 		close(state.done)
 		s.stateMu.Unlock()
 		s.clientWriteMu.Unlock()
-		if state.closeAfter {
-			s.shutdown()
-		}
 	}()
 	request := s.request.Clone(s.ctx)
 	requestBody := create.Body
@@ -226,6 +249,7 @@ func (s *responsesWSSession) runRequest(state *responsesWSCallState, message []b
 	})
 	if apiErr != nil && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
 		state.closeAfter = true
+		state.closeReason = "authorization"
 	}
 }
 
@@ -305,7 +329,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 	} else {
 		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
-		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
+		for retry.GetRetry()+len(retry.FullWSChannels) <= common.RetryTimes {
 			common.ClearCodexUpstreamError(c)
 			common.ClearCodexDispatchDiagnostic(c)
 			var channel *appmodel.Channel
@@ -328,12 +352,18 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				}
 				billingPrepared = true
 			} else {
+				if len(retry.FullWSChannels) > 0 {
+					finishWindowBilling, apiErr = prepareResponsesWSWindow(c, info)
+					if apiErr != nil {
+						return apiErr
+					}
+				}
 				info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 				if apiErr = service.PrepareTieredBillingForSelectedGroup(c, info); apiErr != nil {
 					return apiErr
 				}
 			}
-			info.RetryIndex = retry.GetRetry()
+			info.RetryIndex = retry.GetRetry() + len(retry.FullWSChannels)
 			var payload []byte
 			payload, apiErr = buildResponsesWSCreatePayload(c, info, create.Request, create.Generate, create.StreamID)
 			if apiErr != nil {
@@ -341,19 +371,40 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			}
 			adaptor := GetAdaptor(info.ApiType)
 			adaptor.Init(info)
-			target, dialErr := relaychannel.DoWssRequest(adaptor, c, info, nil)
+			if limitErr := s.lease.BeginDial(channel.Id); limitErr != nil {
+				apiErr = types.NewErrorWithStatusCode(limitErr, types.ErrorCodeDoRequestFailed, http.StatusTooManyRequests)
+				if errors.Is(limitErr, wsmanager.ErrChannelLimit) && service.ShouldRetryRelayError(c, apiErr, common.RetryTimes-info.RetryIndex) {
+					// No upstream frame was sent. Keep this priority eligible for a peer,
+					// and spend one retry without penalizing the full channel's health.
+					if retry.FullWSChannels == nil {
+						retry.FullWSChannels = make(map[int]bool)
+					}
+					retry.FullWSChannels[channel.Id] = true
+					continue
+				}
+				types.ErrOptionWithSkipRetry()(apiErr)
+				return apiErr
+			}
+			handshakeTimeout := time.Duration(s.lease.Settings().HandshakeSeconds) * time.Second
+			target, dialErr := relaychannel.DialResponsesWebSocket(adaptor, c, info, handshakeTimeout)
 			if dialErr != nil {
+				s.lease.FinishDial(false)
+				if canceled := s.ctx.Err(); canceled != nil {
+					return types.NewError(canceled, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+				}
 				apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
 				service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
 				info.LastError = apiErr
-				retryAllowed := service.ShouldRetryRelayError(c, apiErr, common.RetryTimes-retry.GetRetry())
+				retryAllowed := service.ShouldRetryRelayError(c, apiErr, common.RetryTimes-info.RetryIndex)
 				service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr)
 				if retryAllowed {
+					retry.IncreaseRetry()
 					continue
 				}
 				return apiErr
 			}
 			if !s.setTarget(target) {
+				s.lease.FinishDial(false)
 				return types.NewError(context.Canceled, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
 			}
 			if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
@@ -393,6 +444,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	info.StreamStatus = relaycommon.NewStreamStatus()
 	c.Set("responses_stream_status", info.StreamStatus)
 	timeout := time.Duration(appconstant.StreamingTimeout) * time.Second
+	if seconds := s.lease.Settings().StreamSeconds; seconds > 0 {
+		timeout = time.Duration(seconds) * time.Second
+	}
 	if timeout <= 0 {
 		timeout = 300 * time.Second
 	}
@@ -409,6 +463,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			if incoming.err != nil {
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, incoming.err)
 				state.closeAfter = true
+				state.closeReason = "upstream_closed"
 				ConsumeResponsesQuota(c, info, accumulator.Finish())
 				return nil
 			}
@@ -522,6 +577,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		case <-idle.C:
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, context.DeadlineExceeded)
 			state.closeAfter = true
+			state.closeReason = "stream_timeout"
 			ConsumeResponsesQuota(c, info, accumulator.Finish())
 			return nil
 		case <-s.ctx.Done():
@@ -644,6 +700,9 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 	if appconstant.StreamScannerMaxBufferMB > 0 {
 		limit = int64(appconstant.StreamScannerMaxBufferMB) << 20
 	}
+	if size := s.lease.Settings().UpstreamMessageMiB; size > 0 {
+		limit = int64(size) << 20
+	}
 	target.SetReadLimit(limit)
 	s.workers.Go(func() {
 		for {
@@ -660,7 +719,7 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 							return
 						}
 					} else {
-						s.shutdown()
+						s.lease.Close("upstream_closed")
 					}
 				case <-s.ctx.Done():
 					return
@@ -672,7 +731,7 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 					return
 				}
 			} else {
-				s.shutdown()
+				s.lease.Close("upstream_closed")
 			}
 			if err != nil {
 				return
@@ -702,7 +761,7 @@ func (s *responsesWSSession) tryReserveCurrent(state *responsesWSCallState) bool
 		s.stateMu.Lock()
 	}
 	defer s.stateMu.Unlock()
-	if s.current != nil {
+	if s.current != nil || !s.lease.BeginTurn() {
 		return false
 	}
 	s.current = state
@@ -735,6 +794,7 @@ func (s *responsesWSSession) setTarget(target *websocket.Conn) bool {
 		return false
 	}
 	s.target = target
+	s.lease.FinishDial(true)
 	return true
 }
 
@@ -745,7 +805,7 @@ func (s *responsesWSSession) writeTarget(kind int, message []byte) error {
 	if target == nil {
 		return errors.New("responses websocket upstream is not connected")
 	}
-	if err := target.SetWriteDeadline(time.Now().Add(responsesWSWriteTimeout)); err != nil {
+	if err := target.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
 		return err
 	}
 	return target.WriteMessage(kind, message)
@@ -754,7 +814,7 @@ func (s *responsesWSSession) writeTarget(kind int, message []byte) error {
 func (s *responsesWSSession) writeClient(kind int, message []byte) error {
 	s.clientWriteMu.Lock()
 	defer s.clientWriteMu.Unlock()
-	if err := s.client.SetWriteDeadline(time.Now().Add(responsesWSWriteTimeout)); err != nil {
+	if err := s.client.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
 		return err
 	}
 	return s.client.WriteMessage(kind, message)
@@ -766,7 +826,9 @@ func (s *responsesWSSession) sendError(eventID, streamID string, apiErr *types.N
 	}
 	payload, err := buildResponsesWSErrorPayload(eventID, streamID, apiErr)
 	if err == nil {
-		_ = s.writeClient(websocket.TextMessage, payload)
+		if s.writeClient(websocket.TextMessage, payload) != nil {
+			s.shutdown()
+		}
 	}
 }
 
@@ -780,13 +842,23 @@ func (s *responsesWSSession) closeTarget() {
 	}
 	if target != nil {
 		_ = target.Close()
+		s.lease.UpstreamClosed()
 	}
 }
 
 func (s *responsesWSSession) shutdown() {
-	s.cancel()
-	s.closeTarget()
-	_ = s.client.Close()
+	s.lease.Close("transport_error")
+}
+
+func (s *responsesWSSession) closeSockets() {
+	s.socketClose.Do(func() {
+		switch s.lease.CloseReason() {
+		case "shutdown", "idle_timeout", "first_frame_timeout":
+			_ = s.client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "connection closing"), time.Now().Add(time.Second))
+		}
+		s.closeTarget()
+		_ = s.client.Close()
+	})
 }
 
 func (s *responsesWSSession) registerChannelClose(channelID int) {
@@ -804,13 +876,14 @@ func (s *responsesWSSession) registerChannelClose(channelID int) {
 // closeForPolicy tells both peers why the connection ends, like the realtime
 // relay does; WriteControl is safe alongside a blocked data writer.
 func (s *responsesWSSession) closeForPolicy(reason string) {
+	s.lease.NoteCloseReason("channel_revoked")
 	closeMessage := websocket.FormatCloseMessage(websocket.ClosePolicyViolation, reason)
 	deadline := time.Now().Add(time.Second)
 	_ = s.client.WriteControl(websocket.CloseMessage, closeMessage, deadline)
 	if target := s.getTarget(); target != nil {
 		_ = target.WriteControl(websocket.CloseMessage, closeMessage, deadline)
 	}
-	s.shutdown()
+	s.lease.Close("channel_revoked")
 }
 
 // Stream identity belongs to the WebSocket envelope. For the legacy wrapped
@@ -874,6 +947,13 @@ func normalizeResponsesWSCreateEvent(message []byte, event responsesWSCreateEven
 			delete(raw, key)
 		}
 	}
+	switch string(create.Generate) {
+	case "", "null":
+		create.Generate = nil
+	case "false", "true":
+	default:
+		return create, errors.New("generate must be a boolean")
+	}
 	delete(raw, "generate")
 	delete(raw, "stream_id")
 	raw["stream"] = json.RawMessage(`true`)
@@ -917,8 +997,12 @@ func buildResponsesWSCreateEvent(jsonData []byte, generate json.RawMessage, stre
 	delete(event, "background")
 	delete(event, "stream")
 	delete(event, "stream_options")
+	// Only the client envelope selects a non-generating operation. An HTTP
+	// channel override must not turn a normal WS request into a prewarm.
 	if len(generate) > 0 {
 		event["generate"] = generate
+	} else {
+		delete(event, "generate")
 	}
 	return common.Marshal(event)
 }
@@ -969,7 +1053,7 @@ func checkResponsesWSModelAccess(c *gin.Context, modelName string) *types.NewAPI
 func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *service.RetryParam) (*appmodel.Channel, *types.NewAPIError) {
 	var channel *appmodel.Channel
 	var err error
-	if retryParam.GetRetry() == 0 {
+	if retryParam.GetRetry() == 0 && len(retryParam.FullWSChannels) == 0 {
 		channel, err = appmodel.CacheGetChannel(c.GetInt("channel_id"))
 	} else {
 		channel, _, err = service.CacheGetRandomSatisfiedChannel(retryParam)
@@ -978,6 +1062,9 @@ func selectResponsesWSChannel(c *gin.Context, modelName string, retryParam *serv
 				return nil, apiErr
 			}
 		}
+	}
+	if err == nil && channel == nil && len(retryParam.FullWSChannels) > 0 {
+		return nil, types.NewErrorWithStatusCode(wsmanager.ErrChannelLimit, types.ErrorCodeDoRequestFailed, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry())
 	}
 	if err != nil || channel == nil {
 		return nil, types.NewErrorWithStatusCode(errors.New("no available Responses WebSocket channel"), types.ErrorCodeGetChannelFailed, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())

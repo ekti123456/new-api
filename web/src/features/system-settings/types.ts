@@ -388,6 +388,7 @@ export type OperationsSettings = {
 }
 
 export type SecuritySettings = {
+  ResponsesWebSocketSettings: string
   ModelRequestRateLimitEnabled: boolean
   ModelRPMRateLimitEnabled: boolean
   ModelRPMRateLimitModels: string

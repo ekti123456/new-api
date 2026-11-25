@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -126,4 +127,44 @@ func TestCacheGetRandomSatisfiedChannelUsesTokenAutoGroupsWhenGlobalAutoIsEmpty(
 	assert.Equal(t, 2102, second.Id)
 	assert.Equal(t, "default", selectedGroup)
 	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+}
+
+func TestFullWSChannelDoesNotExpandTokenAutoGroups(t *testing.T) {
+	db := setupChannelSelectAutoGroupsTest(t)
+	const modelName = "ws-availability"
+	for id, group := range map[int]string{2101: "vip", 2102: "default"} {
+		createChannelSelectAutoGroupsChannel(t, db, id, group, modelName)
+		ch, err := model.GetChannelById(id, true)
+		require.NoError(t, err)
+		ch.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
+		require.NoError(t, db.Save(ch).Error)
+	}
+	model.InitChannelCache()
+	for _, tc := range []struct {
+		name       string
+		crossGroup bool
+		groups     []string
+		want       int
+	}{
+		{"stay in admitted group", false, []string{"vip", "default"}, 0},
+		{"authorized fallback group", true, []string{"vip", "default"}, 2102},
+		{"unlisted group", true, []string{"vip"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("responses_websocket", true)
+			common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+			common.SetContextKey(ctx, constant.ContextKeyAutoGroup, "vip")
+			common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, tc.groups)
+			common.SetContextKey(ctx, constant.ContextKeyTokenCrossGroupRetry, tc.crossGroup)
+			ch, _, err := CacheGetRandomSatisfiedChannel(&RetryParam{Ctx: ctx, TokenGroup: "auto", ModelName: modelName, RequestPath: "/v1/responses", FullWSChannels: map[int]bool{2101: true}})
+			require.NoError(t, err)
+			if tc.want == 0 {
+				require.Nil(t, ch)
+			} else {
+				require.NotNil(t, ch)
+				assert.Equal(t, tc.want, ch.Id)
+			}
+		})
+	}
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -119,17 +121,62 @@ func newResponsesWSRequestRunner(c *gin.Context) relay.ResponsesWSRequestRunner 
 }
 
 func ResponsesWebSocket(c *gin.Context) {
+	serveResponsesWebSocket(c, wsmanager.LocalResponses)
+}
+
+// net/http stops managing a connection as soon as Upgrade hijacks it. Wake a
+// blocked 101 write if this session is canceled before the relay takes over.
+type responsesUpgradeWriter struct {
+	gin.ResponseWriter
+	ctx  context.Context
+	stop func() bool
+}
+
+func (w *responsesUpgradeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := w.ResponseWriter.Hijack()
+	if err == nil {
+		w.stop = context.AfterFunc(w.ctx, func() { _ = conn.Close() })
+	}
+	return conn, rw, err
+}
+
+func serveResponsesWebSocket(c *gin.Context, manager *wsmanager.ResponsesManager) {
+	lease, err := manager.Open(c.Request.Context(), c.GetInt("id"))
+	if err != nil {
+		status, code := http.StatusTooManyRequests, "websocket_connection_limit"
+		if errors.Is(err, wsmanager.ErrDraining) {
+			status, code = http.StatusServiceUnavailable, "service_shutting_down"
+		}
+		c.JSON(status, gin.H{"error": gin.H{"type": "server_error", "code": code, "message": err.Error()}})
+		return
+	}
+	defer lease.Release()
 	requestID := c.GetString(common.RequestIdKey)
 	runner := newResponsesWSRequestRunner(c)
-	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	localUpgrader := upgrader
+	localUpgrader.HandshakeTimeout = time.Duration(manager.Settings().ClientHandshakeSeconds) * time.Second
+	writer := &responsesUpgradeWriter{ResponseWriter: c.Writer, ctx: lease.Context()}
+	ws, err := localUpgrader.Upgrade(writer, c.Request, nil)
+	if writer.stop != nil {
+		writer.stop()
+	}
 	if err != nil {
+		lease.Close("upgrade_failed")
 		return
 	}
 	defer ws.Close()
+	if lease.Context().Err() != nil {
+		return
+	}
 
-	if apiError := relay.ResponsesWebSocketHelper(c, ws, runner); apiError != nil {
+	if apiError := relay.ResponsesWebSocketHelper(c, ws, runner, lease); apiError != nil {
 		logger.LogError(c, fmt.Sprintf("responses websocket relay error: %s", common.LocalLogPreview(apiError.Error())))
 		apiError.SetMessage(common.MessageWithRequestId(apiError.Error(), requestID))
 		helper.WssError(c, ws, apiError.ToOpenAIError())
 	}
+}
+
+func GetResponsesWebSocketStats(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	common.ApiSuccess(c, gin.H{"node": common.NodeName, "started_at": common.StartTime, "connections": wsmanager.LocalResponses.Stats()})
 }

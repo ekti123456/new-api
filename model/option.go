@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -151,6 +152,8 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
 	common.OptionMap["ModelRPMRateLimitModels"] = setting.ModelRPMRateLimitModels2JSONString()
 	common.OptionMap["DefaultUserConcurrencyLimit"] = strconv.Itoa(setting.DefaultUserConcurrencyLimit)
+	wsDefaults, _ := common.Marshal(wsmanager.DefaultResponsesSettings())
+	common.OptionMap[wsmanager.ResponsesOption] = string(wsDefaults)
 	common.OptionMap["BackgroundUserConcurrencyLimit"] = strconv.Itoa(setting.GetBackgroundUserConcurrencyLimit())
 	common.OptionMap["UserConcurrencyCooldownSeconds"] = strconv.Itoa(setting.UserConcurrencyCooldownSeconds)
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
@@ -221,6 +224,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == wsmanager.ResponsesOption {
+		_, err := wsmanager.ParseResponsesSettings(value)
+		return err
+	}
 	if err := operation_setting.ValidateQuotaOption(key, value); err != nil {
 		return err
 	}
@@ -268,6 +275,9 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
+	if key == wsmanager.ResponsesOption {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
@@ -325,6 +335,17 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == wsmanager.ResponsesOption {
+		settings, err := wsmanager.ParseResponsesSettings(value)
+		if err != nil {
+			return err
+		}
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[key] = value
+		wsmanager.LocalResponses.Configure(settings)
+		common.OptionMapRWMutex.Unlock()
+		return nil
+	}
 	if key == "BackgroundUserConcurrencyLimit" {
 		if err := validateOptionValue(key, value); err != nil {
 			return err

@@ -50,6 +50,61 @@ func TestResponsesWSRoundTripFieldFidelity(t *testing.T) {
 	}
 }
 
+func TestResponsesWSGenerateBelongsToClientFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name, envelope, adjusted, want string
+	}{
+		{"client prewarm", `{"type":"response.create","model":"m","input":[],"generate":false}`, `{"model":"m","generate":true}`, "false"},
+		{"legacy wrapped prewarm", `{"type":"response.create","response":{"model":"m","input":[],"generate":false}}`, `{"model":"m"}`, "false"},
+		{"regular frame", `{"type":"response.create","model":"m","input":"hello"}`, `{"model":"m","generate":false}`, ""},
+		{"explicit true", `{"type":"response.create","model":"m","input":"hello","generate":true}`, `{"model":"m","generate":false}`, "true"},
+		{"invalid string", `{"type":"response.create","model":"m","input":[],"generate":"false"}`, `{}`, "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := []byte(tc.envelope)
+			event, stream, err := parseResponsesWSEnvelope(wire)
+			require.NoError(t, err)
+			req, err := normalizeResponsesWSCreateEvent(wire, event, stream)
+			if tc.want == "invalid" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			frame, err := buildResponsesWSCreateEvent([]byte(tc.adjusted), req.Generate, stream)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, gjson.GetBytes(frame, "generate").Raw)
+		})
+	}
+}
+
+func TestResponsesHTTPOverrideKeepsClientOperation(t *testing.T) {
+	testFalse, testTrue := false, true
+	for _, tc := range []struct {
+		name     string
+		generate *bool
+		override map[string]any
+		want     string
+	}{
+		{"normal request", nil, map[string]any{"generate": false}, ""},
+		{"client prewarm", &testFalse, map[string]any{"generate": true}, "false"},
+		{"client generates", &testTrue, map[string]any{"generate": false}, "true"},
+		{"delete cannot enable generation", &testFalse, map[string]any{"operations": []any{map[string]any{"mode": "delete", "path": "generate"}}}, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.override["service_tier"] = "priority"
+			req := dto.OpenAIResponsesRequest{Model: "m", Generate: tc.generate, Input: []byte(`[{"role":"user","content":"generate"}]`)}
+			body, err := common.Marshal(req)
+			require.NoError(t, err)
+			info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeResponses, ChannelMeta: &relaycommon.ChannelMeta{ParamOverride: tc.override}}
+			out, err := applyResponsesHTTPParamOverrides(body, req, info)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, gjson.GetBytes(out, "generate").Raw)
+			require.Equal(t, "priority", gjson.GetBytes(out, "service_tier").Str)
+			require.Equal(t, "generate", gjson.GetBytes(out, "input.0.content").Str)
+		})
+	}
+}
+
 func responsesFidelityContext(t *testing.T, body []byte, baseURL string, passthrough bool) (*gin.Context, *relaycommon.RelayInfo) {
 	t.Helper()
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

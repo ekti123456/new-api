@@ -231,7 +231,7 @@ func main() {
 	shutdownTimeout := time.Duration(common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 120)) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := shutdownRelayServer(ctx, srv, wsmanager.LocalResponses); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
 	if err := perfmetrics.FlushAdmissionErrors(ctx); err != nil {
@@ -242,6 +242,36 @@ func main() {
 		model.SaveQuotaDataCache()
 	}
 	common.SysLog("server exited")
+}
+
+// HTTP Shutdown does not own upgraded sockets. Drain this process's Responses
+// sessions alongside HTTP, leaving a bounded portion of the existing shutdown
+// budget for workers to settle or refund after a forced transport close.
+func shutdownRelayServer(ctx context.Context, srv *http.Server, ws *wsmanager.ResponsesManager) error {
+	done := ws.BeginDrain()
+	deadline, bounded := ctx.Deadline()
+	wait := time.Duration(ws.Settings().ShutdownSeconds) * time.Second
+	if bounded {
+		budget := max(time.Duration(0), time.Until(deadline))
+		latest := budget - min(time.Second, budget/10)
+		if wait == 0 || wait > latest {
+			wait = latest
+		}
+	}
+	if bounded || wait > 0 {
+		timer := time.AfterFunc(wait, ws.ForceClose)
+		defer timer.Stop()
+	}
+	stop := context.AfterFunc(ctx, ws.ForceClose)
+	defer stop()
+	httpErr := srv.Shutdown(ctx)
+	select {
+	case <-done:
+		return httpErr
+	case <-ctx.Done():
+		ws.ForceClose()
+		return errors.Join(httpErr, ctx.Err())
+	}
 }
 
 func InjectUmamiAnalytics() {

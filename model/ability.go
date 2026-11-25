@@ -127,19 +127,24 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 // GetChannelWithRoutingMode strictly separates normal channels from channels
 // reserved for User-Agent routing.
 func GetChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool, responsesWS ...bool) (*Channel, error) {
+	options := ChannelRoutingOptions{UserAgentOnly: uaRoutingOnly, ResponsesWebSocket: len(responsesWS) > 0 && responsesWS[0]}
+	return options.selectChannelFromDB(group, model, retry, requestPath)
+}
+
+func (options ChannelRoutingOptions) selectChannelFromDB(group, model string, retry int, requestPath string) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
 	var allowedIDs [][]int
-	if len(responsesWS) > 0 && responsesWS[0] {
+	if options.ResponsesWebSocket {
 		var candidates []*Channel
 		query := DB.Model(&Ability{}).Select("channel_id").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
-		if err := DB.Where("id IN (?)", query).Where("ua_routing_only = ?", uaRoutingOnly).Find(&candidates).Error; err != nil {
+		if err := DB.Where("id IN (?)", query).Where("ua_routing_only = ?", options.UserAgentOnly).Find(&candidates).Error; err != nil {
 			return nil, err
 		}
 		ids := []int{}
 		for _, candidate := range candidates {
-			if candidate.SupportsResponsesWebSocket(model) {
+			if options.allowsResponsesWS(candidate, model) {
 				ids = append(ids, candidate.Id)
 			}
 		}
@@ -148,7 +153,7 @@ func GetChannelWithRoutingMode(group string, model string, retry int, requestPat
 		}
 		allowedIDs = append(allowedIDs, ids)
 	}
-	channelQuery, err := getChannelQuery(group, model, retry, uaRoutingOnly, allowedIDs...)
+	channelQuery, err := getChannelQuery(group, model, retry, options.UserAgentOnly, allowedIDs...)
 	if err != nil {
 		return nil, err
 	}

@@ -26,7 +26,7 @@ import {
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
@@ -77,8 +77,16 @@ async function renderSettings() {
   })
 }
 
+let restorePut: () => void
 beforeEach(() => {
-  vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  restorePut = () => put.mockRestore()
+})
+
+afterEach(() => {
+  restorePut()
 })
 
 test.each(['0.1', '0.5', '1.5', '2.5', '0.0001'])(

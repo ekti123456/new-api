@@ -411,6 +411,14 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 }
 
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
+	return dialChannelWebSocket(a, c, info, 0)
+}
+
+func DialResponsesWebSocket(a Adaptor, c *gin.Context, info *common.RelayInfo, handshakeTimeout time.Duration) (*websocket.Conn, error) {
+	return dialChannelWebSocket(a, c, info, handshakeTimeout)
+}
+
+func dialChannelWebSocket(a Adaptor, c *gin.Context, info *common.RelayInfo, handshakeTimeout time.Duration) (*websocket.Conn, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -457,7 +465,14 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if dialerErr != nil {
 		return nil, dialerErr
 	}
-	targetConn, policyResponse, err := dialer.DialContext(c.Request.Context(), websocketURL, targetHeader)
+	dial := dialer.DialContext
+	if handshakeTimeout > 0 {
+		dialer.HandshakeTimeout = handshakeTimeout
+		dial = func(ctx context.Context, target string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+			return service.DialResponsesWebSocket(ctx, dialer, target, headers)
+		}
+	}
+	targetConn, policyResponse, err := dial(c.Request.Context(), websocketURL, targetHeader)
 	if policyResponse != nil && policyRequest.URL != nil {
 		model.UpdateUserSessionWindowFromHeader(info.UserId, policyRequest.URL.Scheme+"://"+policyRequest.URL.Host, policyResponse.Header)
 	}

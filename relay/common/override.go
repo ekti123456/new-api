@@ -202,6 +202,79 @@ func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, 
 	return result, nil
 }
 
+// ApplyRawProtocolHeaderPassthrough preserves configured same-name protocol
+// headers when the caller streams the original body. Resolve header rules in
+// order so a conditional or later deletion cannot be bypassed. Only an approved
+// inbound value may be added; static channel overrides retain precedence.
+func ApplyRawProtocolHeaderPassthrough(info *RelayInfo, protocolHeaders []string, readBody func() ([]byte, error)) error {
+	ops, ok := tryParseOperations(getParamOverrideMap(info))
+	if !ok {
+		return nil
+	}
+	var headerOps []ParamOperation
+	declared := make(map[string]bool)
+	needsBody := false
+	for _, op := range ops {
+		switch op.Mode {
+		case "pass_headers":
+			names, err := parseHeaderPassThroughNames(op.Value)
+			if err != nil {
+				return err
+			}
+			for _, name := range names {
+				declared[name] = true
+			}
+		case "set_header", "delete_header", "copy_header", "move_header":
+		default:
+			continue
+		}
+		headerOps = append(headerOps, op)
+		needsBody = needsBody || len(op.Conditions) > 0
+	}
+	if len(declared) == 0 {
+		return nil
+	}
+	ctx := BuildParamOverrideContext(info)
+	inbound := ctx[paramOverrideContextRequestHeaders].(map[string]any)
+	for name := range getHeaderOverrideMap(info) {
+		// An explicitly empty channel override also suppresses passthrough.
+		delete(declared, normalizeHeaderContextKey(name))
+	}
+	var candidates []string
+	for _, name := range protocolHeaders {
+		key := normalizeHeaderContextKey(name)
+		if declared[key] && inbound[key] != nil {
+			candidates = append(candidates, name)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	var body []byte
+	if needsBody {
+		var err error
+		body, err = readBody()
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := applyOperations(body, headerOps, ctx); err != nil {
+		return err
+	}
+	resolved := ctx[paramOverrideContextHeaderOverride].(map[string]any)
+	headers := GetEffectiveHeaderOverride(info)
+	for _, name := range candidates {
+		key := normalizeHeaderContextKey(name)
+		if resolved[key] == inbound[key] {
+			// Keep inbound text literal, including text resembling a placeholder.
+			headers[key] = "{client_header:" + name + "}"
+			info.RuntimeHeadersOverride = headers
+			info.UseRuntimeHeadersOverride = true
+		}
+	}
+	return nil
+}
+
 func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {
 	if common.DebugEnabled {
 		return true

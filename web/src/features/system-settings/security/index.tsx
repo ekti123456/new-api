@@ -25,6 +25,7 @@ import {
 } from './section-registry.tsx'
 
 const defaultSecuritySettings: SecuritySettings = {
+  ResponsesWebSocketSettings: '{}',
   ModelRequestRateLimitEnabled: false,
   ModelRPMRateLimitEnabled: false,
   ModelRPMRateLimitModels: '{}',

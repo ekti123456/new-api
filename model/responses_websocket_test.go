@@ -35,6 +35,22 @@ func TestResponsesWebSocketSelectionPreservesHTTPAndRoutingPools(t *testing.T) {
 				require.NotNil(t, channel)
 				require.Equal(t, scenario.want, channel.Id)
 			}
+			seedChannelRoutingModeTestChannel(t, 9304, 1, false)
+			peer, err := GetChannelById(9304, true)
+			require.NoError(t, err)
+			peer.Type = constant.ChannelTypeOpenAI
+			peer.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
+			require.NoError(t, DB.Save(peer).Error)
+			InitChannelCache()
+			options := ChannelRoutingOptions{ResponsesWebSocket: true, FullWSChannels: map[int]bool{9302: true}}
+			selected, err := options.SelectChannel("default", "gpt-5", 0, "/v1/responses")
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			require.Equal(t, peer.Id, selected.Id, "an equal-priority peer can take a new connection")
+			options.FullWSChannels[peer.Id] = true
+			selected, err = options.SelectChannel("default", "gpt-5", 0, "/v1/responses")
+			require.NoError(t, err)
+			require.Nil(t, selected, "HTTP-only and UA-reserved channels remain ineligible")
 		})
 	}
 }

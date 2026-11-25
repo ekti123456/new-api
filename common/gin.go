@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime"
@@ -19,6 +20,27 @@ import (
 
 const KeyRequestBody = "key_request_body"
 const KeyBodyStorage = "key_body_storage"
+
+type requestBodyLimitKey struct{}
+
+// WithRequestBodyLimitMiB carries an administrator-selected limit into the
+// normal request middleware when an admitted WebSocket frame becomes a turn.
+func WithRequestBodyLimitMiB(ctx context.Context, maxMiB int) context.Context {
+	if maxMiB <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, requestBodyLimitKey{}, maxMiB)
+}
+
+func RequestBodyLimitMiB(ctx context.Context) int {
+	if limit, ok := ctx.Value(requestBodyLimitKey{}).(int); ok {
+		return limit
+	}
+	if constant.MaxRequestBodyMB > 0 {
+		return constant.MaxRequestBodyMB
+	}
+	return 128
+}
 
 var ErrRequestBodyTooLarge = errors.New("request body too large")
 
@@ -57,10 +79,7 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 		}
 	}
 
-	maxMB := constant.MaxRequestBodyMB
-	if maxMB <= 0 {
-		maxMB = 128 // 默认 128MB
-	}
+	maxMB := RequestBodyLimitMiB(c.Request.Context())
 	maxBytes := int64(maxMB) << 20
 
 	contentLength := c.Request.ContentLength

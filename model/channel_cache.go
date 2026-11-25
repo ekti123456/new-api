@@ -116,9 +116,24 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 }
 
 func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry int, requestPath string, uaRoutingOnly bool, responsesWS ...bool) (*Channel, error) {
+	options := ChannelRoutingOptions{UserAgentOnly: uaRoutingOnly, ResponsesWebSocket: len(responsesWS) > 0 && responsesWS[0]}
+	return options.SelectChannel(group, model, retry, requestPath)
+}
+
+type ChannelRoutingOptions struct {
+	UserAgentOnly      bool
+	ResponsesWebSocket bool
+	FullWSChannels     map[int]bool
+}
+
+func (options ChannelRoutingOptions) allowsResponsesWS(channel *Channel, model string) bool {
+	return channel != nil && !options.FullWSChannels[channel.Id] && channel.SupportsResponsesWebSocket(model)
+}
+
+func (options ChannelRoutingOptions) SelectChannel(group, model string, retry int, requestPath string) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannelWithRoutingMode(group, model, retry, requestPath, uaRoutingOnly, responsesWS...)
+		return options.selectChannelFromDB(group, model, retry, requestPath)
 	}
 
 	channelSyncLock.RLock()
@@ -126,11 +141,11 @@ func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry 
 
 	// First, try to find channels with the exact model name.
 	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][model], requestPath, model)
-	channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
-	if len(responsesWS) > 0 && responsesWS[0] {
+	channels = filterChannelsByUARoutingMode(channels, options.UserAgentOnly)
+	if options.ResponsesWebSocket {
 		filtered := make([]int, 0, len(channels))
 		for _, id := range channels {
-			if channelsIDM[id].SupportsResponsesWebSocket(model) {
+			if options.allowsResponsesWS(channelsIDM[id], model) {
 				filtered = append(filtered, id)
 			}
 		}
@@ -141,11 +156,11 @@ func GetRandomSatisfiedChannelWithRoutingMode(group string, model string, retry 
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, model)
-		channels = filterChannelsByUARoutingMode(channels, uaRoutingOnly)
-		if len(responsesWS) > 0 && responsesWS[0] {
+		channels = filterChannelsByUARoutingMode(channels, options.UserAgentOnly)
+		if options.ResponsesWebSocket {
 			filtered := make([]int, 0, len(channels))
 			for _, id := range channels {
-				if channelsIDM[id].SupportsResponsesWebSocket(model) {
+				if options.allowsResponsesWS(channelsIDM[id], model) {
 					filtered = append(filtered, id)
 				}
 			}

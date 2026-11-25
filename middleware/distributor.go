@@ -657,9 +657,11 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelParamOverride, paramOverride)
 	common.SetContextKey(c, constant.ContextKeyChannelHeaderOverride, headerOverride)
-	if nil != channel.OpenAIOrganization && *channel.OpenAIOrganization != "" {
-		common.SetContextKey(c, constant.ContextKeyChannelOrganization, *channel.OpenAIOrganization)
+	var organization string
+	if channel.OpenAIOrganization != nil {
+		organization = *channel.OpenAIOrganization
 	}
+	common.SetContextKey(c, constant.ContextKeyChannelOrganization, organization)
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
@@ -702,13 +704,8 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	if common.GetContextKeyBool(c, constant.ContextKeyCodexBackgroundDelegated) && !relaychannel.IsCodex2APIPolicyDestination(channel.GetBaseURL(), key) {
 		return types.NewErrorWithStatusCode(errors.New("background channel authorization changed; retry the request"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
-	if channel.ChannelInfo.IsMultiKey {
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
-		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
-	} else {
-		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
-	}
+	common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, channel.ChannelInfo.IsMultiKey)
+	common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
 	// c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
 	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())

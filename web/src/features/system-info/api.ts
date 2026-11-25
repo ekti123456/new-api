@@ -19,9 +19,20 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  ResponsesWebSocketSnapshot,
   SystemInstanceDeleteResponse,
   SystemInstanceListResponse,
 } from './types'
+
+export async function getResponsesWebSocketSnapshot() {
+  const { data } = await api.get<{
+    success: boolean
+    message: string
+    data?: ResponsesWebSocketSnapshot
+  }>('/api/system-info/responses-websocket')
+  if (!data.success || !data.data) throw new Error(data.message)
+  return data.data
+}
 
 export async function listSystemInstances() {
   const res = await api.get<SystemInstanceListResponse>(
