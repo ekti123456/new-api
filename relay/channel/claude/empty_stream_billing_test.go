@@ -168,3 +168,50 @@ func TestClaudeStreamPreservesBillableEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestInterruptedBedrockUsesLatestExplicitOutput(t *testing.T) {
+	const model = "claude-opus-5-5"
+	const text = "partial response before cancellation"
+	for _, tc := range []struct {
+		name, startFields, deltaFields string
+		want                           int
+		estimated                      bool
+	}{
+		{"reported zero", `,"output_tokens":0`, "", 0, false},
+		{"missing output", "", "", service.EstimateTokenByModel(model, text), true},
+		{"later usage omits output", `,"output_tokens":1`, `{"input_tokens":100}`, 1, false},
+		{"latest output wins", `,"output_tokens":1`, `{"output_tokens":7}`, 7, false},
+		{"latest explicit zero wins", `,"output_tokens":1`, `{"output_tokens":0}`, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: model}}
+			info.SetEstimatePromptTokens(2000000)
+			state := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+			var checkpoint BedrockStreamUsage
+			start := `{"type":"message_start","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":50` + tc.startFields + `}}}`
+			require.Nil(t, checkpoint.HandleEvent(c, info, state, start))
+			require.Nil(t, checkpoint.HandleEvent(c, info, state, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"`+text+`"}}`))
+			if tc.deltaFields != "" {
+				require.Nil(t, checkpoint.HandleEvent(c, info, state, `{"type":"message_delta","usage":`+tc.deltaFields+`}`))
+			}
+			cancel()
+			before := recorder.Body.Len()
+			checkpoint.Finish(c, info, state)
+			require.NotNil(t, state.Usage.BillingUsage)
+			require.NotNil(t, state.Usage.BillingUsage.ClaudeUsage)
+			billed := state.Usage.BillingUsage.ClaudeUsage
+			assert.Equal(t, tc.want, billed.OutputTokens)
+			assert.Equal(t, tc.want, state.Usage.CompletionTokens)
+			assert.Equal(t, 100+tc.want, state.Usage.TotalTokens)
+			assert.Equal(t, 100, billed.InputTokens)
+			assert.Equal(t, 50, billed.CacheReadInputTokens)
+			assert.Equal(t, tc.estimated, state.Usage.BillingUsage.Estimated)
+			assert.Equal(t, before, recorder.Body.Len())
+		})
+	}
+}

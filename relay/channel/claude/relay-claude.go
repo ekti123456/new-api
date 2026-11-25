@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func stopReasonClaude2OpenAI(reason string) string {
@@ -84,6 +85,20 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 }
 
 func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, data string) *types.NewAPIError {
+	return handleStreamResponseData(c, info, claudeInfo, data, nil)
+}
+
+// Bedrock closes its event stream as soon as the client disconnects. Keep
+// the latest explicit output count, including zero, for that partial settlement.
+type BedrockStreamUsage struct {
+	outputTokens *int
+}
+
+func (usage *BedrockStreamUsage) HandleEvent(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, data string) *types.NewAPIError {
+	return handleStreamResponseData(c, info, claudeInfo, data, usage)
+}
+
+func handleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, data string, bedrock *BedrockStreamUsage) *types.NewAPIError {
 	var claudeResponse dto.ClaudeResponse
 	err := common.UnmarshalJsonStr(data, &claudeResponse)
 	if err != nil {
@@ -92,6 +107,22 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
 		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+	}
+	if bedrock != nil {
+		var usage *dto.ClaudeUsage
+		var path string
+		switch claudeResponse.Type {
+		case "message_start":
+			if claudeResponse.Message != nil {
+				usage, path = claudeResponse.Message.Usage, "message.usage.output_tokens"
+			}
+		case "message_delta":
+			usage, path = claudeResponse.Usage, "usage.output_tokens"
+		}
+		// The typed DTO represents a missing count and an explicit zero alike.
+		if usage != nil && (usage.OutputTokens > 0 || usage.OutputTokens == 0 && gjson.Get(data, path).Type == gjson.Number) {
+			bedrock.outputTokens = &usage.OutputTokens
+		}
 	}
 	if claudeResponse.StopReason != "" {
 		maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
@@ -151,6 +182,28 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	handleStreamFinalResponse(c, info, claudeInfo, nil)
+}
+
+func (usage *BedrockStreamUsage) Finish(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	if c.Request.Context().Err() == nil {
+		HandleStreamFinalResponse(c, info, claudeInfo)
+		return
+	}
+	handleStreamFinalResponse(c, info, claudeInfo, usage)
+}
+
+func handleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, interrupted *BedrockStreamUsage) {
+	estimateOutput := !claudeInfo.HasFinalUsage
+	if interrupted != nil {
+		estimateOutput = interrupted.outputTokens == nil
+		if !estimateOutput {
+			claudeInfo.Usage.CompletionTokens = *interrupted.outputTokens
+			if billing := claudeInfo.Usage.BillingUsage; billing != nil && billing.ClaudeUsage != nil {
+				billing.ClaudeUsage.OutputTokens = *interrupted.outputTokens
+			}
+		}
+	}
 	// A request estimate is not evidence that the upstream processed any input.
 	// Retain real input/cache usage and any text, reasoning or tool output, but
 	// do not invent a charge for a connection that ended without either.
@@ -165,17 +218,17 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 				info.StreamStatus.RecordError("upstream stream ended without usage or output")
 			}
 		}
-	} else if !claudeInfo.HasFinalUsage {
+	} else {
 		// Estimate only missing usage after actual output. In particular, a zero
 		// input count in message_start can mean a fully cached prompt.
-		if claudeInfo.ResponseText.Len() > 0 {
+		if estimateOutput && claudeInfo.ResponseText.Len() > 0 {
 			outputTokens := service.EstimateTokenByModel(info.UpstreamModelName, claudeInfo.ResponseText.String())
 			if outputTokens > claudeInfo.Usage.CompletionTokens {
 				claudeInfo.Usage.CompletionTokens = outputTokens
 				estimated = true
 			}
 		}
-		if !claudeInfo.HasInputUsage && claudeInfo.Usage.BillingUsage == nil &&
+		if !claudeInfo.HasFinalUsage && !claudeInfo.HasInputUsage && claudeInfo.Usage.BillingUsage == nil &&
 			claudeInfo.Usage.PromptTokens == 0 && (claudeInfo.HasOutput || claudeInfo.ResponseText.Len() > 0) && info.GetEstimatePromptTokens() > 0 {
 			claudeInfo.Usage.PromptTokens = info.GetEstimatePromptTokens()
 			estimated = true
@@ -198,6 +251,10 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		}
 	}
 
+	if interrupted != nil {
+		// The downstream has already gone. Only the accounting steps above apply.
+		return
+	}
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
 	} else if info.RelayFormat == types.RelayFormatOpenAI {

@@ -278,6 +278,7 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 	}
 
 	events := stream.Events()
+	var usage claude.BedrockStreamUsage
 streamLoop:
 	for {
 		select {
@@ -294,7 +295,7 @@ streamLoop:
 			switch v := event.(type) {
 			case *bedrockruntimeTypes.ResponseStreamMemberChunk:
 				info.SetFirstResponseTime()
-				respErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(v.Value.Bytes))
+				respErr := usage.HandleEvent(c, info, claudeInfo, string(v.Value.Bytes))
 				if respErr != nil {
 					return respErr, nil
 				}
@@ -309,7 +310,7 @@ streamLoop:
 	}
 
 	_ = stream.Close()
-	claude.HandleStreamFinalResponse(c, info, claudeInfo)
+	usage.Finish(c, info, claudeInfo)
 	return nil, claudeInfo.Usage
 }
 
